@@ -1,0 +1,33 @@
+- name: Apply dotfiles server profile
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Import common role
+      ansible.builtin.import_role:
+        name: common
+      tags:
+        - common
+
+    - name: Import shell role
+      ansible.builtin.import_role:
+        name: shell
+      tags:
+        - shell
+
+    - name: Import git role
+      ansible.builtin.import_role:
+        name: git
+      tags:
+        - git
+
+    - name: Import ssh role
+      ansible.builtin.import_role:
+        name: ssh
+      tags:
+        - ssh
+
+    - name: Import sync role
+      ansible.builtin.import_role:
+        name: sync
+      tags:
+        - sync

@@ -1,0 +1,9 @@
+# Copy this file to localhost.yml and fill in your values, or run install.sh
+# to generate it interactively. This file is gitignored — never commit localhost.yml.
+
+dotfiles_profile: workstation # workstation | server | minimal
+machine_name: "" # Defaults to ansible hostname if blank
+git_personal_email: "" # Personal git email used by git role when personal identity is selected
+git_work_email: "" # Work git email used by git role when work identity is selected
+nvim_config_repo_url: "" # SSH URL preferred, e.g. git@github.com:you/nvim-config.git
+ai_config_repo_url: "" # SSH URL preferred, e.g. git@github.com:you/ai-config.git

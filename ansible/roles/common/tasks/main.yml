@@ -1,0 +1,38 @@
+# ============================================================================
+# Section 1 - Gather OS facts
+# ============================================================================
+- name: Gather distribution, kernel, and environment facts required by roles
+  ansible.builtin.setup:
+    gather_subset:
+      - distribution
+      - kernel
+      - env
+
+# ============================================================================
+# Section 2 - Set derived facts
+# ============================================================================
+- name: Set dotfiles OS family fact for platform-specific role selection
+  ansible.builtin.set_fact:
+    dotfiles_os_family: "{{ ansible_os_family }}" # Used by shell role selection and future package role conditionals.
+
+- name: Set dotfiles distro fact for distro-specific role behavior
+  ansible.builtin.set_fact:
+    dotfiles_distro: "{{ ansible_distribution | lower }}" # Used by shell role distro file selection logic.
+
+- name: Set dotfiles WSL fact for additive WSL platform conditionals
+  ansible.builtin.set_fact:
+    dotfiles_is_wsl: "{{ 'microsoft' in ansible_kernel | lower }}" # Used by shell role to source WSL platform snippets when applicable.
+
+- name: Set dotfiles machine name fact for identity-aware configuration
+  ansible.builtin.set_fact:
+    dotfiles_machine_name: "{{ machine_name | default(ansible_hostname) }}" # Used by git role to derive machine identity when writing config.
+
+# ============================================================================
+# Section 3 - Create XDG base directories
+# ============================================================================
+- name: Ensure base XDG and role destination directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ common_xdg_dirs }}"

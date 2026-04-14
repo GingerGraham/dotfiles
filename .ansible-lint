@@ -1,0 +1,7 @@
+---
+
+# Keep ansible-lint strict while allowing the requested shared fact names.
+
+skip_list:
+
+- var-naming

@@ -1,0 +1,7 @@
+ansible/host_vars/localhost.yml
+.ansible/
+*.retry
+.vault_pass
+__pycache__/
+*.pyc
+.DS_Store
