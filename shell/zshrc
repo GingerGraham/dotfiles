@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# dotfiles managed
+# Thin stub — delegates entirely to loader.sh
+
+SHELL_CONFIG_DIR="${HOME}/.config/shell"
+
+if [[ -f "${SHELL_CONFIG_DIR}/loader.sh" ]]; then
+    source "${SHELL_CONFIG_DIR}/loader.sh"
+fi

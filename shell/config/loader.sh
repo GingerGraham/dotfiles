@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Shell configuration loader — sources all tiers in order.
+# This file is the single entry point; stubs in ~/.bashrc and ~/.zshrc source it.
+
+SHELL_CONFIG_DIR="${HOME}/.config/shell"
+export SHELL_CONFIG_DIR
+
+# ── bash-logger (silent fallback if not installed) ───────────────────────────
+if [[ -f "${HOME}/.local/lib/bash-logger/logging.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/lib/bash-logger/logging.sh"
+else
+    log_info()  { :; }
+    log_warn()  { :; }
+    log_error() { :; }
+    log_debug() { :; }
+fi
+
+# ── OS / WSL / Distro detection (runs once) ──────────────────────────────────
+_raw_os="$(uname -s)"
+case "${_raw_os}" in
+    Linux)  DOTFILES_OS="Linux" ;;
+    Darwin) DOTFILES_OS="Mac"   ;;
+    *)      DOTFILES_OS="Linux" ;;
+esac
+export DOTFILES_OS
+unset _raw_os
+
+if [[ -f /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+    DOTFILES_WSL="true"
+else
+    DOTFILES_WSL="false"
+fi
+export DOTFILES_WSL
+
+if [[ "${DOTFILES_OS}" == "Linux" && -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    _distro_id="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")"
+    _distro_id_like="$(. /etc/os-release 2>/dev/null && echo "${ID_LIKE:-}")"
+    case "${_distro_id}" in
+        fedora|rhel|centos|rocky|almalinux) DOTFILES_DISTRO="rhel" ;;
+        ubuntu|debian|linuxmint|pop)        DOTFILES_DISTRO="debian" ;;
+        opensuse*|sles)                     DOTFILES_DISTRO="suse" ;;
+        *)
+            case "${_distro_id_like}" in
+                *rhel*|*fedora*|*centos*) DOTFILES_DISTRO="rhel"   ;;
+                *debian*|*ubuntu*)        DOTFILES_DISTRO="debian" ;;
+                *suse*)                   DOTFILES_DISTRO="suse"   ;;
+                *)                        DOTFILES_DISTRO="unknown" ;;
+            esac
+            ;;
+    esac
+    unset _distro_id _distro_id_like
+else
+    DOTFILES_DISTRO="unknown"
+fi
+export DOTFILES_DISTRO
+
+# ── Lazy-load helper ─────────────────────────────────────────────────────────
+bash_lazy_load() {
+    local stub_name="$1"
+    local source_file="$2"
+    # shellcheck disable=SC2140,SC2086
+    eval "${stub_name}() {
+        unset -f ${stub_name}
+        source \"${source_file}\"
+        ${stub_name} \"\$@\"
+    }"
+}
+
+# ── Tier 1: env/ — sourced in numeric order, no subprocesses ─────────────────
+for _env_file in "${SHELL_CONFIG_DIR}/env"/[0-9][0-9]-*.sh; do
+    [[ -f "${_env_file}" ]] && source "${_env_file}"
+done
+unset _env_file
+
+# ── Tier 1: core/ — always sourced ───────────────────────────────────────────
+for _core_file in \
+    "${SHELL_CONFIG_DIR}/core/aliases.sh" \
+    "${SHELL_CONFIG_DIR}/core/functions.sh" \
+    "${SHELL_CONFIG_DIR}/core/ssh.sh"; do
+    [[ -f "${_core_file}" ]] && source "${_core_file}"
+done
+unset _core_file
+
+# ── Tier 2: tools/ — guarded by command availability ─────────────────────────
+_source_if_cmd() {
+    local cmd="$1"
+    local file="$2"
+    command -v "${cmd}" &>/dev/null && [[ -f "${file}" ]] && source "${file}"
+}
+
+_source_if_any_cmd() {
+    local file="${SHELL_CONFIG_DIR}/tools/${1}"
+    shift
+    for _cmd in "$@"; do
+        if command -v "${_cmd}" &>/dev/null; then
+            [[ -f "${file}" ]] && source "${file}"
+            return
+        fi
+    done
+}
+
+_source_if_cmd  git        "${SHELL_CONFIG_DIR}/tools/git.sh"
+_source_if_cmd  kubectl    "${SHELL_CONFIG_DIR}/tools/kubernetes.sh"
+_source_if_any_cmd terraform.sh  terraform tofu
+_source_if_cmd  ansible    "${SHELL_CONFIG_DIR}/tools/ansible.sh"
+_source_if_any_cmd containers.sh docker podman
+_source_if_cmd  aws        "${SHELL_CONFIG_DIR}/tools/aws.sh"
+_source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
+_source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
+_source_if_any_cmd security.sh clamscan trivy
+
+unset -f _source_if_cmd _source_if_any_cmd
+
+# ── Tier 2: platform/ ─────────────────────────────────────────────────────────
+_platform_file="${SHELL_CONFIG_DIR}/platform/${DOTFILES_OS,,}.sh"
+[[ -f "${_platform_file}" ]] && source "${_platform_file}"
+unset _platform_file
+
+if [[ "${DOTFILES_WSL}" == "true" ]]; then
+    _wsl_file="${SHELL_CONFIG_DIR}/platform/wsl.sh"
+    [[ -f "${_wsl_file}" ]] && source "${_wsl_file}"
+    unset _wsl_file
+fi
+
+# ── Tier 2: distro/ ───────────────────────────────────────────────────────────
+_distro_file="${SHELL_CONFIG_DIR}/distro/${DOTFILES_DISTRO}.sh"
+[[ -f "${_distro_file}" ]] && source "${_distro_file}"
+unset _distro_file
+
+# ── Completions ───────────────────────────────────────────────────────────────
+command -v gh      &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/gh.sh" ]]         && source "${SHELL_CONFIG_DIR}/completions/gh.sh"
+command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kubernetes.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/kubernetes.sh"
+{ command -v terraform &>/dev/null || command -v tofu &>/dev/null; } && [[ -f "${SHELL_CONFIG_DIR}/completions/terraform.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/terraform.sh"
+
+# ── Tier 3: lazy stubs ────────────────────────────────────────────────────────
+_lazy_installers="${SHELL_CONFIG_DIR}/lazy/installers.sh"
+for _stub in \
+    install-bitwarden \
+    install-opendeck \
+    install-opendeck-version \
+    list-opendeck-releases \
+    install-edit \
+    install-edit-version \
+    list-edit-releases \
+    install-noteshub \
+    install-noteshub-version \
+    list-noteshub-releases \
+    helm-install \
+    terraform-install \
+    ansible-install \
+    tflint-install \
+    trivy-install; do
+    bash_lazy_load "${_stub}" "${_lazy_installers}"
+done
+unset _stub _lazy_installers
+
+_lazy_maintenance="${SHELL_CONFIG_DIR}/lazy/maintenance.sh"
+bash_lazy_load update-tools "${_lazy_maintenance}"
+unset _lazy_maintenance
+
+# ── Local overrides (always last) ─────────────────────────────────────────────
+_local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
+[[ -f "${_local_env}" ]] && source "${_local_env}"
+unset _local_env

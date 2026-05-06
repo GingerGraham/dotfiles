@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Machine-local environment overrides — managed by Ansible, never overwritten.
+# Edit this file directly to add machine-specific settings.
+# Variables set here override everything sourced before this file.
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name }}"
+export GIT_AUTHOR_EMAIL="{{ git_personal_email }}"
+
+# ── Local PATH additions ───────────────────────────────────────────────────────
+# Add any machine-specific binaries here:
+# export PATH="${HOME}/my-local-tool/bin:${PATH}"
