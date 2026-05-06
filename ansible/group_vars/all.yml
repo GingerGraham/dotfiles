@@ -31,7 +31,6 @@ copilot_config_dest: >- # Copilot config destination; override if your platform 
      else ansible_env.HOME + '/Library/Application Support/GitHub Copilot' }}
 
 # ── WSL Detection ─────────────────────────────────────────────────────────────
-# Set as a convenience alias. The common role re-exposes this as an ansible fact
-# for use in conditionals. Do not use this directly in role when: conditions —
-# use the fact set by common instead.
-is_wsl: "{{ 'microsoft' in ansible_kernel | lower }}" # Convenience WSL alias; override only for testing unusual kernels.
+# WSL detection is handled by the common role, which sets the dotfiles_is_wsl fact.
+# Use dotfiles_is_wsl in all role when: conditions — never reference ansible_kernel
+# directly outside the common role. Detection logic: 'microsoft' in ansible_kernel | lower

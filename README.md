@@ -70,7 +70,7 @@ ansible-playbook ansible/site.yml --tags git,shell
 | ai_config_repo_url   | ""                                           | host_vars/localhost.yml | Source repository URL for cloning AI tool config.                              |
 | claude_config_dest   | {{ ansible_env.HOME }}/.claude               | group_vars/all.yml      | Destination path for Claude configuration symlink or files.                    |
 | copilot_config_dest  | OS-specific expression in group_vars/all.yml | group_vars/all.yml      | Destination path for GitHub Copilot configuration.                             |
-| is_wsl               | {{ 'microsoft' in ansible_kernel \| lower }} | group_vars/all.yml      | Convenience WSL alias; common role re-exposes canonical fact for conditionals. |
+| dotfiles_is_wsl      | false                                        | Set by common role      | Canonical WSL detection fact. Set from ansible_kernel by the common role. Use this in all role when: conditions. |
 
 ## Development / Testing
 
