@@ -1,0 +1,7 @@
+# dotfiles managed
+# Sets ZDOTDIR so zsh finds its config under XDG_CONFIG_HOME.
+# Only activate if the loader is present; leave ZDOTDIR unset on a fresh
+# machine before Ansible has run so that the system default applies.
+if [[ -f "${HOME}/.config/shell/loader.sh" ]]; then
+    export ZDOTDIR="${HOME}"
+fi
