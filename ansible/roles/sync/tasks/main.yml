@@ -8,7 +8,7 @@
     state: directory
     mode: "0755"
   loop:
-    - "{{ ansible_env.HOME }}/.local/bin"
+    - "{{ ansible_facts['env']['HOME'] }}/.local/bin"
     - "{{ xdg_data_home }}/dotfiles/logs"
     - "{{ xdg_config_home }}/dotfiles"
     - "{{ xdg_config_home }}/systemd/user"
@@ -30,14 +30,14 @@
 - name: Deploy dotfiles-sync wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/sync.sh"
-    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-sync"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync"
     state: link
     force: true
 
 - name: Deploy dotfiles-branch wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/switch-branch.sh"
-    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-branch"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-branch"
     state: link
     force: true
 
@@ -106,20 +106,21 @@
   loop:
     - dotfiles-sync.service
     - dotfiles-sync.timer
-  when: ansible_system == "Linux"
+  when: ansible_facts['os_family'] == "Linux"
   notify: Reload and enable dotfiles timer
 
 - name: Ensure systemd user instance is available (WSL workaround)
-  ansible.builtin.command: systemctl --user daemon-reload
-  changed_when: false
-  when: ansible_system == "Linux"
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  when: ansible_facts['os_family'] == "Linux"
 
 # ── macOS: launchd agent ──────────────────────────────────────────────────────
 
 - name: Deploy launchd agent plist
   ansible.builtin.template:
     src: launchd/com.dotfiles.sync.plist.j2
-    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.dotfiles.sync.plist"
+    dest: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist"
     mode: "0644"
-  when: ansible_system == "Darwin"
+  when: ansible_facts['os_family'] == "Darwin"
   notify: Load launchd agent
