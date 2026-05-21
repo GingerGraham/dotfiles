@@ -56,21 +56,21 @@ ansible-playbook ansible/site.yml --tags git,shell
 
 ## Variable Reference
 
-| Variable             | Default                                      | Override in             | Purpose                                                                        |
-| -------------------- | -------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| xdg_config_home      | {{ ansible_env.HOME }}/.config               | group_vars/all.yml      | Base XDG config directory used by roles to avoid hardcoded paths.              |
-| xdg_data_home        | {{ ansible_env.HOME }}/.local/share          | group_vars/all.yml      | Base XDG data directory for role-managed data storage.                         |
-| xdg_cache_home       | {{ ansible_env.HOME }}/.cache                | group_vars/all.yml      | Base XDG cache directory for transient files.                                  |
-| xdg_state_home       | {{ ansible_env.HOME }}/.local/state          | group_vars/all.yml      | Base XDG state directory for persistent runtime state.                         |
-| shell_config_dir     | {{ xdg_config_home }}/shell                  | group_vars/all.yml      | Destination path consumed by shell role.                                       |
-| git_config_dir       | {{ xdg_config_home }}/git                    | group_vars/all.yml      | Destination path consumed by git role.                                         |
-| nvim_config_dir      | {{ xdg_config_home }}/nvim                   | group_vars/all.yml      | Destination path consumed by nvim role.                                        |
-| dotfiles_profile     | workstation                                  | host_vars/localhost.yml | Selects which profile-driven role set should run on this machine.              |
-| nvim_config_repo_url | ""                                           | host_vars/localhost.yml | Source repository URL for cloning nvim config.                                 |
-| ai_config_repo_url   | ""                                           | host_vars/localhost.yml | Source repository URL for cloning AI tool config.                              |
-| claude_config_dest   | {{ ansible_env.HOME }}/.claude               | group_vars/all.yml      | Destination path for Claude configuration symlink or files.                    |
-| copilot_config_dest  | OS-specific expression in group_vars/all.yml | group_vars/all.yml      | Destination path for GitHub Copilot configuration.                             |
-| dotfiles_is_wsl      | false                                        | Set by common role      | Canonical WSL detection fact. Set from ansible_kernel by the common role. Use this in all role when: conditions. |
+| Variable             | Default                                         | Override in             | Purpose                                                                                                          |
+| -------------------- | ----------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| xdg_config_home      | {{ ansible_facts['env']['HOME'] }}/.config      | group_vars/all.yml      | Base XDG config directory used by roles to avoid hardcoded paths.                                                |
+| xdg_data_home        | {{ ansible_facts['env']['HOME'] }}/.local/share | group_vars/all.yml      | Base XDG data directory for role-managed data storage.                                                           |
+| xdg_cache_home       | {{ ansible_facts['env']['HOME'] }}/.cache       | group_vars/all.yml      | Base XDG cache directory for transient files.                                                                    |
+| xdg_state_home       | {{ ansible_facts['env']['HOME'] }}/.local/state | group_vars/all.yml      | Base XDG state directory for persistent runtime state.                                                           |
+| shell_config_dir     | {{ xdg_config_home }}/shell                     | group_vars/all.yml      | Destination path consumed by shell role.                                                                         |
+| git_config_dir       | {{ xdg_config_home }}/git                       | group_vars/all.yml      | Destination path consumed by git role.                                                                           |
+| nvim_config_dir      | {{ xdg_config_home }}/nvim                      | group_vars/all.yml      | Destination path consumed by nvim role.                                                                          |
+| dotfiles_profile     | workstation                                     | host_vars/localhost.yml | Selects which profile-driven role set should run on this machine.                                                |
+| nvim_config_repo_url | ""                                              | host_vars/localhost.yml | Source repository URL for cloning nvim config.                                                                   |
+| ai_config_repo_url   | ""                                              | host_vars/localhost.yml | Source repository URL for cloning AI tool config.                                                                |
+| claude_config_dest   | {{ ansible_facts['env']['HOME'] }}/.claude      | group_vars/all.yml      | Destination path for Claude configuration symlink or files.                                                      |
+| copilot_config_dest  | OS-specific expression in group_vars/all.yml    | group_vars/all.yml      | Destination path for GitHub Copilot configuration.                                                               |
+| dotfiles_is_wsl      | false                                           | Set by common role      | Canonical WSL detection fact. Set from ansible_kernel by the common role. Use this in all role when: conditions. |
 
 ## Development / Testing
 

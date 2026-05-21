@@ -3,5 +3,4 @@ common_xdg_dirs:
   - "{{ xdg_data_home }}"
   - "{{ xdg_cache_home }}"
   - "{{ xdg_state_home }}"
-  - "{{ xdg_config_home }}/shell"
-  - "{{ xdg_config_home }}/git"
+  - "{{ xdg_config_home }}/git" # git role could also own this, but it's benign here

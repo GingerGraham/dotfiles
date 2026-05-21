@@ -4,10 +4,10 @@
 # path contains "linuxDotFiles", it is removed before the new structure
 # is deployed. Real files (non-symlinks) are never touched here.
 shell_migration_targets:
-  - "{{ ansible_env.HOME }}/.bashrc"
-  - "{{ ansible_env.HOME }}/.zshrc"
-  - "{{ ansible_env.HOME }}/.zshenv"
-  - "{{ ansible_env.HOME }}/.applets"
+  - "{{ ansible_facts['env']['HOME'] }}/.bashrc"
+  - "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+  - "{{ ansible_facts['env']['HOME'] }}/.zshenv"
+  - "{{ ansible_facts['env']['HOME'] }}/.applets"
 
 # ── Shell stub files ──────────────────────────────────────────────────────────
 # Thin stubs in the repo root that are symlinked into HOME.
@@ -15,8 +15,8 @@ shell_migration_targets:
 # dest is the absolute path of the symlink to create.
 shell_stubs:
   - src: shell/bashrc
-    dest: "{{ ansible_env.HOME }}/.bashrc"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.bashrc"
   - src: shell/zshrc
-    dest: "{{ ansible_env.HOME }}/.zshrc"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
   - src: shell/zshenv
-    dest: "{{ ansible_env.HOME }}/.zshenv"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.zshenv"
