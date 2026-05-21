@@ -1,19 +1,15 @@
 [Unit]
 Description=Dotfiles GitOps Sync
-Documentation=https://github.com/{{ dotfiles_github_user }}/dotfiles
-# Network is a soft dependency — if unavailable the sync script exits cleanly
+Documentation=file://{{ dotfiles_dir }}/README.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Wrapper deployed by the sync role — stable path that delegates to scripts/sync.sh in the repo
 ExecStart=%h/.local/bin/dotfiles-sync
 StandardOutput=journal
 StandardError=journal
-# Generous timeout; most syncs complete in seconds but a slow connection shouldn't fail the unit
 TimeoutSec=120
-# Exit codes: 0 = success or nothing to do; 1 = error condition (logged to journal)
 SuccessExitStatus=0
 
 [Install]
