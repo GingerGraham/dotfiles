@@ -8,7 +8,7 @@
     state: directory
     mode: "0755"
   loop:
-    - "{{ ansible_env.HOME }}/.local/bin"
+    - "{{ ansible_facts['env']['HOME'] }}/.local/bin"
     - "{{ xdg_data_home }}/dotfiles/logs"
     - "{{ xdg_config_home }}/dotfiles"
     - "{{ xdg_config_home }}/systemd/user"
@@ -31,14 +31,14 @@
 - name: Deploy dotfiles-sync wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/sync.sh"
-    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-sync"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync"
     state: link
     force: true
 
 - name: Deploy dotfiles-branch wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/switch-branch.sh"
-    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-branch"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-branch"
     state: link
     force: true
 
@@ -56,6 +56,12 @@
   failed_when: false  # handled below with a clear message
   check_mode: false
 
+# Debug print the detected remote URL for visibility in Ansible output. This is not used programmatically — just a debug message.
+- name: Debug print detected dotfiles remote URL
+  ansible.builtin.debug:
+    msg: "Detected dotfiles remote URL: {{ _dotfiles_git_info.stdout | trim }}"
+  when: _dotfiles_git_info.rc == 0
+
 - name: Fail with actionable message if remote URL cannot be determined
   ansible.builtin.fail:
     msg: >
@@ -63,14 +69,14 @@
       Either the repo has no 'origin' remote, or git is not available.
       Set dotfiles_repo_url explicitly in host_vars/localhost.yml to override.
   when:
-    - _dotfiles_remote_url.rc != 0
+    - _dotfiles_git_info.rc != 0
     - dotfiles_repo_url == ""
 
 - name: Set dotfiles_repo_url fact from git remote
   ansible.builtin.set_fact:
-    dotfiles_repo_url: "{{ _dotfiles_remote_url.stdout | trim }}"
+    dotfiles_repo_url: "{{ _dotfiles_git_info.stdout | trim }}"
   when:
-    - _dotfiles_remote_url.rc == 0
+    - _dotfiles_git_info.rc == 0
     - dotfiles_repo_url == ""
 
 # Only create sync.conf if it does not already exist. install.sh creates it
@@ -97,8 +103,9 @@
   notify: Reload and enable dotfiles timer
 
 - name: Ensure systemd user instance is available (WSL workaround)
-  ansible.builtin.command: systemctl --user daemon-reload
-  changed_when: false
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
   when: ansible_system == "Linux"
 
 # ── macOS: launchd agent ──────────────────────────────────────────────────────
@@ -106,7 +113,7 @@
 - name: Deploy launchd agent plist
   ansible.builtin.template:
     src: launchd/com.dotfiles.sync.plist.j2
-    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.dotfiles.sync.plist"
+    dest: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist"
     mode: "0644"
   when: ansible_system == "Darwin"
   notify: Load launchd agent
