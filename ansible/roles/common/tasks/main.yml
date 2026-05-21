@@ -36,3 +36,34 @@
     state: directory
     mode: "0755"
   loop: "{{ common_xdg_dirs }}"
+
+# ============================================================================
+# Section 4 - Install bash-logger
+# ============================================================================
+- name: Check for system-wide bash-logger installation
+  ansible.builtin.stat:
+    path: /usr/local/lib/bash-logger/logging.sh
+  register: _bash_logger_system
+
+- name: Ensure user bash-logger lib directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.local/lib/bash-logger"
+    state: directory
+    mode: "0755"
+  when: not _bash_logger_system.stat.exists
+
+- name: Clone or update bash-logger repository to staging location
+  ansible.builtin.git:
+    repo: "{{ bash_logger_repo_url }}"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/lib/bash-logger-src"
+    version: main
+    depth: 1
+  when: not _bash_logger_system.stat.exists
+
+- name: Deploy bash-logger logging.sh from staging to lib directory
+  ansible.builtin.copy:
+    src: "{{ ansible_facts['env']['HOME'] }}/.local/lib/bash-logger-src/logging.sh"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/lib/bash-logger/logging.sh"
+    mode: "0644"
+    remote_src: true
+  when: not _bash_logger_system.stat.exists

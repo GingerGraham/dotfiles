@@ -20,6 +20,9 @@ dotfiles_profile: workstation # Default role profile; override per machine to co
 nvim_config_repo_url: "" # Neovim repo URL; override in host_vars when you want the nvim role to clone your config.
 ai_config_repo_url: "" # AI tools repo URL; override in host_vars when you want the ai-tools role to clone config.
 
+# ── External Libraries ────────────────────────────────────────────────────────
+bash_logger_repo_url: "https://github.com/GingerGraham/bash-logger.git"
+
 # ── AI Tool Config Paths ──────────────────────────────────────────────────────
 # Destination for ~/.claude symlink — same on all platforms for now
 claude_config_dest: "{{ ansible_facts['env']['HOME'] }}/.claude" # Claude config destination; override only if you want a non-default target path.

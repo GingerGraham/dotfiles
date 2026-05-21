@@ -5,16 +5,34 @@
 SHELL_CONFIG_DIR="${HOME}/.config/shell"
 export SHELL_CONFIG_DIR
 
-# ── bash-logger (silent fallback if not installed) ───────────────────────────
-if [[ -f "${HOME}/.local/lib/bash-logger/logging.sh" ]]; then
-    # shellcheck disable=SC1091
-    source "${HOME}/.local/lib/bash-logger/logging.sh"
-else
-    log_info()  { :; }
-    log_warn()  { :; }
-    log_error() { :; }
+# ── bash-logger ───────────────────────────────────────────────────────────────
+# Check user install first, then system-wide. Either satisfies the requirement.
+_bash_logger_loaded=false
+
+for _bl_path in \
+    "${HOME}/.local/lib/bash-logger/logging.sh" \
+    "/usr/local/lib/bash-logger/logging.sh"; do
+    if [[ -f "${_bl_path}" ]]; then
+        # shellcheck disable=SC1090
+        source "${_bl_path}"
+        # init_logger must be called after sourcing — script name auto-detection
+        # returns "unknown" from RC file context so we set it explicitly.
+        init_logger --name "shell" --level INFO
+        _bash_logger_loaded=true
+        break
+    fi
+done
+unset _bl_path
+
+if [[ "${_bash_logger_loaded}" == "false" ]]; then
+    # bash-logger is not installed — emit to stderr so output is never silently
+    # dropped. log_debug is a no-op to avoid noise from conditional debug calls.
+    log_info()  { printf '[INFO]  %s\n' "$*" >&2; }
+    log_warn()  { printf '[WARN]  %s\n' "$*" >&2; }
+    log_error() { printf '[ERROR] %s\n' "$*" >&2; }
     log_debug() { :; }
 fi
+unset _bash_logger_loaded
 
 # ── OS / WSL / Distro detection (runs once) ──────────────────────────────────
 _raw_os="$(uname -s)"
