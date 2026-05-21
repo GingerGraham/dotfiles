@@ -10,8 +10,16 @@ if command -v systemctl &>/dev/null; then
     alias services="systemctl --type=service --state=running"
 fi
 
+# ── Flush DNS ──────────────────────────────────────────────────────────────────
+if command -v systemd-resolve &>/dev/null; then
+    alias flush-dns="sudo systemd-resolve --flush-caches"
+    alias flushdns="sudo systemd-resolve --flush-caches"
+fi
+
 # ── xdg-open shortcut ─────────────────────────────────────────────────────────
-command -v xdg-open &>/dev/null && alias open="xdg-open"
+if command -v xdg-open &>/dev/null; then
+    alias open="xdg-open"
+fi
 
 # ── lvfs firmware updates ─────────────────────────────────────────────────────
 if command -v fwupdmgr &>/dev/null; then

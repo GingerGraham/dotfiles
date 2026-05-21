@@ -79,7 +79,7 @@ ansible-install-python() {
     pip3 install --upgrade ansible --disable-pip-version-check
 }
 
-ansible-install() {
+install-ansible() {
     log_info "Installing Ansible..."
     [[ -z "${PACKAGE_MANAGER}" ]] && detect-package-manager
     case "${PACKAGE_MANAGER:-}" in
@@ -120,7 +120,7 @@ helm-install-mac() {
     fi
 }
 
-helm-install() {
+install-helm() {
     local helm_version
     helm_version="$(curl -s https://api.github.com/repos/helm/helm/releases/latest \
         | grep '"tag_name":' | sed -E 's/.+"v([^"]+)".+/\1/')"
@@ -175,7 +175,7 @@ tf-install-mac() {
     tfenv install latest && tfenv use latest
 }
 
-terraform-install() {
+install-terraform() {
     local tf_version
     tf_version="$(get-latest-terraform-version)"
     [[ -z "${tf_version}" ]] && { log_error "Could not determine Terraform version"; return 1; }
@@ -226,7 +226,7 @@ tflint-install-mac() {
     command -v tflint &>/dev/null && brew upgrade tflint || brew install tflint
 }
 
-tflint-install() {
+install-tflint() {
     case "${DOTFILES_OS}" in
         Linux) tflint-install-linux ;;
         Mac)   tflint-install-mac ;;
@@ -290,7 +290,7 @@ trivy-install-mac() {
     command -v trivy &>/dev/null && brew upgrade trivy || brew install trivy
 }
 
-trivy-install() {
+install-trivy() {
     case "${DOTFILES_OS}" in
         Linux) trivy-install-linux ;;
         Mac)   trivy-install-mac ;;

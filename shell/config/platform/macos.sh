@@ -12,6 +12,7 @@ fi
 [[ -d "/opt/homebrew/bin" ]] && export PATH="/opt/homebrew/bin:${PATH}"
 
 # ── macOS-specific aliases ────────────────────────────────────────────────────
+alias flush-dns="sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder"
 alias flushdns="sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder"
 
 # ── iTerm2 shell integration ─────────────────────────────────────────────────

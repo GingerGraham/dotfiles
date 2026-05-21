@@ -27,5 +27,5 @@ if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
 fi
 
 if command -v docker-compose &>/dev/null || command -v podman-compose &>/dev/null; then
-    alias dc="${DOCKER_COMPOSE_CMD:-docker-compose}"
+    alias dc='${DOCKER_COMPOSE_CMD:-docker-compose}'
 fi
