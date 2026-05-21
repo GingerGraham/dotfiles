@@ -1,0 +1,130 @@
+# ============================================================================
+# Section 1 — Derive repo root
+# ============================================================================
+- name: Set dotfiles repo root fact
+  ansible.builtin.set_fact:
+    dotfiles_repo_root: "{{ playbook_dir | dirname }}"
+  # playbook_dir resolves to the ansible/ directory at runtime.
+  # dirname gives the repo root regardless of where the repo was cloned.
+
+# ============================================================================
+# Section 2 — Verify shell config source exists in repo
+# ============================================================================
+- name: Stat shell config source directory
+  ansible.builtin.stat:
+    path: "{{ dotfiles_repo_root }}/shell/config"
+  register: _shell_config_source
+
+- name: Fail if shell config source is absent from repo
+  ansible.builtin.fail:
+    msg: >-
+      Shell config source not found at {{ dotfiles_repo_root }}/shell/config.
+      Ensure the shell/ directory is present and committed in the dotfiles repo.
+  when: not _shell_config_source.stat.exists
+
+# ============================================================================
+# Section 3 — Migrate linuxDotFiles symlinks
+# ============================================================================
+- name: Stat potential linuxDotFiles migration targets
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _migration_stats
+  loop: "{{ shell_migration_targets }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Remove symlinks pointing into linuxDotFiles
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: absent
+  when:
+    - item.stat.exists
+    - item.stat.islnk
+    - "'linuxDotFiles' in item.stat.lnk_target"
+  loop: "{{ _migration_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# ============================================================================
+# Section 4 — Deploy shell config directory symlink
+# ============================================================================
+- name: Stat shell config destination
+  ansible.builtin.stat:
+    path: "{{ shell_config_dir }}"
+  register: _shell_config_dest
+
+- name: Fail if shell config destination is a real directory
+  ansible.builtin.fail:
+    msg: >-
+      {{ shell_config_dir }} exists as a real directory, not a symlink.
+      Back it up and remove it manually before re-running this role.
+      Any files you want to keep should be moved to shell/config/ in the repo.
+  when:
+    - _shell_config_dest.stat.exists
+    - not _shell_config_dest.stat.islnk
+
+- name: Symlink shell config directory to repo source
+  ansible.builtin.file:
+    src: "{{ dotfiles_repo_root }}/shell/config"
+    dest: "{{ shell_config_dir }}"
+    state: link
+
+# ============================================================================
+# Section 5 — Deploy shell stub symlinks (.bashrc, .zshrc, .zshenv)
+# ============================================================================
+- name: Stat shell stub destinations
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+  register: _stub_stats
+  loop: "{{ shell_stubs }}"
+  loop_control:
+    label: "{{ item.dest }}"
+
+# Any real (non-symlink) stub files are backed up with a .pre-dotfiles.bak
+# suffix before being replaced. force: false means existing backups are
+# preserved — a second Ansible run will not overwrite them.
+- name: Back up existing non-symlink stub files
+  ansible.builtin.copy:
+    src: "{{ item.item.dest }}"
+    dest: "{{ item.item.dest }}.pre-dotfiles.bak"
+    remote_src: true
+    force: false
+  when:
+    - item.stat.exists
+    - not item.stat.islnk
+  loop: "{{ _stub_stats.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Remove original stub files that have been backed up
+  ansible.builtin.file:
+    path: "{{ item.item.dest }}"
+    state: absent
+  when:
+    - item.stat.exists
+    - not item.stat.islnk
+  loop: "{{ _stub_stats.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Deploy shell stub symlinks into HOME
+  ansible.builtin.file:
+    src: "{{ dotfiles_repo_root }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    state: link
+  loop: "{{ shell_stubs }}"
+  loop_control:
+    label: "{{ item.dest }}"
+
+# ============================================================================
+# Section 6 — Deploy machine-local env override (create once, never overwrite)
+# ============================================================================
+# shell_config_dir is a symlink into the repo, so this file lands at
+# shell/config/env/90-local.sh — which is gitignored. It is created on first
+# run and force: false ensures subsequent Ansible runs leave it untouched.
+- name: Deploy 90-local.sh machine override template
+  ansible.builtin.template:
+    src: env/90-local.sh.j2
+    dest: "{{ shell_config_dir }}/env/90-local.sh"
+    mode: "0644"
+    force: false

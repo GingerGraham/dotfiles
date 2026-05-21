@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ~/.config/shell/env/90-local.sh
+# Machine-local environment overrides for {{ dotfiles_machine_name | default(ansible_hostname) }}
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS FILE IS MANAGED LOCALLY — NOT BY ANSIBLE
+# ─────────────────────────────────────────────────────────────────────────────
+# Created once by Ansible on first run. Never overwritten on subsequent runs.
+# Gitignored — all edits stay local to this machine.
+#
+# PURPOSE
+#   This file is sourced last in the env/ tier (numeric sort: 90-*), so any
+#   value set here wins over the shared env files (00-core, 10-editors, etc.).
+#   Use it for anything too machine-specific or sensitive to commit.
+#
+# HOW TO USE
+#   Uncomment and adapt the examples below, or add your own.
+#   Changes take effect in new shell sessions (or: source ~/.bashrc).
+#
+# FOR HELP / MORE EXAMPLES
+#   See shell/config/env/ in the dotfiles repo for the env files this
+#   overrides, and the loader.sh loading order.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Machine identity — set by Ansible, safe to change
+export DOTFILES_MACHINE="{{ dotfiles_machine_name | default(ansible_hostname) }}"
+
+# ── PATH extensions ───────────────────────────────────────────────────────────
+# Add machine-local tool directories that aren't in the shared env files.
+# export PATH="${HOME}/.local/bin/my-tool:${PATH}"
+
+# ── Editor / pager overrides ──────────────────────────────────────────────────
+# Override the shared EDITOR/VISUAL set in 10-editors.sh if needed.
+# export EDITOR="nano"
+
+# ── Proxy settings ────────────────────────────────────────────────────────────
+# Work or corporate proxy. Keep these out of the shared config.
+# export HTTP_PROXY="http://proxy.corp.example.com:8080"
+# export HTTPS_PROXY="${HTTP_PROXY}"
+# export NO_PROXY="localhost,127.0.0.1,.corp.example.com"
+
+# ── Tool version pins ─────────────────────────────────────────────────────────
+# Machine-specific SDK or runtime roots that differ from the shared defaults.
+# export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+# export GOROOT="/usr/local/go-1.22"
+
+# ── Credentials / tokens ─────────────────────────────────────────────────────
+# Short-lived or machine-specific tokens. For long-lived secrets prefer a
+# secrets manager (Bitwarden CLI, AWS SSM, etc.) over plain exports here.
+# export GITHUB_TOKEN="ghp_..."
+
+# ── Work-specific config ──────────────────────────────────────────────────────
+# Employer-specific directories, aliases, or environment setup.
+# source "${HOME}/work/env.sh"
