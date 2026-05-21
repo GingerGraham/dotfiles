@@ -1,0 +1,86 @@
+---
+# ansible/roles/sync/tasks/main.yml
+# Installs the dotfiles GitOps sync service and stable user-facing wrappers.
+# Does NOT create sync.conf if it already exists — that file is owned by install.sh
+# and dotfiles-branch at runtime.
+
+- name: Ensure XDG state and log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+    - "{{ ansible_facts['env']['HOME'] }}/.local/share/dotfiles/logs"
+    - "{{ ansible_facts['env']['XDG_CONFIG_HOME'] | default(ansible_facts['env']['HOME'] + '/.config') }}/dotfiles"
+    - "{{ ansible_facts['env']['XDG_CONFIG_HOME'] | default(ansible_facts['env']['HOME'] + '/.config') }}/systemd/user"
+
+# ── Scripts ───────────────────────────────────────────────────────────────────
+
+- name: Make repo scripts executable
+  ansible.builtin.file:
+    path: "{{ dotfiles_dir }}/scripts/{{ item }}"
+    mode: "0755"
+  loop:
+    - sync.sh
+    - switch-branch.sh
+  # Soft-fail: repo may not be cloned yet on very first run before shell role
+  failed_when: false
+
+# Deploy stable wrappers to ~/.local/bin so the path never changes even if
+# the repo moves. Symlinks rather than copies — changes in the repo are
+# immediately reflected without re-running Ansible.
+- name: Deploy dotfiles-sync wrapper symlink
+  ansible.builtin.file:
+    src: "{{ dotfiles_dir }}/scripts/sync.sh"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync"
+    state: link
+    force: true
+
+- name: Deploy dotfiles-branch wrapper symlink
+  ansible.builtin.file:
+    src: "{{ dotfiles_dir }}/scripts/switch-branch.sh"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-branch"
+    state: link
+    force: true
+
+# ── sync.conf ─────────────────────────────────────────────────────────────────
+
+# Only create sync.conf if it does not already exist. install.sh creates it
+# interactively on first run; dotfiles-branch mutates it at runtime.
+# Ansible must never clobber it — DEV_MODE and GIT_BRANCH state live here.
+- name: Create sync.conf if not present
+  ansible.builtin.template:
+    src: sync.conf.j2
+    dest: "{{ ansible_facts['env']['XDG_CONFIG_HOME'] | default(ansible_facts['env']['HOME'] + '/.config') }}/dotfiles/sync.conf"
+    mode: "0600"
+    force: false   # <-- the key: no-op if the file already exists
+
+# ── Linux: systemd user timer ─────────────────────────────────────────────────
+
+- name: Deploy systemd user units
+  ansible.builtin.template:
+    src: "systemd/{{ item }}.j2"
+    dest: "{{ ansible_facts['env']['XDG_CONFIG_HOME'] | default(ansible_facts['env']['HOME'] + '/.config') }}/systemd/user/{{ item }}"
+    mode: "0644"
+  loop:
+    - dotfiles-sync.service
+    - dotfiles-sync.timer
+  when: ansible_system == "Linux"
+  notify: Reload and enable dotfiles timer
+
+- name: Ensure systemd user instance is available (WSL workaround)
+  ansible.builtin.systemd:
+    daemon_reexec: true
+    scope: user
+  when: ansible_system == "Linux"
+
+# ── macOS: launchd agent ──────────────────────────────────────────────────────
+
+- name: Deploy launchd agent plist
+  ansible.builtin.template:
+    src: launchd/com.dotfiles.sync.plist.j2
+    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.dotfiles.sync.plist"
+    mode: "0644"
+  when: ansible_system == "Darwin"
+  notify: Load launchd agent

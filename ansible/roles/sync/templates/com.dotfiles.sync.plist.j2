@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dotfiles.sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync</string>
+    </array>
+
+    <!-- Fire 2 minutes after login, then every 30 minutes -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>2</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>{{ ansible_facts['env']['HOME'] }}/.local/share/dotfiles/logs/sync.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{ ansible_facts['env']['HOME'] }}/.local/share/dotfiles/logs/sync-error.log</string>
+
+    <!-- Throttle restart on repeated failure — don't hammer origin if SSH is broken -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

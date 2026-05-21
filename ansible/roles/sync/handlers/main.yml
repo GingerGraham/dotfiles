@@ -1,0 +1,18 @@
+---
+# ansible/roles/sync/handlers/main.yml
+
+- name: Reload and enable dotfiles timer
+  ansible.builtin.systemd:
+    name: dotfiles-sync.timer
+    state: started
+    enabled: true
+    scope: user
+    daemon_reload: true
+  when: ansible_system == "Linux"
+
+- name: Load launchd agent
+  ansible.builtin.command: >
+    launchctl load -w
+    {{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist
+  changed_when: true
+  when: ansible_system == "Darwin"

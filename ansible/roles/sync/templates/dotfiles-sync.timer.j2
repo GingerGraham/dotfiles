@@ -1,0 +1,16 @@
+[Unit]
+Description=Dotfiles GitOps Sync Timer
+Requires=dotfiles-sync.service
+
+[Timer]
+# Fire shortly after login so the first shell of a new session gets fresh config
+OnBootSec=2min
+# Poll every 30 minutes — dotfiles don't change minute-to-minute
+OnUnitActiveSec=30min
+# Catch up if the machine was off during a scheduled run
+Persistent=true
+# Randomise start within a 60s window — avoids hammering origin at exactly :00 on many machines
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

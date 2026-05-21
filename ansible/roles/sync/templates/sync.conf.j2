@@ -1,0 +1,16 @@
+# ~/.config/dotfiles/sync.conf
+# Written by install.sh on first run — never overwritten by Ansible.
+# Managed at runtime by: dotfiles-branch
+#
+# DEV_MODE: when "true", sync.sh exits immediately without pulling.
+#           Set automatically by dotfiles-branch when switching to a non-main branch.
+#
+# SSH_KEY:  path to a dedicated deploy key if you are not using an SSH agent.
+#           Leave commented out to rely on ssh-agent (preferred for dev workstations).
+#           Downstream/server installs with no agent should uncomment and set this.
+
+DOTFILES_DIR="{{ dotfiles_dir }}"
+REPO_URL="{{ dotfiles_repo_url }}"
+GIT_BRANCH="main"
+DEV_MODE="false"
+# SSH_KEY="${HOME}/.ssh/dotfiles_ed25519"
