@@ -1,6 +1,3 @@
----
-# ansible/roles/sync/handlers/main.yml
-
 - name: Reload and enable dotfiles timer
   ansible.builtin.systemd:
     name: dotfiles-sync.timer
