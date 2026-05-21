@@ -8,7 +8,7 @@
     state: directory
     mode: "0755"
   loop:
-    - "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+    - "{{ ansible_env.HOME }}/.local/bin"
     - "{{ xdg_data_home }}/dotfiles/logs"
     - "{{ xdg_config_home }}/dotfiles"
     - "{{ xdg_config_home }}/systemd/user"
@@ -22,7 +22,6 @@
   loop:
     - sync.sh
     - switch-branch.sh
-  # Soft-fail: repo may not be cloned yet on very first run before shell role
   failed_when: false
 
 # Deploy stable wrappers to ~/.local/bin so the path never changes even if
@@ -31,52 +30,60 @@
 - name: Deploy dotfiles-sync wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/sync.sh"
-    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync"
+    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-sync"
     state: link
     force: true
 
 - name: Deploy dotfiles-branch wrapper symlink
   ansible.builtin.file:
     src: "{{ dotfiles_dir }}/scripts/switch-branch.sh"
-    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-branch"
+    dest: "{{ ansible_env.HOME }}/.local/bin/dotfiles-branch"
     state: link
     force: true
 
 # ── sync.conf ─────────────────────────────────────────────────────────────────
 
-# Derive the repo URL from git rather than requiring it as a static variable.
-# This means forks just work — no need to update group_vars after cloning.
-# The result is only used when sync.conf doesn't already exist (force: false below).
+# Pre-initialise with a sentinel so subsequent when conditions are always
+# evaluable — if the command task is skipped for any reason (check mode,
+# upstream conditional, etc.) Ansible does not set the register variable at all,
+# which causes 'is undefined' errors on any task that references it.
+- name: Pre-initialise remote URL register
+  ansible.builtin.set_fact:
+    _dotfiles_remote_url: {rc: 1, stdout: ""}
+
+# ansible.builtin.command is correct here — git remote get-url is a pure read
+# with no side effects. changed_when: false satisfies the idempotency linter.
+# ansible.builtin.git is a checkout module and does not inspect existing repos.
 - name: Detect dotfiles remote URL from git
-  ansible.builtin.git:
-    repo: "{{ dotfiles_dir }}"
-    remote: origin
-  register: _dotfiles_git_info
+  ansible.builtin.command:
+    cmd: git remote get-url origin
+    chdir: "{{ dotfiles_dir }}"
+  register: _dotfiles_remote_url
   changed_when: false
-  failed_when: false  # handled below with a clear message
+  failed_when: false
   check_mode: false
 
-# Debug print the detected remote URL for visibility in Ansible output. This is not used programmatically — just a debug message.
-- name: Debug print detected dotfiles remote URL
+- name: Debug detected dotfiles remote URL
   ansible.builtin.debug:
-    msg: "Detected dotfiles remote URL: {{ _dotfiles_git_info.stdout | trim }}"
-  when: _dotfiles_git_info.rc == 0
+    msg: "Detected dotfiles remote URL: {{ _dotfiles_remote_url.stdout | trim }}"
+  when: _dotfiles_remote_url.rc == 0
 
 - name: Fail with actionable message if remote URL cannot be determined
   ansible.builtin.fail:
     msg: >
-      Could not determine dotfiles remote URL from 'git remote get-url origin' in {{ dotfiles_dir }}.
-      Either the repo has no 'origin' remote, or git is not available.
+      Could not determine dotfiles remote URL from 'git remote get-url origin'
+      in {{ dotfiles_dir }} (exit code: {{ _dotfiles_remote_url.rc }}).
+      Either the repo has no 'origin' remote or git is not available.
       Set dotfiles_repo_url explicitly in host_vars/localhost.yml to override.
   when:
-    - _dotfiles_git_info.rc != 0
+    - _dotfiles_remote_url.rc != 0
     - dotfiles_repo_url == ""
 
 - name: Set dotfiles_repo_url fact from git remote
   ansible.builtin.set_fact:
-    dotfiles_repo_url: "{{ _dotfiles_git_info.stdout | trim }}"
+    dotfiles_repo_url: "{{ _dotfiles_remote_url.stdout | trim }}"
   when:
-    - _dotfiles_git_info.rc == 0
+    - _dotfiles_remote_url.rc == 0
     - dotfiles_repo_url == ""
 
 # Only create sync.conf if it does not already exist. install.sh creates it
@@ -87,7 +94,7 @@
     src: sync.conf.j2
     dest: "{{ xdg_config_home }}/dotfiles/sync.conf"
     mode: "0600"
-    force: false   # <-- the key: no-op if the file already exists
+    force: false
 
 # ── Linux: systemd user timer ─────────────────────────────────────────────────
 
@@ -103,9 +110,8 @@
   notify: Reload and enable dotfiles timer
 
 - name: Ensure systemd user instance is available (WSL workaround)
-  ansible.builtin.systemd_service:
-    daemon_reload: true
-    scope: user
+  ansible.builtin.command: systemctl --user daemon-reload
+  changed_when: false
   when: ansible_system == "Linux"
 
 # ── macOS: launchd agent ──────────────────────────────────────────────────────
@@ -113,7 +119,7 @@
 - name: Deploy launchd agent plist
   ansible.builtin.template:
     src: launchd/com.dotfiles.sync.plist.j2
-    dest: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist"
+    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.dotfiles.sync.plist"
     mode: "0644"
   when: ansible_system == "Darwin"
   notify: Load launchd agent
