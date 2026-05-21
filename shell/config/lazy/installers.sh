@@ -355,35 +355,106 @@ install-bitwarden() {
 }
 
 # ── Microsoft Edit install ────────────────────────────────────────────────────
-install-edit() {
-    log_info "Installing or updating Microsoft Edit..."
-    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
-    command -v tar  &>/dev/null || { log_error "tar is required"; return 1; }
+#
+# _edit_arch_stem <version_string>
+#   Prints the platform-specific asset stem, e.g. "edit-2.0.0-x86_64-linux-gnu"
+#   Returns 1 on unsupported platform so callers can bail early.
+_edit_arch_stem() {
+    local normalized_ver="$1"
+    local machine; machine="$(uname -m)"
+    local kernel;  kernel="$(uname -s)"
 
-    local api_response ver arch normalized_ver
-    api_response="$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest)"
-    ver="$(echo "${api_response}" | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
-    [[ -z "${ver}" ]] && { log_error "Could not determine edit version"; return 1; }
-
-    case "$(uname -m)" in
-        x86_64)       arch="x86_64-linux-gnu" ;;
-        aarch64|arm64) arch="aarch64-linux-gnu" ;;
-        *) log_error "Unsupported arch: $(uname -m)"; return 1 ;;
+    local arch os_tag
+    case "${machine}" in
+        x86_64)         arch="x86_64"  ;;
+        aarch64|arm64)  arch="aarch64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
     esac
 
-    normalized_ver="${ver#v}"
-    local asset_name="edit-${normalized_ver}-${arch}.tar.zst"
-    local download_url
-    download_url="$(echo "${api_response}" | grep "\"browser_download_url\":.*${asset_name}\"" \
-        | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
-    [[ -z "${download_url}" ]] && { log_error "Asset ${asset_name} not found in release"; return 1; }
+    case "${kernel}" in
+        Linux)  os_tag="linux-gnu"    ;;
+        Darwin) os_tag="apple-darwin" ;;
+        *) log_error "Unsupported OS: ${kernel}"; return 1 ;;
+    esac
 
-    local tmp_dir; tmp_dir="$(mktemp -d)"
-    download_file_robust "${download_url}" "${tmp_dir}/${asset_name}" || { rm -rf "${tmp_dir}"; return 1; }
-    tar -xf "${tmp_dir}/${asset_name}" -C "${tmp_dir}" || { log_error "Extraction failed"; rm -rf "${tmp_dir}"; return 1; }
+    printf 'edit-%s-%s-%s' "${normalized_ver}" "${arch}" "${os_tag}"
+}
+
+# _edit_asset_url <api_response> <stem>
+#   Searches the GitHub API JSON for any download URL whose filename starts with
+#   <stem> and ends with a known archive extension.  Prints the URL.
+#   By matching on stem rather than full filename we survive extension changes.
+_edit_asset_url() {
+    local api_response="$1" stem="$2"
+    local url
+    # Match the stem followed by any extension (.tar.gz, .tar.zst, .zip, etc.)
+    url="$(printf '%s' "${api_response}" \
+        | grep "\"browser_download_url\":.*${stem}" \
+        | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' \
+        | head -1)"
+    printf '%s' "${url}"
+}
+
+# _edit_extract <archive> <dest_dir>
+#   Extracts .tar.gz, .tar.zst, or .zip into dest_dir.
+_edit_extract() {
+    local archive="$1" dest="$2"
+    case "${archive}" in
+        *.tar.gz)  tar -xzf "${archive}" -C "${dest}" ;;
+        *.tar.zst)
+            if command -v zstd &>/dev/null; then
+                tar -I zstd -xf "${archive}" -C "${dest}"
+            else
+                # tar on recent Linux/macOS handles zstd natively
+                tar -xf "${archive}" -C "${dest}"
+            fi
+            ;;
+        *.zip) unzip -q "${archive}" -d "${dest}" ;;
+        *) log_error "Unrecognised archive format: $(basename "${archive}")"; return 1 ;;
+    esac
+}
+
+# _edit_install_from_api_response <api_response> <display_version>
+#   Shared implementation used by both install-edit and install-edit-version.
+_edit_install_from_api_response() {
+    local api_response="$1" display_ver="$2"
+    local normalized_ver="${display_ver#v}"
+
+    local stem
+    stem="$(_edit_arch_stem "${normalized_ver}")" || return 1
+
+    local download_url
+    download_url="$(_edit_asset_url "${api_response}" "${stem}")"
+    if [[ -z "${download_url}" ]]; then
+        log_error "No release asset matching '${stem}' found for ${display_ver}"
+        log_info "Assets available in this release:"
+        printf '%s' "${api_response}" \
+            | grep '"browser_download_url":' \
+            | sed -E 's/.*"browser_download_url": *"([^"]+)".*/  \1/'
+        return 1
+    fi
+
+    # Derive the archive filename from the URL so extraction uses the right handler
+    local asset_name; asset_name="$(basename "${download_url}")"
+    local tmp_dir;    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset_name}..."
+    if ! download_file_robust "${download_url}" "${tmp_dir}/${asset_name}"; then
+        rm -rf "${tmp_dir}"; return 1
+    fi
+
+    log_info "Extracting ${asset_name}..."
+    if ! _edit_extract "${tmp_dir}/${asset_name}" "${tmp_dir}"; then
+        log_error "Extraction failed for ${asset_name}"
+        rm -rf "${tmp_dir}"; return 1
+    fi
 
     local binary; binary="$(find "${tmp_dir}" -name "edit" -type f -executable | head -1)"
-    [[ -z "${binary}" ]] && { log_error "edit binary not found in archive"; rm -rf "${tmp_dir}"; return 1; }
+    if [[ -z "${binary}" ]]; then
+        log_error "edit binary not found in archive — contents:"
+        find "${tmp_dir}" -type f | sed 's/^/  /'
+        rm -rf "${tmp_dir}"; return 1
+    fi
 
     mkdir -p "${HOME}/.local/bin"
     cp "${binary}" "${HOME}/.local/bin/edit"
@@ -392,36 +463,35 @@ install-edit() {
     log_info "Microsoft Edit ${normalized_ver} installed to ~/.local/bin/edit"
 }
 
+install-edit() {
+    log_info "Installing or updating Microsoft Edit..."
+    command -v curl   &>/dev/null || { log_error "curl is required";   return 1; }
+    command -v tar    &>/dev/null || { log_error "tar is required"; return 1; }
+
+    local api_response ver
+    api_response="$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest edit version"; return 1; }
+
+    log_info "Latest version: ${ver}"
+    _edit_install_from_api_response "${api_response}" "${ver}"
+}
+
 install-edit-version() {
     local target_version="$1"
-    [[ -z "${target_version}" ]] && { log_error "Usage: install-edit-version <version>"; return 1; }
+    [[ -z "${target_version}" ]] && { log_error "Usage: install-edit-version <version>  (e.g. v2.0.0)"; return 1; }
+
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+    command -v tar  &>/dev/null || { log_error "tar is required"; return 1; }
+
     log_info "Installing Microsoft Edit ${target_version}..."
     local api_response
     api_response="$(curl -s "https://api.github.com/repos/microsoft/edit/releases/tags/${target_version}")"
-    echo "${api_response}" | grep -q '"message": "Not Found"' && { log_error "Version ${target_version} not found"; return 1; }
+    printf '%s' "${api_response}" | grep -q '"message": *"Not Found"' \
+        && { log_error "Version ${target_version} not found on GitHub"; return 1; }
 
-    local arch normalized_ver="${target_version#v}"
-    case "$(uname -m)" in
-        x86_64)       arch="x86_64-linux-gnu" ;;
-        aarch64|arm64) arch="aarch64-linux-gnu" ;;
-        *) log_error "Unsupported arch"; return 1 ;;
-    esac
-
-    local asset_name="edit-${normalized_ver}-${arch}.tar.zst"
-    local download_url
-    download_url="$(echo "${api_response}" | grep "\"browser_download_url\":.*${asset_name}\"" \
-        | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
-    [[ -z "${download_url}" ]] && { log_error "Asset not found"; return 1; }
-
-    local tmp_dir; tmp_dir="$(mktemp -d)"
-    download_file_robust "${download_url}" "${tmp_dir}/${asset_name}" || { rm -rf "${tmp_dir}"; return 1; }
-    tar -xf "${tmp_dir}/${asset_name}" -C "${tmp_dir}" || { rm -rf "${tmp_dir}"; return 1; }
-    local binary; binary="$(find "${tmp_dir}" -name "edit" -type f -executable | head -1)"
-    [[ -z "${binary}" ]] && { rm -rf "${tmp_dir}"; return 1; }
-    mkdir -p "${HOME}/.local/bin"
-    cp "${binary}" "${HOME}/.local/bin/edit" && chmod +x "${HOME}/.local/bin/edit"
-    rm -rf "${tmp_dir}"
-    log_info "Microsoft Edit ${normalized_ver} installed"
+    _edit_install_from_api_response "${api_response}" "${target_version}"
 }
 
 list-edit-releases() {
