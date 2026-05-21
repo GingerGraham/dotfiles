@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ~/.config/shell/env/90-local.sh
-# Machine-local environment overrides for {{ dotfiles_machine_name | default(ansible_hostname) }}
+# Machine-local environment overrides for {{ dotfiles_machine_name | default(ansible_facts['hostname']) }}
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # THIS FILE IS MANAGED LOCALLY — NOT BY ANSIBLE
@@ -23,7 +23,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Machine identity — set by Ansible, safe to change
-export DOTFILES_MACHINE="{{ dotfiles_machine_name | default(ansible_hostname) }}"
+export DOTFILES_MACHINE="{{ dotfiles_machine_name | default(ansible_facts['hostname']) }}"
 
 # ── PATH extensions ───────────────────────────────────────────────────────────
 # Add machine-local tool directories that aren't in the shared env files.
