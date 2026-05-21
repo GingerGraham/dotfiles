@@ -106,14 +106,14 @@
   loop:
     - dotfiles-sync.service
     - dotfiles-sync.timer
-  when: ansible_facts['os_family'] == "Linux"
+  when: ansible_facts['system'] == "Linux"
   notify: Reload and enable dotfiles timer
 
 - name: Ensure systemd user instance is available (WSL workaround)
   ansible.builtin.systemd:
     daemon_reload: true
     scope: user
-  when: ansible_facts['os_family'] == "Linux"
+  when: ansible_facts['system'] == "Linux"
 
 # ── macOS: launchd agent ──────────────────────────────────────────────────────
 
@@ -122,5 +122,5 @@
     src: launchd/com.dotfiles.sync.plist.j2
     dest: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist"
     mode: "0644"
-  when: ansible_facts['os_family'] == "Darwin"
+  when: ansible_facts['system'] == "Darwin"
   notify: Load launchd agent

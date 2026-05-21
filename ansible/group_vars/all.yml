@@ -34,7 +34,7 @@ claude_config_dest: "{{ ansible_facts['env']['HOME'] }}/.claude" # Claude config
 # Copilot config path differs by OS — overridden per os_family if needed
 copilot_config_dest: >- # Copilot config destination; override if your platform or setup requires a custom location.
   {{ ansible_facts['env']['HOME'] + '/.config/github-copilot'
-     if ansible_os_family != 'Darwin'
+     if ansible_facts['system'] != 'Darwin'
      else ansible_facts['env']['HOME'] + '/Library/Application Support/GitHub Copilot' }}
 
 # ── WSL Detection ─────────────────────────────────────────────────────────────
