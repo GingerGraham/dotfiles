@@ -85,6 +85,10 @@ else
 fi
 export DOTFILES_SHELL
 
+# ── Behaviour flags ───────────────────────────────────────────────────────────
+# Override any of these in env/90-local.sh — that file is sourced last.
+DOTFILES_SHOW_FUNCTIONS="${DOTFILES_SHOW_FUNCTIONS:-false}"
+
 # ── Lazy-load helper ─────────────────────────────────────────────────────────
 bash_lazy_load() {
     local stub_name="$1"
@@ -250,6 +254,7 @@ dedupe-path 2>/dev/null || true
 
 # ── Interactive startup ───────────────────────────────────────────────────────
 # Only runs in interactive shells — skipped in scripts, cron, SSH non-interactive.
-if [[ $- == *i* ]] && command -v get-my-functions &>/dev/null; then
+# Set DOTFILES_SHOW_FUNCTIONS=true in env/90-local.sh to enable.
+if [[ $- == *i* ]] && [[ "${DOTFILES_SHOW_FUNCTIONS}" == "true" ]] && command -v get-my-functions &>/dev/null; then
     get-my-functions
 fi
