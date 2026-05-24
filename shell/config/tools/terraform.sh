@@ -91,6 +91,14 @@ if command -v terragrunt &>/dev/null; then
     alias tgws="terragrunt workspace"
 fi
 
+# ── environment variables ─────────────────────────────────────────────────────
+
+# tenv auto-install (terraform version manager)
+if command -v tenv &>/dev/null; then
+    export TENV_AUTO_INSTALL=true
+    log_debug "tenv: TENV_AUTO_INSTALL enabled"
+fi
+
 # ── functions ─────────────────────────────────────────────────────────────────
 get-latest-terraform-version() {
     curl -s https://checkpoint-api.hashicorp.com/v1/check/terraform \

@@ -74,6 +74,16 @@ else
 fi
 export DOTFILES_DISTRO
 
+# ── Shell detection ───────────────────────────────────────────────────────────
+if [[ -n "${ZSH_VERSION}" ]]; then
+    DOTFILES_SHELL="zsh"
+elif [[ -n "${BASH_VERSION}" ]]; then
+    DOTFILES_SHELL="bash"
+else
+    DOTFILES_SHELL="sh"
+fi
+export DOTFILES_SHELL
+
 # ── Lazy-load helper ─────────────────────────────────────────────────────────
 bash_lazy_load() {
     local stub_name="$1"
@@ -88,6 +98,7 @@ bash_lazy_load() {
 
 # ── Tier 1: env/ — sourced in numeric order, no subprocesses ─────────────────
 for _env_file in "${SHELL_CONFIG_DIR}/env"/[0-9][0-9]-*.sh; do
+    # shellcheck disable=SC1090
     [[ -f "${_env_file}" ]] && source "${_env_file}"
 done
 unset _env_file
@@ -97,6 +108,7 @@ for _core_file in \
     "${SHELL_CONFIG_DIR}/core/aliases.sh" \
     "${SHELL_CONFIG_DIR}/core/functions.sh" \
     "${SHELL_CONFIG_DIR}/core/ssh.sh"; do
+    # shellcheck disable=SC1090
     [[ -f "${_core_file}" ]] && source "${_core_file}"
 done
 unset _core_file
@@ -105,6 +117,7 @@ unset _core_file
 _source_if_cmd() {
     local cmd="$1"
     local file="$2"
+    # shellcheck disable=SC1090
     command -v "${cmd}" &>/dev/null && [[ -f "${file}" ]] && source "${file}"
 }
 
@@ -113,6 +126,7 @@ _source_if_any_cmd() {
     shift
     for _cmd in "$@"; do
         if command -v "${_cmd}" &>/dev/null; then
+            # shellcheck disable=SC1090
             [[ -f "${file}" ]] && source "${file}"
             return
         fi
@@ -129,10 +143,23 @@ _source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
 _source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
 _source_if_any_cmd security.sh clamscan trivy
 
+# Prompt engine — mutually exclusive; omp wins if both are present.
+# OMZ guard also requires zsh since it only makes sense there.
+if command -v oh-my-posh &>/dev/null; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/omp.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omp.sh"
+elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
+else
+    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using default prompt."
+fi
+
 unset -f _source_if_cmd _source_if_any_cmd
 
 # ── Tier 2: platform/ ─────────────────────────────────────────────────────────
 _platform_file="${SHELL_CONFIG_DIR}/platform/${DOTFILES_OS,,}.sh"
+# shellcheck disable=SC1090
 [[ -f "${_platform_file}" ]] && source "${_platform_file}"
 unset _platform_file
 
@@ -182,3 +209,9 @@ unset _lazy_maintenance
 _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 [[ -f "${_local_env}" ]] && source "${_local_env}"
 unset _local_env
+
+# ── Interactive startup ───────────────────────────────────────────────────────
+# Only runs in interactive shells — skipped in scripts, cron, SSH non-interactive.
+if [[ $- == *i* ]] && command -v get-my-functions &>/dev/null; then
+    get-my-functions
+fi

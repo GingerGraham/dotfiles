@@ -16,12 +16,21 @@ if [[ -d "${HOME}/.pyenv" ]]; then
 fi
 
 # ── Node / nvm ────────────────────────────────────────────────────────────────
-export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+if [[ -d "${HOME}/.nvm" ]]; then
+    export NVM_DIR="${HOME}/.nvm"
+    # shellcheck disable=SC1091
+    [[ -s "${NVM_DIR}/nvm.sh" ]] && source "${NVM_DIR}/nvm.sh"
+fi
 
 # ── tfenv ─────────────────────────────────────────────────────────────────────
-[[ -d "${HOME}/.tfenv/bin" ]] && PATH="${HOME}/.tfenv/bin:${PATH}"
+if [[ -d "${HOME}/.tfenv" ]]; then
+    export TFENV_ROOT="${HOME}/.tfenv"
+    [[ -d "${TFENV_ROOT}/bin" ]] && PATH="${TFENV_ROOT}/bin:${PATH}"
+fi
 
 # ── Cargo (Rust) ──────────────────────────────────────────────────────────────
-[[ -d "${HOME}/.cargo/bin" ]] && PATH="${HOME}/.cargo/bin:${PATH}"
+if [[ -d "${HOME}/.cargo/bin" ]]; then
+    PATH="${HOME}/.cargo/bin:${PATH}"
+fi
 
 export PATH
