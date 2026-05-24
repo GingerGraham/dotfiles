@@ -20,3 +20,8 @@ export EDITOR="${EDITOR:-vim}"
 # Make less friendlier for non-text input files
 export LESS="-R"
 export PAGER="${PAGER:-less}"
+
+# ── bat theme ─────────────────────────────────────────────────────────────────
+if command -v bat &>/dev/null || command -v batcat &>/dev/null; then
+    export BAT_THEME="${BAT_THEME:-Visual Studio Dark+}"
+fi

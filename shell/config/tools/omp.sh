@@ -32,7 +32,7 @@ fi
 export DOTFILES_PROMPT_ENGINE="omp"
 
 # ── aliases ───────────────────────────────────────────────────────────────────
-alias omp-themes="ls '\${OMP_THEME_DIR}'"
+# alias omp-themes="ls '\${OMP_THEME_DIR}'"
 
 # ── functions ─────────────────────────────────────────────────────────────────
 

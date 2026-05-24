@@ -20,6 +20,8 @@ if [[ -d "${HOME}/.nvm" ]]; then
     export NVM_DIR="${HOME}/.nvm"
     # shellcheck disable=SC1091
     [[ -s "${NVM_DIR}/nvm.sh" ]] && source "${NVM_DIR}/nvm.sh"
+    # shellcheck disable=SC1091
+    [[ -s "${NVM_DIR}/bash_completion" ]] && source "${NVM_DIR}/bash_completion"
 fi
 
 # ── tfenv ─────────────────────────────────────────────────────────────────────
@@ -31,6 +33,12 @@ fi
 # ── Cargo (Rust) ──────────────────────────────────────────────────────────────
 if [[ -d "${HOME}/.cargo/bin" ]]; then
     PATH="${HOME}/.cargo/bin:${PATH}"
+fi
+
+# ── asdf (universal version manager) ─────────────────────────────────────────
+if [[ -f "${HOME}/.asdf/asdf.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.asdf/asdf.sh"
 fi
 
 export PATH
