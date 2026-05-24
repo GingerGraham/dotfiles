@@ -54,7 +54,7 @@
 # ansible.builtin.command is correct here — git remote get-url is a pure read
 # with no side effects. changed_when: false satisfies the idempotency linter.
 # ansible.builtin.git is a checkout module and does not inspect existing repos.
-- name: Detect dotfiles remote URL from git
+- name: Detect dotfiles remote URL from git # noqa: command-instead-of-module
   ansible.builtin.command:
     cmd: git remote get-url origin
     chdir: "{{ dotfiles_dir }}"
