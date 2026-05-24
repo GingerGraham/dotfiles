@@ -34,6 +34,83 @@ download_file_robust() {
     return 1
 }
 
+# ── Oh-My-Posh install ────────────────────────────────────────────────────────
+
+_omp-install-linux() {
+    if command -v oh-my-posh &>/dev/null; then
+        if oh-my-posh update; then
+            log_info "oh-my-posh updated successfully"
+            return 0
+        else
+            log_error "oh-my-posh update failed. Check your installation or try updating manually."
+            return 1
+        fi
+    fi
+
+    if command -v curl &>/dev/null; then
+        curl -s https://ohmyposh.dev/install.sh | bash
+    elif command -v wget &>/dev/null; then
+        wget -qO- https://ohmyposh.dev/install.sh | bash
+    else
+        log_error "curl or wget required to install oh-my-posh"
+        return 1
+    fi
+}
+
+_omp-install-macos() {
+    if command -v oh-my-posh &>/dev/null && command -v brew &>/dev/null; then
+        if brew update && brew upgrade oh-my-posh; then
+            log_info "oh-my-posh updated successfully via Homebrew"
+            return 0
+        elif oh-my-posh update; then
+            log_info "oh-my-posh updated successfully via built-in updater"
+            return 0
+        else
+            log_error "oh-my-posh update failed. Check your installation or try updating manually."
+            return 1
+        fi
+    fi
+
+    if command -v brew &>/dev/null; then
+        brew install jandedobbeleer/oh-my-posh/oh-my-posh
+    else
+        _omp-install-linux
+    fi
+}
+
+install-oh-my-posh() {
+    case "${DOTFILES_OS}" in
+        Linux) _omp-install-linux ;;
+        Mac)   _omp-install-macos ;;
+        *)     log_error "Unsupported OS for oh-my-posh install"; return 1 ;;
+    esac
+}
+
+# ── oh-my-zsh install ─────────────────────────────────────────────────────────
+
+install-oh-my-zsh() {
+    if command -v omz &>/dev/null; then
+        if omz update; then
+            log_info "oh-my-zsh updated successfully"
+            return 0
+        else
+            log_error "oh-my-zsh update failed. Check your installation or try updating manually."
+            return 1
+        fi
+    fi
+
+    if command -v curl &>/dev/null; then
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    elif command -v wget &>/dev/null; then
+        sh -c "$(wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)"
+    elif command -v fetch &>/dev/null; then
+        sh -c "$(fetch -o - https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    else
+        log_error "curl or wget required to install oh-my-zsh"
+        return 1
+    fi
+}
+
 # ── Ansible install ───────────────────────────────────────────────────────────
 _ansible-install-dnf() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
