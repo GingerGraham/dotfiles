@@ -54,6 +54,7 @@ export DOTFILES_WSL
 if [[ "${DOTFILES_OS}" == "Linux" && -f /etc/os-release ]]; then
     # shellcheck disable=SC1091
     _distro_id="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")"
+    # shellcheck disable=SC1091
     _distro_id_like="$(. /etc/os-release 2>/dev/null && echo "${ID_LIKE:-}")"
     case "${_distro_id}" in
         fedora|rhel|centos|rocky|almalinux) DOTFILES_DISTRO="rhel" ;;
@@ -113,6 +114,17 @@ for _core_file in \
 done
 unset _core_file
 
+# ── Tier 1: shell-specific core ───────────────────────────────────────────────
+# zsh.sh and bash.sh contain constructs that are illegal in the other shell,
+# so they are sourced conditionally here rather than in the core/ glob loop.
+if [[ "${DOTFILES_SHELL}" == "zsh" ]]; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/core/zsh.sh" ]] && source "${SHELL_CONFIG_DIR}/core/zsh.sh"
+elif [[ "${DOTFILES_SHELL}" == "bash" ]]; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/core/bash.sh" ]] && source "${SHELL_CONFIG_DIR}/core/bash.sh"
+fi
+
 # ── Tier 2: tools/ — guarded by command availability ─────────────────────────
 _source_if_cmd() {
     local cmd="$1"
@@ -141,7 +153,21 @@ _source_if_any_cmd containers.sh docker podman
 _source_if_cmd  aws        "${SHELL_CONFIG_DIR}/tools/aws.sh"
 _source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
 _source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
-_source_if_any_cmd security.sh clamscan trivy
+
+_source_if_cmd     fzf         "${SHELL_CONFIG_DIR}/tools/fzf.sh"
+
+# zsh plugins — sourced only in zsh; check for at least one plugin before loading
+if [[ "${DOTFILES_SHELL}" == "zsh" ]] && {
+    [[ -d "${HOME}/.zsh/zsh-autosuggestions" ]]              ||
+    [[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] ||
+    [[ -d "${HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions" ]] ||
+    [[ -d "${HOME}/.zsh/zsh-syntax-highlighting" ]]          ||
+    [[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] ||
+    [[ -d "${HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" ]]
+}; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/zsh-plugins.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/zsh-plugins.sh"
+fi
 
 # Prompt engine — mutually exclusive; omp wins if both are present.
 # OMZ guard also requires zsh since it only makes sense there.
@@ -165,18 +191,23 @@ unset _platform_file
 
 if [[ "${DOTFILES_WSL}" == "true" ]]; then
     _wsl_file="${SHELL_CONFIG_DIR}/platform/wsl.sh"
+    # shellcheck disable=SC1090
     [[ -f "${_wsl_file}" ]] && source "${_wsl_file}"
     unset _wsl_file
 fi
 
 # ── Tier 2: distro/ ───────────────────────────────────────────────────────────
 _distro_file="${SHELL_CONFIG_DIR}/distro/${DOTFILES_DISTRO}.sh"
+# shellcheck disable=SC1090
 [[ -f "${_distro_file}" ]] && source "${_distro_file}"
 unset _distro_file
 
 # ── Completions ───────────────────────────────────────────────────────────────
+# shellcheck disable=SC1091
 command -v gh      &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/gh.sh" ]]         && source "${SHELL_CONFIG_DIR}/completions/gh.sh"
+# shellcheck disable=SC1091
 command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kubernetes.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/kubernetes.sh"
+# shellcheck disable=SC1091
 { command -v terraform &>/dev/null || command -v tofu &>/dev/null; } && [[ -f "${SHELL_CONFIG_DIR}/completions/terraform.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/terraform.sh"
 
 # ── Tier 3: lazy stubs ────────────────────────────────────────────────────────
@@ -206,9 +237,16 @@ bash_lazy_load update-tools "${_lazy_maintenance}"
 unset _lazy_maintenance
 
 # ── Local overrides (always last) ─────────────────────────────────────────────
+# shellcheck disable=SC1090
 _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
+# shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
 unset _local_env
+
+# ── PATH deduplication ────────────────────────────────────────────────────────
+# Run after all tiers so every tool that extended PATH is already done.
+# dedupe-path is defined in core/functions.sh and is always available.
+dedupe-path 2>/dev/null || true
 
 # ── Interactive startup ───────────────────────────────────────────────────────
 # Only runs in interactive shells — skipped in scripts, cron, SSH non-interactive.

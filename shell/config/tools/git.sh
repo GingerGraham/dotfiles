@@ -127,3 +127,19 @@ gwt-cd() {
         echo "Worktree for '${branch}' not found"; return 1
     fi
 }
+
+# ── GitHub CLI token export ───────────────────────────────────────────────────
+# Sets GITHUB_PERSONAL_ACCESS_TOKEN from 'gh auth token' if gh is authenticated.
+# Required by tools (e.g. some Terraform providers, scripts) that read this env
+# var rather than using the gh credential helper.
+# The gh auth status check is fast (~50ms) and avoids a confusing empty export
+# when gh is present but not logged in.
+if command -v gh &>/dev/null; then
+    if gh auth status &>/dev/null 2>&1; then
+        GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
+        export GITHUB_PERSONAL_ACCESS_TOKEN
+        log_debug "git: GITHUB_PERSONAL_ACCESS_TOKEN set from gh auth token"
+    else
+        log_debug "git: gh present but not authenticated — skipping token export"
+    fi
+fi

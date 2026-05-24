@@ -14,6 +14,15 @@ if [[ -d "${HOME}/.pyenv" ]]; then
     export PYENV_ROOT="${HOME}/.pyenv"
     PATH="${PYENV_ROOT}/bin:${PATH}"
 fi
+# Activate shims and shell integration — must run after PYENV_ROOT is in PATH.
+# pyenv init adds shims to PATH and sets up the version-switching hooks.
+# virtualenv-init is only called if the plugin is actually installed.
+if [[ -d "${HOME}/.pyenv" ]] && command -v pyenv &>/dev/null; then
+    eval "$(pyenv init - "${DOTFILES_SHELL:-bash}")"
+    if pyenv commands 2>/dev/null | grep -q virtualenv-init; then
+        eval "$(pyenv virtualenv-init -)"
+    fi
+fi
 
 # ── Node / nvm ────────────────────────────────────────────────────────────────
 if [[ -d "${HOME}/.nvm" ]]; then
@@ -39,6 +48,13 @@ fi
 if [[ -f "${HOME}/.asdf/asdf.sh" ]]; then
     # shellcheck disable=SC1091
     source "${HOME}/.asdf/asdf.sh"
+fi
+
+# ── tenv (OpenTofu / Terraform version manager) ───────────────────────────────
+# tenv manages both terraform and tofu binaries via shims.
+# TENV_AUTO_INSTALL causes tenv to auto-install the required version on first use.
+if command -v tenv &>/dev/null; then
+    export TENV_AUTO_INSTALL=true
 fi
 
 export PATH
