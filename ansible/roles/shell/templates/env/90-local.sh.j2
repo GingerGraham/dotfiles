@@ -22,12 +22,18 @@
 #   overrides, and the loader.sh loading order.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Machine identity — set by Ansible, safe to change
-export DOTFILES_MACHINE="{{ dotfiles_machine_name | default(ansible_facts['hostname']) }}"
+# ── Identity ──────────────────────────────────────────────────────────────────
+# Machine identity — set by Ansible, safe to change here if needed. Used by prompts, scripts, etc.
+export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name | default(ansible_facts['hostname']) }}"
+export GIT_AUTHOR_EMAIL="{{ git_personal_email }}"
 
 # ── PATH extensions ───────────────────────────────────────────────────────────
 # Add machine-local tool directories that aren't in the shared env files.
 # export PATH="${HOME}/.local/bin/my-tool:${PATH}"
+
+# ── Behaviour Flag Overrides ───────────────────────────────────────────────────
+# Uncomment to print available shell functions at interactive shell startup.
+# DOTFILES_SHOW_FUNCTIONS=true
 
 # ── Editor / pager overrides ──────────────────────────────────────────────────
 # Override the shared EDITOR/VISUAL set in 10-editors.sh if needed.
@@ -52,3 +58,4 @@ export DOTFILES_MACHINE="{{ dotfiles_machine_name | default(ansible_facts['hostn
 # ── Work-specific config ──────────────────────────────────────────────────────
 # Employer-specific directories, aliases, or environment setup.
 # source "${HOME}/work/env.sh"
+·
