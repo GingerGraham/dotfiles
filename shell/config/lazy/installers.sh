@@ -35,7 +35,7 @@ download_file_robust() {
 }
 
 # ── Ansible install ───────────────────────────────────────────────────────────
-ansible-install-dnf() {
+_ansible-install-dnf() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     [[ "${elevation_cmd}" == "run0" ]] && log_warn "run0 detected — multiple prompts expected"
     command -v dnf &>/dev/null || { log_error "dnf not found"; return 1; }
@@ -43,25 +43,25 @@ ansible-install-dnf() {
     ${elevation_cmd} dnf install -y ansible
 }
 
-ansible-install-yum() {
+_ansible-install-yum() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     command -v yum &>/dev/null || { log_error "yum not found"; return 1; }
     ${elevation_cmd} yum install -y ansible
 }
 
-ansible-install-zypper() {
+_ansible-install-zypper() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     command -v zypper &>/dev/null || { log_error "zypper not found"; return 1; }
     ${elevation_cmd} zypper install -y ansible
 }
 
-ansible-install-pacman() {
+_ansible-install-pacman() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     command -v pacman &>/dev/null || { log_error "pacman not found"; return 1; }
     ${elevation_cmd} pacman -S --noconfirm ansible
 }
 
-ansible-add-ppa() {
+_ansible-add-ppa() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     command -v apt-add-repository &>/dev/null || { log_error "apt-add-repository not found"; return 1; }
     ${elevation_cmd} apt update
@@ -70,7 +70,7 @@ ansible-add-ppa() {
     ${elevation_cmd} apt-add-repository -y ppa:ansible/ansible
 }
 
-ansible-install-python() {
+_ansible-install-python() {
     command -v pip3 &>/dev/null || { log_error "pip3 is required"; return 1; }
     local latest
     latest="$(curl -s https://pypi.org/pypi/ansible/json | grep -Eo '"version":"[0-9]+\.[0-9]+\.[0-9]+",' | sed -E 's/.+"([0-9]+\.[0-9]+\.[0-9]+)",/\1/' | head -1)"
@@ -83,18 +83,18 @@ install-ansible() {
     log_info "Installing Ansible..."
     [[ -z "${PACKAGE_MANAGER}" ]] && detect-package-manager
     case "${PACKAGE_MANAGER:-}" in
-        dnf)    ansible-install-dnf ;;
-        yum)    ansible-install-yum ;;
-        zypper) ansible-install-zypper ;;
-        pacman) ansible-install-pacman ;;
-        apt)    ansible-add-ppa && { local ec; ec="$(get-elevation-command)"; ${ec} apt install -y ansible; } ;;
+        dnf)    _ansible-install-dnf ;;
+        yum)    _ansible-install-yum ;;
+        zypper) _ansible-install-zypper ;;
+        pacman) _ansible-install-pacman ;;
+        apt)    _ansible-add-ppa && { local ec; ec="$(get-elevation-command)"; ${ec} apt install -y ansible; } ;;
         brew)   brew install ansible ;;
-        *)      ansible-install-python ;;
+        *)      _ansible-install-python ;;
     esac
 }
 
 # ── Helm install ──────────────────────────────────────────────────────────────
-helm-install-linux() {
+_helm-install-linux() {
     local helm_version="$1"
     local helm_dir="${HOME}/.local/bin/k8s/helm-${helm_version}"
     mkdir -p "${helm_dir}"
@@ -111,7 +111,7 @@ helm-install-linux() {
     command -v helm &>/dev/null && log_info "Helm ${helm_version} installed"
 }
 
-helm-install-mac() {
+_helm-install-mac() {
     command -v brew &>/dev/null || { log_error "brew is required on macOS"; return 1; }
     if command -v helm &>/dev/null; then
         brew upgrade helm
@@ -133,14 +133,14 @@ install-helm() {
     fi
 
     case "${DOTFILES_OS}" in
-        Linux) helm-install-linux "${helm_version}" ;;
-        Mac)   helm-install-mac ;;
+        Linux) _helm-install-linux "${helm_version}" ;;
+        Mac)   _helm-install-mac ;;
         *)     log_error "Unsupported OS for helm install"; return 1 ;;
     esac
 }
 
 # ── Terraform install ─────────────────────────────────────────────────────────
-tf-install-linux() {
+_tf-install-linux() {
     local tf_version="${1:-$(get-latest-terraform-version)}"
     [[ -z "${tf_version}" ]] && { log_error "Could not determine Terraform version"; return 1; }
 
@@ -162,10 +162,14 @@ tf-install-linux() {
     tfenv install latest && tfenv use latest
 }
 
-tf-install-mac() {
+_tf-install-mac() {
     local tf_version="${1:-$(get-latest-terraform-version)}"
     if command -v brew &>/dev/null; then
-        command -v tfenv &>/dev/null && brew upgrade tfenv || brew install tfenv
+        if command -v tfenv &>/dev/null; then
+            brew upgrade tfenv
+        else
+            brew install tfenv
+        fi
     elif command -v git &>/dev/null; then
         git clone --depth=1 https://github.com/tfutils/tfenv.git "${HOME}/.tfenv"
         [[ ":${PATH}:" != *":${HOME}/.tfenv/bin:"* ]] && PATH="${HOME}/.tfenv/bin:${PATH}"
@@ -180,14 +184,14 @@ install-terraform() {
     tf_version="$(get-latest-terraform-version)"
     [[ -z "${tf_version}" ]] && { log_error "Could not determine Terraform version"; return 1; }
     case "${DOTFILES_OS}" in
-        Linux) tf-install-linux "${tf_version}" && tflint-install && trivy-install ;;
-        Mac)   tf-install-mac "${tf_version}"   && tflint-install && trivy-install ;;
+        Linux) _tf-install-linux "${tf_version}" && tflint-install && trivy-install ;;
+        Mac)   _tf-install-mac "${tf_version}"   && tflint-install && trivy-install ;;
         *)     log_error "Unsupported OS"; return 1 ;;
     esac
 }
 
 # ── TFLint install ────────────────────────────────────────────────────────────
-tflint-install-linux() {
+_tflint-install-linux() {
     local ver
     ver="$(curl -s https://api.github.com/repos/terraform-linters/tflint/releases/latest \
         | grep '"tag_name":' | sed -E 's/.+"v([^"]+)".+/\1/')"
@@ -210,26 +214,34 @@ tflint-install-linux() {
 
     local existing; existing="$(command -v tflint 2>/dev/null)"
     if [[ -n "${existing}" ]]; then
-        [[ -L "${existing}" ]] && rm "${existing}" || mv "${existing}" "${existing}.old"
+        if [[ -L "${existing}" ]]; then
+            rm "${existing}"
+        else
+            mv "${existing}" "${existing}.old"
+        fi
     fi
     ln -sf "${install_path}/tflint" "${HOME}/.local/bin/tflint"
     log_info "TFLint ${ver} installed"
 }
 
-tflint-install-mac() {
+_tflint-install-mac() {
     local ver
     ver="$(curl -s https://api.github.com/repos/terraform-linters/tflint/releases/latest \
         | grep '"tag_name":' | sed -E 's/.+"v([^"]+)".+/\1/')"
     [[ -z "${ver}" ]] && { log_error "Could not determine TFLint version"; return 1; }
 
     command -v brew &>/dev/null || { log_error "brew required on macOS"; return 1; }
-    command -v tflint &>/dev/null && brew upgrade tflint || brew install tflint
+    if command -v tflint &>/dev/null; then
+        brew upgrade tflint
+    else
+        brew install tflint
+    fi
 }
 
 install-tflint() {
     case "${DOTFILES_OS}" in
-        Linux) tflint-install-linux ;;
-        Mac)   tflint-install-mac ;;
+        Linux) _tflint-install-linux ;;
+        Mac)   _tflint-install-mac ;;
         *)     log_error "Unsupported OS for tflint"; return 1 ;;
     esac
 }
@@ -240,14 +252,17 @@ _trivy-repo-rpm() {
     [[ -f /etc/yum.repos.d/trivy.repo ]] && { log_info "Trivy repo already configured"; return 0; }
     cat <<'EOF' | ${elevation_cmd} tee /etc/yum.repos.d/trivy.repo
 [trivy]
-name=Trivy repository
+name=Trivy
 baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/$basearch/
 gpgcheck=1
 enabled=1
 gpgkey=https://aquasecurity.github.io/trivy-repo/rpm/public.key
 EOF
-    command -v dnf &>/dev/null && ${elevation_cmd} dnf check-update --refresh -y || \
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf check-update --refresh -y
+    else
         ${elevation_cmd} yum check-update -y
+    fi
 }
 
 _trivy-repo-deb() {
@@ -261,7 +276,7 @@ _trivy-repo-deb() {
     ${elevation_cmd} apt-get update
 }
 
-trivy-install-linux() {
+_trivy-install-linux() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
     local ver
     ver="$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest \
@@ -285,15 +300,19 @@ trivy-install-linux() {
     fi
 }
 
-trivy-install-mac() {
+_trivy-install-mac() {
     command -v brew &>/dev/null || { log_error "brew required on macOS"; return 1; }
-    command -v trivy &>/dev/null && brew upgrade trivy || brew install trivy
+    if command -v trivy &>/dev/null; then
+        brew upgrade trivy
+    else
+        brew install trivy
+    fi
 }
 
 install-trivy() {
     case "${DOTFILES_OS}" in
-        Linux) trivy-install-linux ;;
-        Mac)   trivy-install-mac ;;
+        Linux) _trivy-install-linux ;;
+        Mac)   _trivy-install-mac ;;
         *)     log_error "Unsupported OS for trivy"; return 1 ;;
     esac
 }
