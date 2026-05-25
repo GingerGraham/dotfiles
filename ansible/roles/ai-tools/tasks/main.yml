@@ -20,9 +20,14 @@
 # (git@github-dotfiles-ai:user/ai-config.git). This task normalises whatever
 # is in host_vars into the canonical variable used for all subsequent git ops.
 
-- name: Resolve effective ai_config_repo_url
+- name: Normalise ai_config_repo_url to SSH alias format
   ansible.builtin.set_fact:
-    _ai_effective_repo_url: "{{ ai_config_repo_url }}"
+    _ai_effective_repo_url: >-
+      {{
+        ai_config_repo_url
+        | regex_replace('^https://github\.com/(.+?)(?:\.git)?$', 'git@github.com:\1.git')
+        | regex_replace('git@github\.com:', 'git@github-dotfiles-ai:')
+      }}
 
 # ============================================================================
 # Section 2 — Clone or update ai-config repository

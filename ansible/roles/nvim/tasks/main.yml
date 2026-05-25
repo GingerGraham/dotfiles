@@ -240,12 +240,13 @@
 # converted to SSH so that the headless Ansible context never tries to prompt
 # for credentials. SSH alias URLs (git@github-dotfiles-nvim:...) and plain
 # SSH URLs pass through unchanged.
-- name: Normalise nvim_config_repo_url to SSH format
+- name: Normalise nvim_config_repo_url to SSH alias format
   ansible.builtin.set_fact:
     _nvim_effective_repo_url: >-
       {{
         nvim_config_repo_url
         | regex_replace('^https://github\.com/(.+?)(?:\.git)?$', 'git@github.com:\1.git')
+        | regex_replace('git@github\.com:', 'git@github-dotfiles-nvim:')
       }}
 
 - name: Report effective repo URL
