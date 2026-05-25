@@ -83,41 +83,40 @@
     - ansible_facts['os_family'] == 'RedHat'
     - ansible_facts['distribution'] != 'Fedora'
 
-- name: Install neovim via dnf (Fedora / RHEL family)
-  ansible.builtin.dnf:
-    name: neovim
-    state: present
-  become: true
-  when:
-    - _nvim_needs_install | bool
-    - nvim_install_method == 'package'
-    - ansible_facts['os_family'] == 'RedHat'
-
-- name: Install neovim via apt (Debian / Ubuntu family)
+# Update apt cache before installing on Debian/Ubuntu. The generic
+# ansible.builtin.package module does not accept update_cache, so this
+# is a separate distro-specific step.
+- name: Update apt package cache (Debian / Ubuntu)
   ansible.builtin.apt:
-    name: neovim
-    state: present
     update_cache: true
+    cache_valid_time: 3600
   become: true
   when:
     - _nvim_needs_install | bool
     - nvim_install_method == 'package'
     - ansible_facts['os_family'] == 'Debian'
 
-- name: Install neovim via zypper (openSUSE / SLES)
-  community.general.zypper:
+# Single generic install task for all Linux package managers.
+# ansible.builtin.package auto-detects dnf / apt / zypper from the OS family.
+- name: Install neovim via system package manager (Linux)
+  ansible.builtin.package:
     name: neovim
     state: present
   become: true
   when:
     - _nvim_needs_install | bool
     - nvim_install_method == 'package'
-    - ansible_facts['os_family'] == 'Suse'
+    - ansible_facts['system'] == 'Linux'
 
+# Homebrew has no ansible.builtin backend; ansible.builtin.command is used
+# instead of community.general.homebrew to avoid the collection dependency.
+# _nvim_needs_install guards against redundant re-runs.
 - name: Install neovim via Homebrew (macOS)
-  community.general.homebrew:
-    name: neovim
-    state: present
+  ansible.builtin.command:
+    cmd: brew install neovim
+  become: false
+  register: _nvim_brew_result
+  changed_when: "'already installed' not in _nvim_brew_result.stdout"
   when:
     - _nvim_needs_install | bool
     - nvim_install_method == 'package'
