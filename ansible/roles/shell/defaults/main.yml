@@ -1,14 +1,3 @@
-# ── Migration targets ────────────────────────────────────────────────────────
-# Home-directory paths that may be symlinks left by the linuxDotFiles repo.
-# The shell role stats each one; if it is a symlink whose resolved target
-# path contains "linuxDotFiles", it is removed before the new structure
-# is deployed. Real files (non-symlinks) are never touched here.
-shell_migration_targets:
-  - "{{ ansible_facts['env']['HOME'] }}/.bashrc"
-  - "{{ ansible_facts['env']['HOME'] }}/.zshrc"
-  - "{{ ansible_facts['env']['HOME'] }}/.zshenv"
-  - "{{ ansible_facts['env']['HOME'] }}/.applets"
-
 # ── Shell stub files ──────────────────────────────────────────────────────────
 # Thin stubs in the repo root that are symlinked into HOME.
 # src is relative to the repo root (resolved at role runtime via playbook_dir).

@@ -25,25 +25,44 @@
 # ============================================================================
 # Section 3 — Migrate linuxDotFiles symlinks
 # ============================================================================
-- name: Stat potential linuxDotFiles migration targets
-  ansible.builtin.stat:
+
+- name: Find all symlinks in HOME pointing into linuxDotFiles
+  ansible.builtin.find:
+    paths: "{{ ansible_env.HOME }}"
+    file_type: link
+    recurse: true
+  register: _home_symlinks
+
+- name: Filter to symlinks whose target contains linuxDotFiles
+  ansible.builtin.set_fact:
+    _legacy_symlinks: >-
+      {{
+        _home_symlinks.files
+        | selectattr('lnk_target', 'search', 'linuxDotFiles')
+        | map(attribute='path')
+        | list
+      }}
+
+- name: Remove stale linuxDotFiles symlinks
+  ansible.builtin.file:
     path: "{{ item }}"
-  register: _migration_stats
-  loop: "{{ shell_migration_targets }}"
+    state: absent
+  loop: "{{ _legacy_symlinks }}"
   loop_control:
     label: "{{ item }}"
 
-- name: Remove symlinks pointing into linuxDotFiles
-  ansible.builtin.file:
-    path: "{{ item.item }}"
-    state: absent
-  when:
-    - item.stat.exists
-    - item.stat.islnk
-    - "'linuxDotFiles' in item.stat.lnk_target"
-  loop: "{{ _migration_stats.results }}"
+- name: Report removed symlinks
+  ansible.builtin.debug:
+    msg: "Removed stale linuxDotFiles symlink: {{ item }}"
+  loop: "{{ _legacy_symlinks }}"
   loop_control:
-    label: "{{ item.item }}"
+    label: "{{ item }}"
+  when: _legacy_symlinks | length > 0
+
+- name: Report clean state
+  ansible.builtin.debug:
+    msg: "No linuxDotFiles symlinks found — nothing to clean up."
+  when: _legacy_symlinks | length == 0
 
 # ============================================================================
 # Section 4 — Deploy shell config directory symlink
