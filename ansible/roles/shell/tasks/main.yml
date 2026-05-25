@@ -27,42 +27,38 @@
 # ============================================================================
 
 - name: Find all symlinks in HOME pointing into linuxDotFiles
-  ansible.builtin.find:
-    paths: "{{ ansible_env.HOME }}"
-    file_type: link
-    recurse: true
-  register: _home_symlinks
-
-- name: Filter to symlinks whose target contains linuxDotFiles
-  ansible.builtin.set_fact:
-    _legacy_symlinks: >-
-      {{
-        _home_symlinks.files
-        | selectattr('lnk_target', 'search', 'linuxDotFiles')
-        | map(attribute='path')
-        | list
-      }}
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      find "$HOME" -type l | while read -r link; do
+        target=$(readlink "$link")
+        if echo "$target" | grep -q "linuxDotFiles"; then
+          echo "$link"
+        fi
+      done
+  register: _legacy_symlink_find
+  changed_when: false
 
 - name: Remove stale linuxDotFiles symlinks
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-  loop: "{{ _legacy_symlinks }}"
+  loop: "{{ _legacy_symlink_find.stdout_lines }}"
   loop_control:
     label: "{{ item }}"
 
 - name: Report removed symlinks
   ansible.builtin.debug:
     msg: "Removed stale linuxDotFiles symlink: {{ item }}"
-  loop: "{{ _legacy_symlinks }}"
+  loop: "{{ _legacy_symlink_find.stdout_lines }}"
   loop_control:
     label: "{{ item }}"
-  when: _legacy_symlinks | length > 0
+  when: _legacy_symlink_find.stdout_lines | length > 0
 
 - name: Report clean state
   ansible.builtin.debug:
     msg: "No linuxDotFiles symlinks found — nothing to clean up."
-  when: _legacy_symlinks | length == 0
+  when: _legacy_symlink_find.stdout_lines | length == 0
 
 # ============================================================================
 # Section 4 — Deploy shell config directory symlink
