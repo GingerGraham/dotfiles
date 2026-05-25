@@ -320,6 +320,12 @@
     - "{{ nvim_state_dir }}/logs"
     - "{{ nvim_sync_conf_dir }}"
 
+- name: Ensure ~/.local/bin exists
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+    state: directory
+    mode: "0755"
+
 - name: Deploy nvim-config-sync script to ~/.local/bin
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../scripts/nvim-sync.sh"
