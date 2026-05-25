@@ -98,6 +98,7 @@ get-my-functions() {
         # shellcheck disable=SC2016
         declare -F \
             | awk '{print $3}' \
+            | grep -v '^_' \
             | while read -r fn; do
                 grep -rlq "^${fn}[[:space:]]*()" "${SHELL_CONFIG_DIR:-${HOME}/.config/shell}" 2>/dev/null \
                     && echo "${fn}"
@@ -106,7 +107,7 @@ get-my-functions() {
     elif [[ -n "${ZSH_VERSION}" ]]; then
         grep -Eho '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' \
             "${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"/**/*.sh 2>/dev/null \
-            | sed 's/()//' | awk -F: '{print $NF}' | sort | column
+            | sed 's/()//' | awk -F: '{print $NF}' | grep -v '^_' | sort | column
     fi
 
     echo
