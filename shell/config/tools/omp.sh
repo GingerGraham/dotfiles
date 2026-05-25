@@ -42,14 +42,14 @@ omp-themes() {
         log_error "omp-themes: OMP_THEME_DIR is not set"
         return 1
     fi
-    find "${OMP_THEME_DIR}" -maxdepth 1 -type f -name "*.omp.json" | while read -r theme_file; do
+    find "${OMP_THEME_DIR}" -maxdepth 1 -type f -name "*.omp.json" | sort | while read -r theme_file; do
         local theme_name
         theme_name="$(basename "${theme_file}" .omp.json)"
+        echo ""
         echo "Theme: ${theme_name}"
-        oh-my-posh --config "${theme_file}" --print-config
-        echo
+        oh-my-posh print primary --config "${theme_file}"
+        echo ""
     done
-
 }
 
 # Temporarily switch to a different theme in the current session.
