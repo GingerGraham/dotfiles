@@ -239,6 +239,23 @@
     state: directory
     mode: "0755"
 
+# Normalise the repo URL before any git operation. HTTPS GitHub URLs are
+# converted to SSH so that the headless Ansible context never tries to prompt
+# for credentials. SSH alias URLs (git@github-dotfiles-nvim:...) and plain
+# SSH URLs pass through unchanged.
+- name: Normalise nvim_config_repo_url to SSH format
+  ansible.builtin.set_fact:
+    _nvim_effective_repo_url: >-
+      {{
+        nvim_config_repo_url
+        | regex_replace('^https://github\.com/(.+?)(?:\.git)?$', 'git@github.com:\1.git')
+      }}
+
+- name: Report effective repo URL
+  ansible.builtin.debug:
+    msg: "nvim-config repo: {{ _nvim_effective_repo_url }}
+          (original: {{ nvim_config_repo_url }})"
+
 # If ~/.config/nvim exists but is not a git repo it may be a pre-existing
 # manual config. Back it up before cloning to avoid data loss.
 - name: Stat existing nvim config directory
@@ -267,7 +284,7 @@
 # the working tree is dirty the task will fail with a clear message.
 - name: Clone or update nvim-config repository
   ansible.builtin.git:
-    repo: "{{ nvim_config_repo_url }}"
+    repo: "{{ _nvim_effective_repo_url }}"
     dest: "{{ nvim_config_dir }}"
     version: "{{ nvim_config_branch }}"
     update: "{{ nvim_config_update | bool }}"
@@ -321,7 +338,7 @@
   ansible.builtin.lineinfile:
     path: "{{ nvim_sync_conf_path }}"
     regexp: '^REPO_URL='
-    line: 'REPO_URL="{{ nvim_config_repo_url }}"'
+    line: 'REPO_URL="{{ _nvim_effective_repo_url }}"'
 
 # ── Linux: systemd user timer ─────────────────────────────────────────────────
 
