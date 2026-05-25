@@ -1,6 +1,3 @@
-# ansible/roles/nvim/handlers/main.yml
----
-
 - name: Reload and enable nvim-config timer
   ansible.builtin.systemd:
     name: nvim-config-sync.timer

@@ -1,0 +1,21 @@
+# ── Linux handlers ─────────────────────────────────────────────────────────────
+
+- name: Reload and enable ai-config timer
+  listen: Reload and enable ai-config timer
+  ansible.builtin.systemd:
+    name: ai-config-sync.timer
+    enabled: true
+    state: started
+    scope: user
+    daemon_reload: true
+  when: ansible_facts['system'] == 'Linux'
+
+# ── macOS handlers ────────────────────────────────────────────────────────────
+
+- name: Load ai-config launchd agent
+  listen: Load ai-config launchd agent
+  ansible.builtin.command: >-
+    launchctl load -w
+    {{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.ai-config.sync.plist
+  changed_when: true
+  when: ansible_facts['system'] == 'Darwin'

@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Config GitOps Sync Timer
+Requires=ai-config-sync.service
+
+[Timer]
+# Fire shortly after login so any upstream changes are available immediately
+OnBootSec=2min
+# 30-minute cadence: AI config (prompts, CLAUDE.md, settings) changes more
+# frequently than nvim config, so a shorter interval is warranted.
+OnUnitActiveSec=30min
+# Catch up if the machine was off during a scheduled window
+Persistent=true
+# Spread starts within a 60-second window to avoid bursts after wake
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

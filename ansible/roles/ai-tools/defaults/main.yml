@@ -1,0 +1,35 @@
+# ansible/roles/ai-tools/defaults/main.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Lowest-priority defaults. Override in group_vars/all.yml or
+# host_vars/localhost.yml.
+
+# ── Config repo behaviour ─────────────────────────────────────────────────────
+# Branch to track in the ai-config repo.
+ai_config_branch: "main"
+
+# When true, 'git pull --ff-only' runs on each Ansible pass. Set false to
+# pin the working copy at whatever commit it's on; the sync timer is unaffected.
+ai_config_update: true
+
+# ── Clone location ────────────────────────────────────────────────────────────
+# The ai-config repo is cloned here. Ansible reads source files from this path
+# and deploys them to their per-tool destinations. Not a user-facing directory.
+ai_config_clone_dir: "{{ xdg_data_home }}/ai-config"
+
+# ── Sync infrastructure ───────────────────────────────────────────────────────
+ai_state_dir: "{{ xdg_data_home }}/ai-config-sync"
+ai_sync_conf_dir: "{{ xdg_config_home }}/ai-config"
+ai_sync_conf_path: "{{ xdg_config_home }}/ai-config/sync.conf"
+ai_sync_script_dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/ai-config-sync"
+
+# ── Per-tool destination paths ────────────────────────────────────────────────
+# These mirror the entries in group_vars/all.yml. Defined here as defaults
+# so the role is self-contained; group_vars values take precedence.
+#
+# Override in group_vars/all.yml to adjust for OS differences (macOS paths
+# are set via the copilot_config_dest expression there).
+ai_tool_destinations:
+  claude: "{{ ansible_facts['env']['HOME'] }}/.claude"
+  copilot: "{{ xdg_config_home }}/github-copilot"
+  cursor: "{{ ansible_facts['env']['HOME'] }}/.cursor"
+  kiro: "{{ ansible_facts['env']['HOME'] }}/.kiro"
