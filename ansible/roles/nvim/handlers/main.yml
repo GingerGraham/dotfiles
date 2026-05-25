@@ -1,13 +1,15 @@
 - name: Reload and enable nvim-config timer
+  listen: Reload and enable nvim-config timer
   ansible.builtin.systemd:
     name: nvim-config-sync.timer
-    state: started
     enabled: true
+    state: started
     scope: user
     daemon_reload: true
   when: ansible_facts['system'] == 'Linux'
 
 - name: Load nvim-config launchd agent
+  listen: Load nvim-config launchd agent
   ansible.builtin.command: >-
     launchctl load -w
     {{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.nvim-config.sync.plist

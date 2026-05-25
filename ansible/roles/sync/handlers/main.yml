@@ -1,4 +1,5 @@
 - name: Reload and enable dotfiles timer
+  listen: Reload and enable dotfiles timer
   ansible.builtin.systemd:
     name: dotfiles-sync.timer
     state: started
@@ -8,6 +9,7 @@
   when: ansible_facts['system'] == "Linux"
 
 - name: Load launchd agent
+  listen: Load launchd agent
   ansible.builtin.command: >
     launchctl load -w
     {{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.dotfiles.sync.plist
