@@ -5,6 +5,11 @@
 # overridden by a more-specific Host block in a later config.d file.
 # Per-host blocks always win over Host *.
 
+Host github-dotfiles-*
+    ControlMaster no
+    ControlPersist no
+    ControlPath none
+
 Host *
     # ── Connection keepalive ──────────────────────────────────────────────────
     # Send a keepalive every 60s; disconnect after 3 missed responses (3min).
@@ -21,9 +26,9 @@ Host *
     # last session exits, so rapid repeated connections stay fast.
     #
     # %C expands to a SHA1 hash of %l%h%p%r — avoids long socket path issues.
-    ControlMaster auto
-    ControlPath {{ ssh_cm_sockets_dir }}/%C
-    ControlPersist 10m
+    # ControlMaster auto
+    # ControlPath {{ ssh_cm_sockets_dir }}/%C
+    # ControlPersist 10m
 
     # ── Key negotiation preferences ───────────────────────────────────────────
     # Prefer modern key types. Most servers support these; older ones fall back
