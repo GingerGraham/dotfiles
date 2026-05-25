@@ -4,11 +4,11 @@
 # after the first call to any function defined here.
 
 # ── Shared download helper ────────────────────────────────────────────────────
-download_file_robust() {
+_download_file_robust() {
     local url="$1" output_file="$2"
     local max_retries=3 retry_count=0
 
-    [[ -z "${url}" || -z "${output_file}" ]] && { log_error "download_file_robust: URL and output required"; return 1; }
+    [[ -z "${url}" || -z "${output_file}" ]] && { log_error "_download_file_robust: URL and output required"; return 1; }
 
     while [[ ${retry_count} -lt ${max_retries} ]]; do
         retry_count=$((retry_count + 1))
@@ -409,18 +409,18 @@ install-bitwarden() {
     case "${PACKAGE_MANAGER}" in
         apt)
             local deb_url="https://bitwarden.com/download/?app=desktop&platform=linux&variant=deb"
-            download_file_robust "${deb_url}" "${temp_dir}/bitwarden.deb" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${deb_url}" "${temp_dir}/bitwarden.deb" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} dpkg -i "${temp_dir}/bitwarden.deb" || true
             ${elevation_cmd} apt-get install -f -y
             ;;
         dnf|yum)
             local rpm_url="https://bitwarden.com/download/?app=desktop&platform=linux&variant=rpm"
-            download_file_robust "${rpm_url}" "${temp_dir}/bitwarden.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${rpm_url}" "${temp_dir}/bitwarden.rpm" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} "${PACKAGE_MANAGER}" install -y "${temp_dir}/bitwarden.rpm"
             ;;
         zypper)
             local rpm_url="https://bitwarden.com/download/?app=desktop&platform=linux&variant=rpm"
-            download_file_robust "${rpm_url}" "${temp_dir}/bitwarden.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${rpm_url}" "${temp_dir}/bitwarden.rpm" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} zypper install -y "${temp_dir}/bitwarden.rpm"
             ;;
         pacman)
@@ -429,7 +429,7 @@ install-bitwarden() {
             else
                 mkdir -p "${HOME}/Applications"
                 local ai_url="https://bitwarden.com/download/?app=desktop&platform=linux&variant=appimage"
-                download_file_robust "${ai_url}" "${HOME}/Applications/Bitwarden.AppImage" || { rm -rf "${temp_dir}"; return 1; }
+                _download_file_robust "${ai_url}" "${HOME}/Applications/Bitwarden.AppImage" || { rm -rf "${temp_dir}"; return 1; }
                 chmod +x "${HOME}/Applications/Bitwarden.AppImage"
             fi
             ;;
@@ -535,7 +535,7 @@ _edit_install_from_api_response() {
     local tmp_dir;    tmp_dir="$(mktemp -d)"
 
     log_info "Downloading ${asset_name}..."
-    if ! download_file_robust "${download_url}" "${tmp_dir}/${asset_name}"; then
+    if ! _download_file_robust "${download_url}" "${tmp_dir}/${asset_name}"; then
         rm -rf "${tmp_dir}"; return 1
     fi
 
@@ -615,14 +615,14 @@ install-opendeck() {
             local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.deb"' \
                 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
             [[ -z "${url}" ]] && { log_error "No DEB asset found"; rm -rf "${temp_dir}"; return 1; }
-            download_file_robust "${url}" "${temp_dir}/opendeck.deb" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/opendeck.deb" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} dpkg -i "${temp_dir}/opendeck.deb" || ${elevation_cmd} apt-get install -f -y
             ;;
         dnf|yum|zypper)
             local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.rpm"' \
                 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
             [[ -z "${url}" ]] && { log_error "No RPM asset found"; rm -rf "${temp_dir}"; return 1; }
-            download_file_robust "${url}" "${temp_dir}/opendeck.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/opendeck.rpm" || { rm -rf "${temp_dir}"; return 1; }
             if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
                 ${elevation_cmd} zypper install -y "${temp_dir}/opendeck.rpm"
             else
@@ -674,7 +674,7 @@ install-noteshub() {
             local url; url="$(echo "${api_response}" | grep "\"browser_download_url\":.*noteshub_.*_${arch_suffix}\.deb\"" \
                 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
             [[ -z "${url}" ]] && { log_error "No DEB asset"; rm -rf "${temp_dir}"; return 1; }
-            download_file_robust "${url}" "${temp_dir}/noteshub.deb" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/noteshub.deb" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} dpkg -i "${temp_dir}/noteshub.deb" || ${elevation_cmd} apt-get install -f -y
             ;;
         dnf|yum|zypper)
@@ -682,7 +682,7 @@ install-noteshub() {
             local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*NotesHub-.*\.x86_64\.rpm"' \
                 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
             [[ -z "${url}" ]] && { log_error "No RPM asset"; rm -rf "${temp_dir}"; return 1; }
-            download_file_robust "${url}" "${temp_dir}/noteshub.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/noteshub.rpm" || { rm -rf "${temp_dir}"; return 1; }
             if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
                 ${elevation_cmd} zypper install -y "${temp_dir}/noteshub.rpm"
             else

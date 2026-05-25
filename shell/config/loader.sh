@@ -214,31 +214,24 @@ command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kuberne
 # shellcheck disable=SC1091
 { command -v terraform &>/dev/null || command -v tofu &>/dev/null; } && [[ -f "${SHELL_CONFIG_DIR}/completions/terraform.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/terraform.sh"
 
-# ── Tier 3: lazy stubs ────────────────────────────────────────────────────────
-_lazy_installers="${SHELL_CONFIG_DIR}/lazy/installers.sh"
-for _stub in \
-    install-bitwarden \
-    install-opendeck \
-    install-opendeck-version \
-    list-opendeck-releases \
-    install-edit \
-    install-edit-version \
-    list-edit-releases \
-    install-noteshub \
-    install-noteshub-version \
-    list-noteshub-releases \
-    helm-install \
-    terraform-install \
-    ansible-install \
-    tflint-install \
-    trivy-install; do
-    bash_lazy_load "${_stub}" "${_lazy_installers}"
-done
-unset _stub _lazy_installers
+# ── Tier 3: lazy stubs — auto-discovered from lazy/*.sh ──────────────────────
+# Any public function (no leading _) defined in a lazy/ file gets a stub
+# automatically. To add a new lazy-loaded function: add it to the relevant
+# lazy/ file and prefix private helpers with _. No changes needed here.
+_register_lazy_stubs() {
+    local source_file="$1"
+    local fn
+    while IFS= read -r fn; do
+        [[ -n "${fn}" ]] && bash_lazy_load "${fn}" "${source_file}"
+    done < <(grep -E '^[a-zA-Z][a-zA-Z0-9_-]+\s*\(\)' "${source_file}" 2>/dev/null \
+             | sed 's/[[:space:]]*().*//')
+}
 
-_lazy_maintenance="${SHELL_CONFIG_DIR}/lazy/maintenance.sh"
-bash_lazy_load update-tools "${_lazy_maintenance}"
-unset _lazy_maintenance
+for _lazy_file in "${SHELL_CONFIG_DIR}/lazy"/*.sh; do
+    [[ -f "${_lazy_file}" ]] && _register_lazy_stubs "${_lazy_file}"
+done
+unset _lazy_file
+unset -f _register_lazy_stubs
 
 # ── Local overrides (always last) ─────────────────────────────────────────────
 # shellcheck disable=SC1090
