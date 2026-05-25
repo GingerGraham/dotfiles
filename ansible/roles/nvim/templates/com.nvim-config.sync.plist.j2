@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nvim-config.sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ nvim_sync_script_dest }}</string>
+    </array>
+
+    <!-- Daily sync at a randomised minute past midnight; mirrors the
+         systemd timer cadence. RunAtLoad fires once on agent load so
+         a fresh install picks up any upstream commits immediately. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{ nvim_state_dir }}/logs/sync.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{ nvim_state_dir }}/logs/sync-error.log</string>
+
+    <!-- Throttle restarts on repeated failure (SSH broken, no network, etc.) -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

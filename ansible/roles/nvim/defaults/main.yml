@@ -1,0 +1,45 @@
+# ansible/roles/nvim/defaults/main.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# These are the lowest-priority defaults. Override in group_vars/all.yml or
+# host_vars/localhost.yml.
+
+# ── Version requirements ──────────────────────────────────────────────────────
+# Minimum version needed to run a modern plugin stack (lazy.nvim, Mason,
+# nvim-treesitter, etc.). Roles that ship Lua configs should bump this as
+# required rather than adding version guards inside init.lua.
+nvim_min_version: "0.12.0"
+
+# ── Installation method ───────────────────────────────────────────────────────
+# package   — use the distro package manager (default)
+# appimage  — download the upstream AppImage; useful on distros with stale
+#             packages (Ubuntu LTS, RHEL without a recent EPEL snapshot)
+# none      — assume neovim is already installed; role will verify and warn
+#             but will not attempt installation
+nvim_install_method: "package"
+
+# AppImage-specific options (only used when nvim_install_method == 'appimage')
+# 'stable' resolves to the latest stable GitHub release tag at download time.
+# Pin to a specific tag (e.g. 'v0.10.4') for reproducible installs.
+nvim_appimage_version: "stable"
+
+# Where the AppImage binary lands. The role creates this directory and writes
+# a wrapper at {{ nvim_bin_wrapper_path }} that exec's into it.
+nvim_appimage_dir: "{{ xdg_data_home }}/nvim"
+nvim_bin_wrapper_path: "{{ ansible_facts['env']['HOME'] }}/.local/bin/nvim"
+
+# ── Config repo behaviour ─────────────────────────────────────────────────────
+# Branch to track in the nvim-config repo.
+nvim_config_branch: "main"
+
+# When true, 'git pull --ff-only' runs on each Ansible pass. Set false to
+# pin the working copy at whatever commit it's currently on; the sync timer
+# is unaffected by this variable.
+nvim_config_update: true
+
+# ── Sync infrastructure ───────────────────────────────────────────────────────
+# State and log storage for the nvim-config sync daemon (mirrors dotfiles
+# sync layout under a sibling directory).
+nvim_state_dir: "{{ xdg_data_home }}/nvim-config"
+nvim_sync_conf_dir: "{{ xdg_config_home }}/nvim-config"
+nvim_sync_conf_path: "{{ xdg_config_home }}/nvim-config/sync.conf"
+nvim_sync_script_dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/nvim-config-sync"

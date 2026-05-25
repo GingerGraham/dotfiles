@@ -1,0 +1,20 @@
+[Unit]
+Description=Neovim Config GitOps Sync
+Documentation=https://github.com/{{ ansible_facts['env']['USER'] }}/dotfiles
+# Must not start until the network is available — we need to reach the remote
+After=network-online.target
+Wants=network-online.target
+# Prevent concurrent runs if a previous instance is still running
+ConditionPathExists={{ nvim_sync_conf_path }}
+
+[Service]
+Type=oneshot
+ExecStart={{ nvim_sync_script_dest }}
+
+# Keep the last 50 log lines in the journal for quick inspection via
+# 'journalctl --user -u nvim-config-sync.service'
+StandardOutput=journal
+StandardError=journal
+
+# Restart behaviour: don't hammer the remote if git or SSH is broken
+Restart=no
