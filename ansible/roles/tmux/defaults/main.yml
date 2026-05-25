@@ -1,0 +1,7 @@
+# Lowest-priority defaults. Override in group_vars/all.yml or host_vars/localhost.yml.
+
+# XDG config directory for tmux — supported natively since tmux 3.1.
+tmux_config_dir: "{{ xdg_config_home }}/tmux"
+
+# Destination path for the symlinked tmux.conf.
+tmux_config_dest: "{{ xdg_config_home }}/tmux/tmux.conf"

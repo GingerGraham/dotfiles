@@ -1,0 +1,70 @@
+# ============================================================================
+# Section 1 — Derive repo root
+# ============================================================================
+- name: Set dotfiles repo root fact
+  ansible.builtin.set_fact:
+    dotfiles_repo_root: "{{ playbook_dir | dirname }}"
+
+# ============================================================================
+# Section 2 — Verify source exists in repo
+# ============================================================================
+- name: Stat vimrc source in repo
+  ansible.builtin.stat:
+    path: "{{ dotfiles_repo_root }}/files/vim/vimrc"
+  register: _vimrc_source
+
+- name: Fail if vimrc source is absent from repo
+  ansible.builtin.fail:
+    msg: >-
+      vimrc source not found at {{ dotfiles_repo_root }}/files/vim/vimrc.
+      Ensure the files/vim/ directory is present and committed in the dotfiles repo.
+  when: not _vimrc_source.stat.exists
+
+# ============================================================================
+# Section 3 — Migrate legacy ~/.vimrc
+# ============================================================================
+# Two cases handled:
+#   a) A linuxDotFiles symlink — remove it; the new symlink replaces it.
+#   b) A real file — back it up then remove it so the symlink can be created.
+
+- name: Stat existing ~/.vimrc
+  ansible.builtin.stat:
+    path: "{{ vim_config_dest }}"
+  register: _existing_vimrc
+
+- name: Remove ~/.vimrc if it is a linuxDotFiles symlink
+  ansible.builtin.file:
+    path: "{{ vim_config_dest }}"
+    state: absent
+  when:
+    - _existing_vimrc.stat.exists
+    - _existing_vimrc.stat.islnk
+    - "'linuxDotFiles' in (_existing_vimrc.stat.lnk_target | default(''))"
+
+- name: Back up ~/.vimrc if it is a real file
+  ansible.builtin.copy:
+    src: "{{ vim_config_dest }}"
+    dest: "{{ vim_config_dest }}.pre-dotfiles.bak"
+    remote_src: true
+    force: false
+    mode: "0644"
+  when:
+    - _existing_vimrc.stat.exists
+    - not _existing_vimrc.stat.islnk
+
+- name: Remove ~/.vimrc after backup
+  ansible.builtin.file:
+    path: "{{ vim_config_dest }}"
+    state: absent
+  when:
+    - _existing_vimrc.stat.exists
+    - not _existing_vimrc.stat.islnk
+
+# ============================================================================
+# Section 4 — Deploy vimrc symlink
+# ============================================================================
+- name: Symlink vimrc from repo to ~/.vimrc
+  ansible.builtin.file:
+    src: "{{ dotfiles_repo_root }}/files/vim/vimrc"
+    dest: "{{ vim_config_dest }}"
+    state: link

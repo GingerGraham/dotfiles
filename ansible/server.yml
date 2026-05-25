@@ -1,3 +1,4 @@
+---
 - name: Apply dotfiles server profile
   hosts: localhost
   gather_facts: false
@@ -25,6 +26,18 @@
         name: ssh
       tags:
         - ssh
+
+    - name: Import tmux role
+      ansible.builtin.import_role:
+        name: tmux
+      tags:
+        - tmux
+
+    - name: Import vim role
+      ansible.builtin.import_role:
+        name: vim
+      tags:
+        - vim
 
     - name: Import sync role
       ansible.builtin.import_role:

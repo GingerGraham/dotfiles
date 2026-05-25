@@ -1,0 +1,70 @@
+" vimrc
+" Managed via dotfiles repo — symlinked to ~/.vimrc
+" Intentionally minimal: works on any server with a standard vim install.
+" For the full editor experience, use neovim (nvim-config repo).
+
+" ── Compatibility ─────────────────────────────────────────────────────────────
+set nocompatible
+
+" ── Filetype and syntax ───────────────────────────────────────────────────────
+filetype on
+filetype plugin indent on
+syntax on
+
+" ── Encoding ──────────────────────────────────────────────────────────────────
+set encoding=utf-8
+
+" ── Line numbers ──────────────────────────────────────────────────────────────
+set number
+set relativenumber
+
+" ── Line handling ─────────────────────────────────────────────────────────────
+set linebreak
+set showbreak=+++
+set textwidth=100
+set scrolloff=5
+
+" ── Indentation ───────────────────────────────────────────────────────────────
+set autoindent
+set smartindent
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set expandtab
+set smarttab
+
+" ── UI ────────────────────────────────────────────────────────────────────────
+set ruler
+set showmode
+set showcmd
+set wildmenu
+set backspace=indent,eol,start
+set matchpairs+=<:>
+set title
+set ttyfast
+
+" ── Search ────────────────────────────────────────────────────────────────────
+set hlsearch
+set incsearch
+set ignorecase
+set smartcase
+set showmatch
+
+" ── Mouse ─────────────────────────────────────────────────────────────────────
+set mouse=a
+
+" ── History and undo ──────────────────────────────────────────────────────────
+set undolevels=1000
+set history=500
+
+" ── Folding ───────────────────────────────────────────────────────────────────
+set foldmethod=indent
+set foldnestmax=5
+
+" ── Misc ──────────────────────────────────────────────────────────────────────
+set autowrite
+set exrc
+set secure
+
+" ── Colour scheme ─────────────────────────────────────────────────────────────
+colorscheme industry

@@ -1,0 +1,105 @@
+# ============================================================================
+# Section 1 — Derive repo root
+# ============================================================================
+- name: Set dotfiles repo root fact
+  ansible.builtin.set_fact:
+    dotfiles_repo_root: "{{ playbook_dir | dirname }}"
+
+# ============================================================================
+# Section 2 — Verify source exists in repo
+# ============================================================================
+- name: Stat tmux config source in repo
+  ansible.builtin.stat:
+    path: "{{ dotfiles_repo_root }}/files/tmux/tmux.conf"
+  register: _tmux_conf_source
+
+- name: Fail if tmux config source is absent from repo
+  ansible.builtin.fail:
+    msg: >-
+      tmux config source not found at {{ dotfiles_repo_root }}/files/tmux/tmux.conf.
+      Ensure the files/tmux/ directory is present and committed in the dotfiles repo.
+  when: not _tmux_conf_source.stat.exists
+
+# ============================================================================
+# Section 3 — Migrate legacy ~/.tmux.conf
+# ============================================================================
+# Two cases handled:
+#   a) A linuxDotFiles symlink — remove it; the new symlink at the XDG path
+#      takes over.
+#   b) A real file — back it up then remove it so we can create the XDG-path
+#      symlink cleanly.
+
+- name: Stat legacy ~/.tmux.conf
+  ansible.builtin.stat:
+    path: "{{ ansible_facts['env']['HOME'] }}/.tmux.conf"
+  register: _legacy_tmux_conf
+
+- name: Remove legacy ~/.tmux.conf if it is a linuxDotFiles symlink
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.tmux.conf"
+    state: absent
+  when:
+    - _legacy_tmux_conf.stat.exists
+    - _legacy_tmux_conf.stat.islnk
+    - "'linuxDotFiles' in (_legacy_tmux_conf.stat.lnk_target | default(''))"
+
+- name: Back up legacy ~/.tmux.conf if it is a real file
+  ansible.builtin.copy:
+    src: "{{ ansible_facts['env']['HOME'] }}/.tmux.conf"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.tmux.conf.pre-dotfiles.bak"
+    remote_src: true
+    force: false
+    mode: "0644"
+  when:
+    - _legacy_tmux_conf.stat.exists
+    - not _legacy_tmux_conf.stat.islnk
+
+- name: Remove legacy ~/.tmux.conf after backup
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.tmux.conf"
+    state: absent
+  when:
+    - _legacy_tmux_conf.stat.exists
+    - not _legacy_tmux_conf.stat.islnk
+
+# ============================================================================
+# Section 4 — Ensure XDG tmux config directory exists
+# ============================================================================
+- name: Ensure tmux XDG config directory exists
+  ansible.builtin.file:
+    path: "{{ tmux_config_dir }}"
+    state: directory
+    mode: "0755"
+
+# ============================================================================
+# Section 5 — Deploy tmux.conf symlink
+# ============================================================================
+- name: Stat tmux config destination
+  ansible.builtin.stat:
+    path: "{{ tmux_config_dest }}"
+  register: _tmux_conf_dest
+
+- name: Back up existing non-symlink tmux.conf at XDG destination
+  ansible.builtin.copy:
+    src: "{{ tmux_config_dest }}"
+    dest: "{{ tmux_config_dest }}.pre-dotfiles.bak"
+    remote_src: true
+    force: false
+    mode: "0644"
+  when:
+    - _tmux_conf_dest.stat.exists
+    - not _tmux_conf_dest.stat.islnk
+
+- name: Remove existing non-symlink tmux.conf at XDG destination after backup
+  ansible.builtin.file:
+    path: "{{ tmux_config_dest }}"
+    state: absent
+  when:
+    - _tmux_conf_dest.stat.exists
+    - not _tmux_conf_dest.stat.islnk
+
+- name: Symlink tmux.conf from repo into XDG config directory
+  ansible.builtin.file:
+    src: "{{ dotfiles_repo_root }}/files/tmux/tmux.conf"
+    dest: "{{ tmux_config_dest }}"
+    state: link

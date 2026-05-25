@@ -1,13 +1,13 @@
+---
 - name: Apply dotfiles workstation profile
   hosts: localhost
   gather_facts: false
   tasks:
     # Profile behaviour in this playbook:
-    #   workstation — all roles run (nvim, ai-tools, sync gated by when: conditions above)
+    #   workstation — all roles run (nvim, ai-tools, sync gated by when: conditions below)
     #   server      — use server.yml instead; this playbook is not profile-aware beyond
     #                 the workstation gate on nvim/ai-tools
-    #   minimal     — shell, git, ssh run unconditionally; nvim, ai-tools, sync are skipped
-    #                 This is intentional: minimal is workstation minus those three roles.
+    #   minimal     — common, shell, git, ssh only; tmux, vim, nvim, ai-tools, sync skipped
     - name: Import common role
       ansible.builtin.import_role:
         name: common
@@ -31,6 +31,20 @@
         name: ssh
       tags:
         - ssh
+
+    - name: Import tmux role for workstation and server profiles
+      ansible.builtin.import_role:
+        name: tmux
+      when: dotfiles_profile in ['workstation', 'server']
+      tags:
+        - tmux
+
+    - name: Import vim role for workstation and server profiles
+      ansible.builtin.import_role:
+        name: vim
+      when: dotfiles_profile in ['workstation', 'server']
+      tags:
+        - vim
 
     - name: Import nvim role for workstation profile
       ansible.builtin.import_role:

@@ -1,0 +1,6 @@
+# Lowest-priority defaults. Override in group_vars/all.yml or host_vars/localhost.yml.
+
+# Destination for the vimrc symlink.
+# ~/.vimrc is used rather than an XDG path because vim's XDG support requires
+# $VIMINIT workarounds that are unreliable on servers. ~/.vimrc is universal.
+vim_config_dest: "{{ ansible_facts['env']['HOME'] }}/.vimrc"
