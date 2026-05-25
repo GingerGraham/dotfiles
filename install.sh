@@ -30,7 +30,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.3"
+VERSION="1.0.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -467,6 +467,9 @@ Host ${alias}
     User git
     IdentityFile ${HOME}/.ssh/${key_name}
     IdentitiesOnly yes
+    ControlMaster no
+    ControlPersist no
+    ControlPath none
 EOF
 }
 
