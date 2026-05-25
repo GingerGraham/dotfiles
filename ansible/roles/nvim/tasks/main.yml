@@ -294,11 +294,15 @@
 - name: Report nvim-config clone/update status
   ansible.builtin.debug:
     msg: >-
-      nvim-config: {{ 'cloned fresh' if _nvim_config_git_result.before is not defined
-                      else ('updated from ' + (_nvim_config_git_result.before | default('unknown'))[:8]
-                            + ' to ' + (_nvim_config_git_result.after | default('unknown'))[:8])
-                      if _nvim_config_git_result.changed
-                      else 'already up to date' }}
+      nvim-config: {{
+        'skipped (update disabled)' if _nvim_config_git_result is skipped
+        else 'cloned fresh' if (_nvim_config_git_result.before | default(none)) is none
+        else ('already up to date' if not _nvim_config_git_result.changed
+              else ('updated '
+                    + (_nvim_config_git_result.before | default('unknown'))[:8]
+                    + ' → '
+                    + (_nvim_config_git_result.after  | default('unknown'))[:8]))
+      }}
 
 # ============================================================================
 # Section 5 — Sync infrastructure
