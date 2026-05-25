@@ -18,6 +18,8 @@
 #
 # Usage: ./install.sh [OPTIONS]
 #
+#   --ask-become-pass, -K                   Prompt for sudo password before running Ansible. Required when any role
+#       needs to install system packages (e.g. neovim on a first run). Not needed on re-runs once packages are already installed.
 #   --profile <workstation|server|minimal>  Skip profile prompt
 #   --machine-name <name>                   Skip hostname prompt
 #   --playbook <site|server>                Playbook to run (default: site)
@@ -39,6 +41,7 @@ ARG_PLAYBOOK="site"
 ARG_CHECK="false"
 ARG_SKIP_SSH="false"
 ARG_NO_PREREQS="false"
+ARG_BECOME_PASS="false"
 
 # Populated during execution (by generate_host_vars or read from existing file)
 PROFILE=""
@@ -74,6 +77,11 @@ dotfiles install.sh v${VERSION}
 Usage: $(basename "$0") [OPTIONS]
 
 OPTIONS
+  --ask-become-pass, -K
+      Prompt for sudo password before running Ansible. Required when any role
+      needs to install system packages (e.g. neovim on a first run). Not needed
+      on re-runs once packages are already installed.
+
   --profile <workstation|server|minimal>
       Skip the profile selection prompt and use the given value.
 
@@ -141,6 +149,10 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --ask-become-pass|-K)
+                ARG_BECOME_PASS="true"
+                shift
+                ;;
             --profile)
                 [[ -z "${2:-}" ]] && die "--profile requires an argument (workstation|server|minimal)"
                 case "$2" in
@@ -577,13 +589,11 @@ run_ansible() {
         || die "Playbook not found: ${playbook_dir}/${playbook}"
 
     local ansible_cmd=(ansible-playbook "${playbook}")
-    [[ "${ARG_CHECK}" == "true" ]] && ansible_cmd+=(--check --diff)
+    [[ "${ARG_CHECK}"       == "true" ]] && ansible_cmd+=(--check --diff)
+    [[ "${ARG_BECOME_PASS}" == "true" ]] && ansible_cmd+=(--ask-become-pass)
 
     info "Running: ${ansible_cmd[*]}"
 
-    # Run in a subshell so cd does not affect the parent process.
-    # ansible.cfg uses relative paths resolved from its own location,
-    # so we must cd to the ansible/ directory.
     (
         cd "${playbook_dir}"
         "${ansible_cmd[@]}"
