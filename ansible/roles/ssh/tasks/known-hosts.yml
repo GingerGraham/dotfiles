@@ -1,0 +1,36 @@
+# Fetch current host keys from each forge via ssh-keyscan. Running this live
+# means the role never needs updating when a forge rotates its host key.
+# failed_when guards against an empty stdout so a network blip produces a
+# clear failure rather than silently writing nothing to known_hosts.
+- name: Fetch host keys from Git forges via ssh-keyscan
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -T {{ ssh_keyscan_timeout }} {{ item }}"
+  register: _forge_keyscans
+  changed_when: false
+  failed_when: >-
+    _forge_keyscans.rc != 0 or
+    (_forge_keyscans.stdout_lines
+     | reject('match', '^#')
+     | list
+     | length == 0)
+  loop: "{{ ssh_known_hosts_forges }}"
+  loop_control:
+    label: "{{ item }}"
+
+# _forge_keyscans.results is a list of per-forge task results, each with a
+# stdout_lines list. subelements flattens this to (result, line) pairs so
+# the known_hosts module can be called once per key line.
+# The when condition drops comment lines (ssh-keyscan emits a leading comment
+# with the scanned hostname) and blank lines.
+- name: Add forge host keys to known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ item.0.item }}"
+    key: "{{ item.1 }}"
+    path: "{{ ssh_known_hosts_path }}"
+    state: present
+  loop: "{{ _forge_keyscans.results | subelements('stdout_lines') }}"
+  when:
+    - item.1 | length > 0
+    - not item.1.startswith('#')
+  loop_control:
+    label: "{{ item.0.item }} [{{ item.1.split(' ')[1] | default('key') }}]"

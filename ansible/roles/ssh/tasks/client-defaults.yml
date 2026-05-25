@@ -1,0 +1,8 @@
+# 00-defaults.conf is loaded first (by filename sort order) in config.d so it
+# acts as the base layer. Per-host blocks in later files take precedence.
+# This file is managed by Ansible and will be updated on every run.
+- name: Deploy SSH client defaults snippet
+  ansible.builtin.template:
+    src: config.d/00-defaults.conf.j2
+    dest: "{{ ssh_config_d_dir }}/00-defaults.conf"
+    mode: "0600"

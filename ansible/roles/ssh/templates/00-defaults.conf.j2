@@ -1,0 +1,50 @@
+# SSH client defaults — managed by Ansible dotfiles ssh role
+# File: ~/.ssh/config.d/00-defaults.conf
+#
+# This file is the base layer. Settings here apply to all connections unless
+# overridden by a more-specific Host block in a later config.d file.
+# Per-host blocks always win over Host *.
+
+Host *
+    # ── Connection keepalive ──────────────────────────────────────────────────
+    # Send a keepalive every 60s; disconnect after 3 missed responses (3min).
+    # Prevents idle session timeouts on firewalled or NAT'd connections.
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+
+    # ── Connection multiplexing (ControlMaster) ───────────────────────────────
+    # Reuse an existing authenticated connection for subsequent SSH/SCP/rsync
+    # calls to the same host. The first connection authenticates; subsequent
+    # ones are instant. Sockets live in ~/.ssh/cm_sockets/.
+    #
+    # ControlPersist keeps the master connection open for 10 minutes after the
+    # last session exits, so rapid repeated connections stay fast.
+    #
+    # %C expands to a SHA1 hash of %l%h%p%r — avoids long socket path issues.
+    ControlMaster auto
+    ControlPath {{ ssh_cm_sockets_dir }}/%C
+    ControlPersist 10m
+
+    # ── Key negotiation preferences ───────────────────────────────────────────
+    # Prefer modern key types. Most servers support these; older ones fall back
+    # gracefully because SSH negotiates downward automatically.
+    HostKeyAlgorithms ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256
+    PubkeyAcceptedAlgorithms ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256
+
+    # ── Security defaults ─────────────────────────────────────────────────────
+    # Do not forward the SSH agent by default. Enable per-host when needed.
+    # Forwarding to an untrusted host allows that host to use your keys.
+    ForwardAgent no
+
+    # Do not forward X11 by default. Enable per-host when needed.
+    ForwardX11 no
+
+    # Hash known_hosts entries so hostnames are not trivially enumerable.
+    HashKnownHosts yes
+
+    # ── Usability ─────────────────────────────────────────────────────────────
+    # Suppress the banner and noise; errors still appear.
+    LogLevel ERROR
+
+    # Reuse TCP connection (keep-alive at the TCP layer as well).
+    TCPKeepAlive yes

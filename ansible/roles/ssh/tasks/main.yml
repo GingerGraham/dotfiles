@@ -1,0 +1,47 @@
+# ============================================================================
+# Section 1 — Directory setup
+# ============================================================================
+- name: Ensure SSH directories exist with correct permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ ssh_dir }}", mode: "0700" }
+    - { path: "{{ ssh_config_d_dir }}", mode: "0700" }
+    - { path: "{{ ssh_cm_sockets_dir }}", mode: "0700" }
+
+# ============================================================================
+# Section 2 — ~/.ssh/config Include directive
+# ============================================================================
+# install.sh may have already written this during Phase 3; lineinfile is
+# idempotent and will not create a duplicate line if it is already present.
+- name: Ensure ~/.ssh/config exists
+  ansible.builtin.file:
+    path: "{{ ssh_config_path }}"
+    state: touch
+    mode: "0600"
+    # Preserve timestamps so this task does not show as changed every run
+    # when the file already exists.
+    modification_time: preserve
+    access_time: preserve
+
+- name: Ensure Include directive is at the top of ~/.ssh/config
+  ansible.builtin.lineinfile:
+    path: "{{ ssh_config_path }}"
+    line: "Include ~/.ssh/config.d/*.conf"
+    insertbefore: BOF
+    state: present
+
+# ============================================================================
+# Section 3 — Known hosts for Git forges
+# ============================================================================
+- name: Fetch and install Git forge host keys
+  ansible.builtin.include_tasks: known-hosts.yml
+
+# ============================================================================
+# Section 4 — Hardened client defaults
+# ============================================================================
+- name: Deploy SSH client defaults config snippet
+  ansible.builtin.include_tasks: client-defaults.yml
+  when: ssh_deploy_client_defaults | bool

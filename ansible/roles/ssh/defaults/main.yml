@@ -1,0 +1,27 @@
+# ── Directory paths ───────────────────────────────────────────────────────────
+ssh_dir: "{{ ansible_facts['env']['HOME'] }}/.ssh"
+ssh_config_d_dir: "{{ ansible_facts['env']['HOME'] }}/.ssh/config.d"
+ssh_config_path: "{{ ansible_facts['env']['HOME'] }}/.ssh/config"
+ssh_known_hosts_path: "{{ ansible_facts['env']['HOME'] }}/.ssh/known_hosts"
+
+# ControlMaster sockets live here. Under ~/.ssh so they survive reboots and
+# stay owned by the user. The directory is created by the directories task.
+ssh_cm_sockets_dir: "{{ ansible_facts['env']['HOME'] }}/.ssh/cm_sockets"
+
+# ── Known hosts ────────────────────────────────────────────────────────────────
+# Git forges to scan and add to known_hosts before any repo clone task runs.
+# Keys are fetched live via ssh-keyscan so this never needs manual updates
+# when a forge rotates its host key. Add private forge hostnames in host_vars.
+ssh_known_hosts_forges:
+  - github.com
+  - gitlab.com
+  - bitbucket.org
+
+# Timeout in seconds for each ssh-keyscan call.
+ssh_keyscan_timeout: 10
+
+# ── Client defaults ────────────────────────────────────────────────────────────
+# Deploy ~/.ssh/config.d/00-defaults.conf with hardened client settings.
+# Set false in host_vars to skip (e.g. on a locked-down server where you
+# don't want to touch SSH config beyond the Include directive).
+ssh_deploy_client_defaults: true
