@@ -87,6 +87,12 @@
 
 # ── Project directories ───────────────────────────────────────────────────────
 
+- name: git | ensure projects base directory exists
+  ansible.builtin.file:
+    path: "{{ projects_base_expanded }}"
+    state: directory
+    mode: '0755'
+
 - name: git | create project directories
   ansible.builtin.file:
     path: "{{ projects_base_expanded }}/{{ item.context }}/{{ item.provider }}"
@@ -115,6 +121,7 @@
     src: "{{ projects_base_expanded }}"
     dest: "{{ ansible_facts['env']['HOME'] }}/Development"
     state: link
+    force: true
   when:
     - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
