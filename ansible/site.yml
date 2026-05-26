@@ -49,20 +49,34 @@
     - name: Import nvim role for workstation profile
       ansible.builtin.import_role:
         name: nvim
-      when: dotfiles_profile == 'workstation'
+      when:
+        - dotfiles_profile == 'workstation'
+        - dotfiles_nvim_enabled | bool
       tags:
         - nvim
 
     - name: Import ai-tools role for workstation profile
       ansible.builtin.import_role:
         name: ai-tools
-      when: dotfiles_profile == 'workstation'
+      when:
+        - dotfiles_profile == 'workstation'
+        - dotfiles_ai_tools_enabled | bool
       tags:
         - ai-tools
 
     - name: Import sync role for workstation and server profiles
       ansible.builtin.import_role:
         name: sync
-      when: dotfiles_profile in ['workstation', 'server']
+      when:
+        - dotfiles_profile in ['workstation', 'server']
+        - dotfiles_sync_enabled | bool
       tags:
         - sync
+
+    - name: Import extra roles
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ dotfiles_extra_roles }}"
+      when: dotfiles_extra_roles | length > 0
+      tags:
+        - extras

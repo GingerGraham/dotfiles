@@ -42,5 +42,14 @@
     - name: Import sync role
       ansible.builtin.import_role:
         name: sync
+      when: dotfiles_sync_enabled | bool
       tags:
         - sync
+
+    - name: Import extra roles
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ dotfiles_extra_roles }}"
+      when: dotfiles_extra_roles | length > 0
+      tags:
+        - extras

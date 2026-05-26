@@ -43,6 +43,8 @@ ARG_SKIP_SSH="false"
 ARG_NO_PREREQS="false"
 ARG_BECOME_PASS="false"
 ARG_PROJECTS_BASE=""
+ARG_SKIP_ROLES=""
+ARG_ONLY_ROLES=""
 
 # Populated during execution (by generate_host_vars or read from existing file)
 PROFILE=""
@@ -184,6 +186,16 @@ parse_args() {
             --projects-base)
                 [[ -z "${2:-}" ]] && die "--projects-base requires an argument"
                 ARG_PROJECTS_BASE="${2/#\~/${HOME}}"   # expand ~ if passed literally
+                shift 2
+                ;;
+            --skip-roles)
+                [[ -z "${2:-}" ]] && die "--skip-roles requires a comma-separated list of role names"
+                ARG_SKIP_ROLES="$2"
+                shift 2
+                ;;
+            --only-roles)
+                [[ -z "${2:-}" ]] && die "--only-roles requires a comma-separated list of role names"
+                ARG_ONLY_ROLES="$2"
                 shift 2
                 ;;
             --check)      ARG_CHECK="true"; shift ;;
@@ -489,6 +501,17 @@ generate_host_vars() {
         info "Companion repo SSH URLs (leave blank to skip cloning):"
         read -r -p "  nvim-config repo: " NVIM_REPO_URL || true
         read -r -p "  ai-config repo:   " AI_REPO_URL   || true
+        if [[ "${PROFILE}" == "workstation" ]]; then
+            echo
+            info "Optional role flags (press Enter to accept default):"
+
+            local nvim_enabled ai_enabled
+            read -r -p "  Enable nvim role? [Y/n]: " nvim_enabled
+            nvim_enabled=$([[ "${nvim_enabled,,}" == "n" ]] && echo "false" || echo "true")
+
+            read -r -p "  Enable ai-tools role? [Y/n]: " ai_enabled
+            ai_enabled=$([[ "${ai_enabled,,}" == "n" ]] && echo "false" || echo "true")
+        fi
     else
         NVIM_REPO_URL=""
         AI_REPO_URL=""
@@ -693,6 +716,30 @@ run_ansible() {
     local ansible_cmd=(ansible-playbook "${playbook}")
     [[ "${ARG_CHECK}"       == "true" ]] && ansible_cmd+=(--check --diff)
     [[ "${ARG_BECOME_PASS}" == "true" ]] && ansible_cmd+=(--ask-become-pass)
+
+    # --only-roles: always include common, then the requested roles.
+    # Deduplication handles the case where the caller explicitly includes common.
+    if [[ -n "${ARG_ONLY_ROLES}" ]]; then
+        local only_tags
+        only_tags="common,${ARG_ONLY_ROLES}"
+        # Deduplicate while preserving order (common always first)
+        only_tags=$(echo "${only_tags}" | tr ',' '\n' | awk '!seen[$0]++' | tr '\n' ',' | sed 's/,$//')
+        ansible_cmd+=(--tags "${only_tags}")
+        info "Role filter (--only-roles): ${only_tags}"
+    fi
+
+    # --skip-roles: prevent skipping common — it is always required.
+    if [[ -n "${ARG_SKIP_ROLES}" ]]; then
+        local skip_tags
+        skip_tags=$(echo "${ARG_SKIP_ROLES}" | tr ',' '\n' | grep -v '^common$' | tr '\n' ',' | sed 's/,$//')
+        if [[ "${ARG_SKIP_ROLES}" != "${skip_tags}" ]]; then
+            warn "'common' cannot be skipped — it is always required. Removed from --skip-roles."
+        fi
+        if [[ -n "${skip_tags}" ]]; then
+            ansible_cmd+=(--skip-tags "${skip_tags}")
+            info "Skipping roles: ${skip_tags}"
+        fi
+    fi
 
     info "Running: ${ansible_cmd[*]}"
 

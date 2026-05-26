@@ -21,15 +21,41 @@ machine_name: ""                 # Friendly name used in git config and prompt.
 nvim_config_repo_url: ""         # e.g. git@github.com:you/nvim-config.git
 ai_config_repo_url:   ""         # e.g. git@github.com:you/ai-config.git
 
+# ── Role feature flags ────────────────────────────────────────────────────────
+# Fine-grained control within a profile. Defaults are set in group_vars/all.yml
+# and reflect sensible behaviour for the chosen profile. Override here to opt
+# out of a specific role without changing your profile.
+#
+# common is always required and cannot be disabled.
+#
+dotfiles_nvim_enabled:     true  # Requires nvim_config_repo_url and workstation profile
+dotfiles_ai_tools_enabled: true  # Requires ai_config_repo_url and workstation profile
+dotfiles_sync_enabled:     true  # systemd user timer (Linux) or launchd agent (macOS)
+
+# ── Extra roles ───────────────────────────────────────────────────────────────
+# Optional roles that are not part of any profile. Each entry must correspond
+# to a role directory under ansible/roles/. Roles are responsible for their
+# own platform/distro guards internally.
+#
+# These run for all profiles — add your own when: guards inside the role if
+# you need to restrict to a specific profile.
+#
+# Example:
+#   dotfiles_extra_roles:
+#     - clamav
+#     - 1password
+#
+dotfiles_extra_roles: []
+
 # ── Git: global identity ──────────────────────────────────────────────────────
 # Used as the default when no project-specific profile matches the working directory.
-git_name:                Your Name
-git_default_email:        you@example.com
+git_name:          Your Name
+git_default_email: you@example.com
 # git_default_signing_key: GPGFINGERPRINT   # optional — enables global gpgsign
 
 # Git tool preferences
-git_editor:    vim                # or: code --wait, nano, etc.
-git_diff_tool: vimdiff            # or: code
+git_editor:     vim               # or: code --wait, nano, etc.
+git_diff_tool:  vimdiff           # or: code
 git_merge_tool: vimdiff           # or: code
 
 # ── Git: projects ─────────────────────────────────────────────────────────────
@@ -70,8 +96,10 @@ git_projects:
 
 # ── SSH ───────────────────────────────────────────────────────────────────────
 # Git forges to pre-trust in ~/.ssh/known_hosts.
-# ssh_known_hosts_forges:
+# Entries are added idempotently — existing entries are never removed.
+#
+# known_hosts_entries:
 #   - github.com
 #   - gitlab.com
 #   - bitbucket.org
-#   - git.internal.example.com
+#   - ssh.dev.azure.com
