@@ -42,6 +42,7 @@ ARG_CHECK="false"
 ARG_SKIP_SSH="false"
 ARG_NO_PREREQS="false"
 ARG_BECOME_PASS="false"
+ARG_PROJECTS_BASE=""
 
 # Populated during execution (by generate_host_vars or read from existing file)
 PROFILE=""
@@ -93,6 +94,10 @@ OPTIONS
   --playbook <site|server>
       Ansible playbook to run. Defaults to 'site'.
       Use 'server' in combination with --profile server for server deployments.
+
+    --projects-base <path>
+      Skip the projects base directory prompt. Passed automatically by
+      bootstrap.sh. Tilde expansion is handled (~/Projects is valid).
 
   --check
       Pass --check --diff to ansible-playbook. Previews changes without
@@ -174,6 +179,11 @@ parse_args() {
                     site|server) ARG_PLAYBOOK="$2" ;;
                     *) die "Invalid playbook '${2}'. Valid values: site, server" ;;
                 esac
+                shift 2
+                ;;
+            --projects-base)
+                [[ -z "${2:-}" ]] && die "--projects-base requires an argument"
+                ARG_PROJECTS_BASE="${2/#\~/${HOME}}"   # expand ~ if passed literally
                 shift 2
                 ;;
             --check)      ARG_CHECK="true"; shift ;;
@@ -424,9 +434,14 @@ generate_host_vars() {
     echo
 
     # ── Projects base ─────────────────────────────────────────────────────────
-    read -r -p "Projects base directory [~/Projects]: " PROJECTS_BASE || true
-    PROJECTS_BASE="${PROJECTS_BASE:-~/Projects}"
-    echo
+    if [[ -n "${ARG_PROJECTS_BASE}" ]]; then
+        PROJECTS_BASE="${ARG_PROJECTS_BASE}"
+        info "Projects base: ${PROJECTS_BASE}"
+    else
+        read -r -p "  Projects base directory [${HOME}/Projects]: " PROJECTS_BASE || true
+        PROJECTS_BASE="${PROJECTS_BASE:-${HOME}/Projects}"
+        PROJECTS_BASE="${PROJECTS_BASE/#\~/${HOME}}"
+    fi
 
     # ── Git projects ──────────────────────────────────────────────────────────
     # Gather context/provider pairs. At least one is recommended for workstation.

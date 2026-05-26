@@ -116,6 +116,22 @@
     - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
 
+# Abort if the repo is inside ~/Development, since the move would break it and manual intervention is needed to fix paths.
+- name: git | migration | abort if dotfiles repo is inside ~/Development
+  ansible.builtin.fail:
+    msg: >-
+      The dotfiles repo is located inside ~/Development ({{ dotfiles_repo_root }}),
+      which is the directory this migration would move. Re-clone the repo to
+      {{ projects_base_expanded }}/Personal/GitHub/dotfiles and re-run from there.
+  when:
+    - dotfiles_profile != 'minimal'
+    - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
+    - legacy_dev_stat is defined
+    - legacy_dev_stat.stat.exists
+    - legacy_dev_stat.stat.isdir
+    - not legacy_dev_stat.stat.islnk
+    - dotfiles_repo_root.startswith(ansible_facts['env']['HOME'] + '/Development')
+
 - name: git | migration | move ~/Development contents to Projects
   ansible.builtin.shell:
     cmd: |
