@@ -107,7 +107,7 @@
     path: "{{ ansible_facts['env']['HOME'] }}/Development"
   register: legacy_dev_stat
   when:
-    - profile != 'minimal'
+    - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
 
 - name: git | migration | create ~/Development → Projects symlink
@@ -116,7 +116,7 @@
     dest: "{{ ansible_facts['env']['HOME'] }}/Development"
     state: link
   when:
-    - profile != 'minimal'
+    - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
     - legacy_dev_stat is defined
     - legacy_dev_stat.stat.exists
