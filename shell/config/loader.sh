@@ -34,6 +34,37 @@ if [[ "${_bash_logger_loaded}" == "false" ]]; then
 fi
 unset _bash_logger_loaded
 
+# ── zsh compatibility shim for bash-logger ────────────────────────────────────
+# bash-logger uses ${var^^} (bash-only uppercase expansion) in _get_log_level_value.
+# Zsh doesn't support ^^ and throws "bad substitution". Redefine the function
+# using zsh-native ${(U)var} syntax when running under zsh.
+# Remove this shim once upstream resolves the issue:
+# https://github.com/GingerGraham/bash-logger/issues/<NUMBER>
+if [[ -n "${ZSH_VERSION:-}" ]] && declare -f _get_log_level_value &>/dev/null; then
+    _get_log_level_value() {
+        local level_name="${(U)1}"
+        local line_num="${2:-}"
+        case "${level_name}" in
+            "DEBUG")                     echo "$LOG_LEVEL_DEBUG"     ;;
+            "INFO")                      echo "$LOG_LEVEL_INFO"      ;;
+            "NOTICE")                    echo "$LOG_LEVEL_NOTICE"    ;;
+            "WARN"|"WARNING")            echo "$LOG_LEVEL_WARN"      ;;
+            "ERROR"|"ERR")               echo "$LOG_LEVEL_ERROR"     ;;
+            "CRITICAL"|"CRIT")           echo "$LOG_LEVEL_CRITICAL"  ;;
+            "ALERT")                     echo "$LOG_LEVEL_ALERT"     ;;
+            "EMERGENCY"|"EMERG"|"FATAL") echo "$LOG_LEVEL_EMERGENCY" ;;
+            *)
+                if [[ "$1" =~ ^[0-7]$ ]]; then
+                    echo "$1"
+                else
+                    [[ -n "$line_num" ]] && echo "Warning: Invalid log level '$1' at line $line_num, using INFO" >&2
+                    echo "$LOG_LEVEL_INFO"
+                fi
+                ;;
+        esac
+    }
+fi
+
 # ── OS / WSL / Distro detection (runs once) ──────────────────────────────────
 _raw_os="$(uname -s)"
 case "${_raw_os}" in
@@ -182,7 +213,12 @@ elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
 else
-    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using default prompt."
+    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
+    # Ensure a usable PS1 exists if the system one wasn't already set.
+    # /etc/bashrc should have set one already; this is a last resort.
+    if [[ -n "${BASH_VERSION:-}" && -z "${PS1:-}" ]]; then
+        PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+    fi
 fi
 
 unset -f _source_if_cmd _source_if_any_cmd

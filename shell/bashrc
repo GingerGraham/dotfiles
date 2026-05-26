@@ -2,6 +2,15 @@
 # dotfiles managed
 # Thin stub — delegates entirely to loader.sh
 
+# Source system-wide definitions before any user config.
+# Fedora/RHEL: /etc/bashrc   Debian/Ubuntu: /etc/bash.bashrc
+# This must happen first so system PS1, completions, and profile.d fragments load.
+if [[ -f /etc/bashrc ]]; then
+    source /etc/bashrc
+elif [[ -f /etc/bash.bashrc ]]; then
+    source /etc/bash.bashrc
+fi
+
 SHELL_CONFIG_DIR="${HOME}/.config/shell"
 
 if [[ -f "${SHELL_CONFIG_DIR}/loader.sh" ]]; then
