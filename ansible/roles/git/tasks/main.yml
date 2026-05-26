@@ -1,27 +1,27 @@
 - name: git | resolve projects_base path
-  set_fact:
-    projects_base_expanded: "{{ projects_base | replace('~', ansible_env.HOME) }}"
+  ansible.builtin.set_fact:
+    projects_base_expanded: "{{ projects_base | replace('~', ansible_facts['env']['HOME']) }}"
 
 # ── Config directories ────────────────────────────────────────────────────────
 
 - name: git | ensure ~/.config/git/profiles exists
-  file:
-    path: "{{ ansible_env.HOME }}/.config/git/profiles"
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/git/profiles"
     state: directory
     mode: '0700'
 
 # ── Static config files ───────────────────────────────────────────────────────
 
 - name: git | deploy global gitignore
-  copy:
+  ansible.builtin.copy:
     src: ignore
-    dest: "{{ ansible_env.HOME }}/.config/git/ignore"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/ignore"
     mode: '0644'
 
 - name: git | deploy global gitattributes
-  copy:
+  ansible.builtin.copy:
     src: attributes
-    dest: "{{ ansible_env.HOME }}/.config/git/attributes"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/attributes"
     mode: '0644'
 
 # ── ~/.gitconfig ──────────────────────────────────────────────────────────────
@@ -29,9 +29,9 @@
 # lines. Does not contain any project-specific includeIf blocks.
 
 - name: git | deploy ~/.gitconfig
-  template:
+  ansible.builtin.template:
     src: gitconfig.j2
-    dest: "{{ ansible_env.HOME }}/.gitconfig"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.gitconfig"
     mode: '0600'
 
 # ── project-includes ──────────────────────────────────────────────────────────
@@ -39,9 +39,9 @@
 # updates this file and host_vars/localhost.yml, so they stay in sync.
 
 - name: git | deploy project-includes
-  template:
+  ansible.builtin.template:
     src: project-includes.j2
-    dest: "{{ ansible_env.HOME }}/.config/git/project-includes"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/project-includes"
     mode: '0600'
 
 # ── projects.yml manifest ─────────────────────────────────────────────────────
@@ -50,9 +50,9 @@
 # Rebuild from host_vars: delete this file and re-run, or git-sync-projects --from-host-vars.
 
 - name: git | write projects.yml manifest (first run only)
-  template:
+  ansible.builtin.template:
     src: projects.yml.j2
-    dest: "{{ ansible_env.HOME }}/.config/git/projects.yml"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/projects.yml"
     mode: '0600'
     force: false
 
@@ -62,9 +62,9 @@
 # updates without rewriting the whole file.
 
 - name: git | deploy profile .inc files (first run only per project)
-  template:
+  ansible.builtin.template:
     src: profile.inc.j2
-    dest: "{{ ansible_env.HOME }}/.config/git/profiles/{{ (item.context + '-' + item.provider) | lower | replace(' ', '-') }}.inc"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/profiles/{{ (item.context + '-' + item.provider) | lower | replace(' ', '-') }}.inc"
     mode: '0600'
     force: false
   loop: "{{ git_projects }}"
@@ -77,18 +77,18 @@
 # Never managed by Ansible beyond initial creation.
 
 - name: git | create local.inc if absent
-  copy:
+  ansible.builtin.copy:
     content: |
       # Machine-local git config — never managed by Ansible.
       # Credential helpers, host-specific settings, etc. go here.
-    dest: "{{ ansible_env.HOME }}/.config/git/profiles/local.inc"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/git/profiles/local.inc"
     mode: '0600'
     force: false
 
 # ── Project directories ───────────────────────────────────────────────────────
 
 - name: git | create project directories
-  file:
+  ansible.builtin.file:
     path: "{{ projects_base_expanded }}/{{ item.context }}/{{ item.provider }}"
     state: directory
     mode: '0755'
@@ -103,21 +103,21 @@
 # Users control actual file migration manually.
 
 - name: git | migration | check for legacy ~/Development directory
-  stat:
-    path: "{{ ansible_env.HOME }}/Development"
+  ansible.builtin.stat:
+    path: "{{ ansible_facts['env']['HOME'] }}/Development"
   register: legacy_dev_stat
   when:
     - profile != 'minimal'
-    - projects_base_expanded != ansible_env.HOME + '/Development'
+    - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
 
 - name: git | migration | create ~/Development → Projects symlink
-  file:
+  ansible.builtin.file:
     src: "{{ projects_base_expanded }}"
-    dest: "{{ ansible_env.HOME }}/Development"
+    dest: "{{ ansible_facts['env']['HOME'] }}/Development"
     state: link
   when:
     - profile != 'minimal'
-    - projects_base_expanded != ansible_env.HOME + '/Development'
+    - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
     - legacy_dev_stat is defined
     - legacy_dev_stat.stat.exists
     - legacy_dev_stat.stat.isdir
