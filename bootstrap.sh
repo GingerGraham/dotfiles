@@ -27,9 +27,18 @@ done
 # ── Determine clone target ────────────────────────────────────────────────────
 
 if [[ -z "${projects_base}" ]]; then
-    read -rp "Projects base directory [${DEFAULT_PROJECTS_BASE}]: " projects_base
+    read -rp "Projects base directory [${DEFAULT_PROJECTS_BASE}]: " raw_input || true
+    # Strip control characters that leak in when running via bash <(curl ...)
+    # e.g. Delete key sends ^[[3~ which corrupts the path if not sanitised
+    projects_base=$(printf '%s' "${raw_input}" | tr -cd '[:print:]' | xargs)
     projects_base="${projects_base:-${DEFAULT_PROJECTS_BASE}}"
     projects_base="${projects_base/#\~/${HOME}}"
+fi
+
+# Validate — must resolve to a path under $HOME
+if [[ "${projects_base}" != "${HOME}"/* ]]; then
+    echo "WARNING: projects base '${projects_base}' is not under \$HOME — using default ${DEFAULT_PROJECTS_BASE}" >&2
+    projects_base="${DEFAULT_PROJECTS_BASE}"
 fi
 
 clone_target="${projects_base}/${CLONE_SUBPATH}"
