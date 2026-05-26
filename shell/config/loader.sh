@@ -188,9 +188,13 @@ fi
 unset -f _source_if_cmd _source_if_any_cmd
 
 # ── Tier 2: platform/ ─────────────────────────────────────────────────────────
-_platform_file="${SHELL_CONFIG_DIR}/platform/${DOTFILES_OS,,}.sh"
+case "${DOTFILES_OS}" in
+    Linux) _platform_file="${SHELL_CONFIG_DIR}/platform/linux.sh" ;;
+    Mac)   _platform_file="${SHELL_CONFIG_DIR}/platform/macos.sh" ;;
+    *)     _platform_file="" ;;
+esac
 # shellcheck disable=SC1090
-[[ -f "${_platform_file}" ]] && source "${_platform_file}"
+[[ -n "${_platform_file}" && -f "${_platform_file}" ]] && source "${_platform_file}"
 unset _platform_file
 
 if [[ "${DOTFILES_WSL}" == "true" ]]; then

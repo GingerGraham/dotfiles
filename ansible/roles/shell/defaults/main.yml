@@ -3,8 +3,12 @@
 # src is relative to the repo root (resolved at role runtime via playbook_dir).
 # dest is the absolute path of the symlink to create.
 shell_stubs:
+  - src: shell/bash_profile
+    dest: "{{ ansible_facts['env']['HOME'] }}/.bash_profile"
   - src: shell/bashrc
     dest: "{{ ansible_facts['env']['HOME'] }}/.bashrc"
+  - src: shell/zprofile
+    dest: "{{ ansible_facts['env']['HOME'] }}/.zprofile"
   - src: shell/zshrc
     dest: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
   - src: shell/zshenv

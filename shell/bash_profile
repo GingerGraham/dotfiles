@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# dotfiles managed
+# Login shell entry point — sources .bashrc so the full config loads.
+[[ -f "${HOME}/.bashrc" ]] && source "${HOME}/.bashrc"

@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+# dotfiles managed
+# Login shell entry point — sources .zshrc so the full config loads.
+[[ -f "${HOME}/.zshrc" ]] && source "${HOME}/.zshrc"
