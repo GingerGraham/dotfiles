@@ -137,9 +137,24 @@
     cmd: |
       set -e
       shopt -s dotglob nullglob
-      for item in "{{ ansible_facts['env']['HOME'] }}/Development"/*; do
-        mv "$item" "{{ projects_base_expanded }}/"
-      done
+
+      merge_into() {
+          local src="$1" dst="$2"
+          local item name
+          mkdir -p "${dst}"
+          for item in "${src}"/*; do
+              [[ -e "${item}" ]] || continue
+              name="${item##*/}"
+              if [[ -d "${item}" && -d "${dst}/${name}" ]]; then
+                  merge_into "${item}" "${dst}/${name}"
+                  rmdir "${item}" 2>/dev/null || true
+              else
+                  mv "${item}" "${dst}/"
+              fi
+          done
+      }
+
+      merge_into "{{ ansible_facts['env']['HOME'] }}/Development" "{{ projects_base_expanded }}"
     executable: /bin/bash
   when:
     - dotfiles_profile != 'minimal'
@@ -149,7 +164,6 @@
     - legacy_dev_stat.stat.isdir
     - not legacy_dev_stat.stat.islnk
   changed_when: true
-
 - name: git | migration | remove now-empty ~/Development directory
   ansible.builtin.file:
     path: "{{ ansible_facts['env']['HOME'] }}/Development"
