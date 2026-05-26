@@ -25,7 +25,7 @@
 # ── Identity ──────────────────────────────────────────────────────────────────
 # Machine identity — set by Ansible, safe to change here if needed. Used by prompts, scripts, etc.
 export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name | default(ansible_facts['hostname']) }}"
-export GIT_AUTHOR_EMAIL="{{ git_personal_email }}"
+export GIT_AUTHOR_EMAIL="{{ git_default_email }}"
 
 # ── PATH extensions ───────────────────────────────────────────────────────────
 # Add machine-local tool directories that aren't in the shared env files.
