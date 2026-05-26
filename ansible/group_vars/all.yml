@@ -22,6 +22,13 @@ dotfiles_repo_url: ""  # Override in host_vars/localhost.yml.
 # Override in host_vars/localhost.yml. Valid values: workstation | server | minimal
 dotfiles_profile: workstation # Default role profile; override per machine to control which role set is activated.
 
+# ── Role feature flags ────────────────────────────────────────────────────────
+# Override in host_vars/localhost.yml to opt out of specific roles.
+dotfiles_nvim_enabled: true
+dotfiles_ai_tools_enabled: true
+dotfiles_sync_enabled: true
+dotfiles_extra_roles: []
+
 # ── Remote Repos ──────────────────────────────────────────────────────────────
 # Left empty here — roles skip clone tasks if the URL is empty, allowing the
 # skeleton to run without credentials.
