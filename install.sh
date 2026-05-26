@@ -18,21 +18,21 @@
 #
 # Usage: ./install.sh [OPTIONS]
 #
-#   --ask-become-pass, -K                   Prompt for sudo password before running Ansible. Required when any role
-#       needs to install system packages (e.g. neovim on a first run). Not needed on re-runs once packages are already installed.
+#   --ask-become-pass, -K                   Prompt for sudo password before running Ansible.
 #   --profile <workstation|server|minimal>  Skip profile prompt
 #   --machine-name <name>                   Skip hostname prompt
 #   --playbook <site|server>                Playbook to run (default: site)
+#   --projects-base <path>                  Skip projects base prompt (set by bootstrap.sh)
+#   --skip-roles <role[,role]>              Skip named roles (passed as --skip-tags to Ansible)
+#   --only-roles <role[,role]>              Run only named roles (common always included)
 #   --check                                 Ansible dry-run (--check --diff)
 #   --skip-ssh                              Skip SSH deploy key generation
-#   --skip-roles <role1,role2,...>         Comma-separated list of roles to skip (by directory name)
-#   --only-roles <role1,role2,...>         Comma-separated list of roles to run exclusively (by directory name)
 #   --no-prereqs                            Skip prerequisite check/install
 #   -h, --help                              Show this help
 
 set -euo pipefail
 
-VERSION="1.0.5"
+VERSION="1.0.6"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -99,9 +99,19 @@ OPTIONS
       Ansible playbook to run. Defaults to 'site'.
       Use 'server' in combination with --profile server for server deployments.
 
-    --projects-base <path>
+  --projects-base <path>
       Skip the projects base directory prompt. Passed automatically by
       bootstrap.sh. Tilde expansion is handled (~/Projects is valid).
+
+  --skip-roles <role[,role,...]>
+      Skip one or more named roles. Passed as --skip-tags to ansible-playbook.
+      Also suppresses related prompts (e.g. --skip-roles ai-tools skips the
+      ai-config repo URL prompt and disables the role in host_vars).
+      'common' cannot be skipped and is silently removed if included.
+
+  --only-roles <role[,role,...]>
+      Run only the named roles. 'common' is always prepended.
+      Also suppresses prompts for roles not in the list.
 
   --check
       Pass --check --diff to ansible-playbook. Previews changes without
@@ -111,15 +121,6 @@ OPTIONS
       Skip SSH deploy key generation entirely. Repo URLs in host_vars are
       used as-is. Useful when your personal SSH key already has access to
       all required repositories.
-
-    --skip-roles <role1,role2,...>
-      Comma-separated list of roles to skip when running the playbook. Role
-      names correspond to the directory names under ansible/roles/.
-
-    --only-roles <role1,role2,...>
-      Comma-separated list of roles to run exclusively. Only the specified
-      roles will be run, and all others skipped. Role names correspond to the
-      directory names under ansible/roles/. Cannot be used with --skip-roles.
 
   --no-prereqs
       Skip the prerequisite check and installation step. Use when you know
@@ -156,19 +157,14 @@ SSH DEPLOY KEYS
   If neither nvim-config nor ai-config URLs are provided, the SSH phase is
   skipped entirely. --skip-ssh is still available to bypass it explicitly.
 
-ROLES
-  All roles are included by default when running the playbook. Use the
-  --skip-roles or --only-roles flags to adjust which roles are run on a given
-  execution. Role names correspond to the directory names under ansible/roles/.
-
 EXAMPLES
   ./install.sh                                    Interactive first run
   ./install.sh --check                            Dry run — preview changes
   ./install.sh --profile workstation              Skip profile prompt
   ./install.sh --profile server --playbook server Server deployment
   ./install.sh --no-prereqs --skip-ssh            Re-run Ansible only
-  ./install.sh --only-roles git,sync              Run only git and sync roles
-  ./install.sh --skip-roles nvim,ai-tools         Run all but nvim and ai-tools roles
+  ./install.sh --skip-roles ai-tools              Skip ai-tools role and prompts
+  ./install.sh --only-roles shell,git             Run common + shell + git only
 EOF
 }
 
@@ -203,7 +199,7 @@ parse_args() {
                 ;;
             --projects-base)
                 [[ -z "${2:-}" ]] && die "--projects-base requires an argument"
-                ARG_PROJECTS_BASE="${2/#\~/${HOME}}"   # expand ~ if passed literally
+                ARG_PROJECTS_BASE="${2/#\~/${HOME}}"
                 shift 2
                 ;;
             --skip-roles)
@@ -235,6 +231,30 @@ check_repo_structure() {
         || die "ansible/site.yml not found. Repository may be incomplete."
 }
 
+# ── Role suppression check ────────────────────────────────────────────────────
+# Returns 0 (true) if the given role should be excluded from this run, based
+# on --skip-roles or --only-roles CLI flags.
+#
+# Used by generate_host_vars to suppress prompts for roles that won't run,
+# and to set dotfiles_<role>_enabled: false in host_vars when a role is
+# explicitly skipped on a first run.
+_role_is_suppressed() {
+    local role="$1"
+    # Explicitly skipped via --skip-roles
+    if [[ -n "${ARG_SKIP_ROLES}" ]]; then
+        if echo "${ARG_SKIP_ROLES}" | tr ',' '\n' | grep -qx "${role}"; then
+            return 0
+        fi
+    fi
+    # --only-roles in effect and this role isn't listed
+    if [[ -n "${ARG_ONLY_ROLES}" ]]; then
+        if ! echo "${ARG_ONLY_ROLES}" | tr ',' '\n' | grep -qx "${role}"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # ── Version comparison ────────────────────────────────────────────────────────
 # Returns 0 (true) if version $1 is >= version $2
 version_ge() {
@@ -264,9 +284,9 @@ install_prereqs() {
             local pkgs=()
             for dep in "${missing[@]}"; do
                 case "${dep}" in
-                    git)                      pkgs+=(git) ;;
-                    python3|python3-upgrade)  pkgs+=(python3) ;;
-                    ansible|ansible-upgrade)  pkgs+=(ansible-core) ;;
+                    git)                     pkgs+=(git) ;;
+                    python3|python3-upgrade) pkgs+=(python3) ;;
+                    ansible|ansible-upgrade) pkgs+=(ansible-core) ;;
                 esac
             done
             [[ ${#pkgs[@]} -gt 0 ]] && sudo dnf install -y "${pkgs[@]}"
@@ -276,27 +296,25 @@ install_prereqs() {
             local pkgs=()
             for dep in "${missing[@]}"; do
                 case "${dep}" in
-                    git)                      pkgs+=(git) ;;
-                    python3|python3-upgrade)  pkgs+=(python3 python3-pip) ;;
-                    ansible|ansible-upgrade)  pkgs+=(ansible-core) ;;
+                    git)                     pkgs+=(git) ;;
+                    python3|python3-upgrade) pkgs+=(python3 python3-pip) ;;
+                    ansible|ansible-upgrade) pkgs+=(ansible-core) ;;
                 esac
             done
             [[ ${#pkgs[@]} -gt 0 ]] && sudo apt-get install -y "${pkgs[@]}"
             # ansible-core may not be in the default apt repos on older Ubuntu.
             # Fall back to pip if the apt install didn't provide ansible-playbook.
             if ! command -v ansible-playbook &>/dev/null; then
-                warn "ansible-core not available via apt — installing via pip..."
-                python3 -m pip install --user ansible-core
-                # Ensure ~/.local/bin is on PATH for this session
-                export PATH="${HOME}/.local/bin:${PATH}"
+                info "ansible-playbook not found after apt install — trying pip3..."
+                pip3 install --user ansible-core
             fi
             ;;
         brew)
             for dep in "${missing[@]}"; do
                 case "${dep}" in
-                    git)                      brew install git ;;
-                    python3|python3-upgrade)  brew install python3 ;;
-                    ansible|ansible-upgrade)  brew install ansible ;;
+                    git)                     brew install git ;;
+                    python3|python3-upgrade) brew install python3 ;;
+                    ansible|ansible-upgrade) brew install ansible ;;
                 esac
             done
             ;;
@@ -304,19 +322,17 @@ install_prereqs() {
             local pkgs=()
             for dep in "${missing[@]}"; do
                 case "${dep}" in
-                    git)                      pkgs+=(git) ;;
-                    python3|python3-upgrade)  pkgs+=(python3) ;;
-                    ansible|ansible-upgrade)  pkgs+=(ansible) ;;
+                    git)                     pkgs+=(git) ;;
+                    python3|python3-upgrade) pkgs+=(python3) ;;
+                    ansible|ansible-upgrade) pkgs+=(ansible-core) ;;
                 esac
             done
             [[ ${#pkgs[@]} -gt 0 ]] && sudo zypper install -y "${pkgs[@]}"
             ;;
         *)
-            die "Cannot auto-install prerequisites — package manager '${pm}' not recognised. Install manually: git, python3 >= 3.9, ansible-core >= 2.14"
+            die "Cannot install prerequisites: unknown package manager. Install git, python3 >= 3.9, and ansible-core >= 2.14 manually, then re-run with --no-prereqs."
             ;;
     esac
-
-    info "Prerequisites installed."
 }
 
 check_prereqs() {
@@ -329,16 +345,16 @@ check_prereqs() {
         warn "git: not found"
         missing+=(git)
     else
-        info "git: $(git --version | head -1)"
+        info "git: $(git --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
     fi
 
-    # python3 >= 3.9
+    # python3
     if ! command -v python3 &>/dev/null; then
         warn "python3: not found"
         missing+=(python3)
     else
         local py_ver
-        py_ver=$(python3 -c "import sys; print('{}.{}'.format(sys.version_info.major, sys.version_info.minor))" 2>/dev/null || echo "0.0")
+        py_ver=$(python3 --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || echo "0.0")
         if version_ge "${py_ver}" "3.9"; then
             info "python3: ${py_ver}"
         else
@@ -347,7 +363,7 @@ check_prereqs() {
         fi
     fi
 
-    # ansible-core >= 2.14
+    # ansible-core
     if ! command -v ansible-playbook &>/dev/null; then
         warn "ansible-core: not found"
         missing+=(ansible)
@@ -378,14 +394,14 @@ check_prereqs() {
 # Reads existing host_vars if present (populates URL variables for SSH phase).
 # Otherwise, prompts interactively and writes the file.
 #
+# Prompt suppression: --skip-roles and --only-roles are consulted via
+# _role_is_suppressed(). Suppressed roles skip their companion repo URL
+# prompts and their enable-flag prompts, and are written as disabled in the
+# generated host_vars file.
+#
 # Profile note: nvim_config_repo_url and ai_config_repo_url are only prompted
 # for the 'workstation' profile. Server and minimal profiles do not run the
 # nvim or ai-tools roles, so collecting these values would be misleading.
-#
-# Git note: the old git_personal_email / git_work_email fields are replaced by
-# git_name, git_default_email, and a git_projects list. At least one project
-# is expected for a workstation profile, but the loop can be skipped — projects
-# can be added later with git-add-project once the shell is deployed.
 
 _read_yaml_scalar() {
     # Reads a bare scalar value from a simple YAML file (no yq dependency).
@@ -408,6 +424,9 @@ generate_host_vars() {
         NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
         AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
+        # Honour CLI suppression — don't hand suppressed role URLs to the SSH phase.
+        _role_is_suppressed "nvim"     && NVIM_REPO_URL=""
+        _role_is_suppressed "ai-tools" && AI_REPO_URL=""
         return 0
     fi
 
@@ -447,46 +466,35 @@ generate_host_vars() {
     info "Machine name: ${MACHINE_NAME}"
     echo
 
-    # ── Git identity ──────────────────────────────────────────────────────────
-    # Gathers the global identity (default fallback) and a projects list.
-    # Projects map context/provider pairs to specific email addresses.
-    # This replaces the old git_personal_email / git_work_email approach.
+    # ── Projects base ─────────────────────────────────────────────────────────
+    PROJECTS_BASE="${ARG_PROJECTS_BASE}"
+    if [[ -z "${PROJECTS_BASE}" ]]; then
+        local default_projects="${HOME}/Projects"
+        read -r -p "Projects base directory [${default_projects}]: " PROJECTS_BASE || true
+        PROJECTS_BASE="${PROJECTS_BASE:-${default_projects}}"
+        PROJECTS_BASE="${PROJECTS_BASE/#\~/${HOME}}"
+    fi
+    info "Projects base: ${PROJECTS_BASE}"
 
-    echo "Git global identity (used when no project-specific profile matches):"
-    while [[ -z "${GIT_NAME}" ]]; do
-        read -r -p "  Your full name: " GIT_NAME || true
-    done
+    # ── Git identity ──────────────────────────────────────────────────────────
+    echo
+    info "Git global identity (used when no project-specific profile matches):"
+    read -r -p "  Your full name: " GIT_NAME || true
     while [[ -z "${GIT_DEFAULT_EMAIL}" ]]; do
         read -r -p "  Default email:  " GIT_DEFAULT_EMAIL || true
     done
-    read -r -p "  Default GPG signing key fingerprint (optional, Enter to skip): " \
-        GIT_DEFAULT_SIGNING_KEY || true
+    read -r -p "  Default GPG signing key fingerprint (optional, Enter to skip): " GIT_DEFAULT_SIGNING_KEY || true
     echo
 
-    # ── Projects base ─────────────────────────────────────────────────────────
-    if [[ -n "${ARG_PROJECTS_BASE}" ]]; then
-        PROJECTS_BASE="${ARG_PROJECTS_BASE}"
-        info "Projects base: ${PROJECTS_BASE}"
-    else
-        read -r -p "  Projects base directory [${HOME}/Projects]: " PROJECTS_BASE || true
-        PROJECTS_BASE="${PROJECTS_BASE:-${HOME}/Projects}"
-        PROJECTS_BASE="${PROJECTS_BASE/#\~/${HOME}}"
-    fi
-
     # ── Git projects ──────────────────────────────────────────────────────────
-    # Gather context/provider pairs. At least one is recommended for workstation.
-    # The loop is optional — skip it by pressing Enter at the first context prompt.
-    # Additional projects can always be added later with: git-add-project
-
     local git_projects_yaml=""
-
-    if [[ "${PROFILE}" != "minimal" ]]; then
-        echo "Git projects — context/provider pairs (e.g. Personal/GitHub, Acme/AzureDevOps)."
+    if [[ "${PROFILE}" == "workstation" ]]; then
+        info "Git projects — context/provider pairs (e.g. Personal/GitHub, Acme/AzureDevOps)."
         echo "Press Enter at the context prompt to finish. Add more later with: git-add-project"
         echo
 
         while true; do
-            local ctx prov email key
+            local ctx="" prov="" email="" key=""
             read -r -p "  Context (or Enter to finish): " ctx || true
             [[ -z "${ctx}" ]] && break
 
@@ -499,7 +507,6 @@ generate_host_vars() {
 
             read -r -p "  GPG signing key for ${ctx}/${prov} (optional, Enter to skip): " key || true
 
-            # Append to the YAML block — indented for the git_projects list
             git_projects_yaml+="  - context: \"${ctx}\"\n"
             git_projects_yaml+="    provider: \"${prov}\"\n"
             git_projects_yaml+="    email: \"${email}\"\n"
@@ -507,32 +514,58 @@ generate_host_vars() {
 
             info "Added ${ctx}/${prov}"
             echo
-            # Reset email for next iteration
-            email=""
-            key=""
         done
     fi
 
-    # ── Companion repo URLs ───────────────────────────────────────────────────
+    # ── Companion repo URLs and role enable flags ─────────────────────────────
+    # Declared here at function scope so the write block below can always
+    # reference them, regardless of which branch of the if/else is taken.
+    local nvim_enabled="true"
+    local ai_enabled="true"
+
     if [[ "${PROFILE}" == "workstation" ]]; then
         echo
         info "Companion repo SSH URLs (leave blank to skip cloning):"
-        read -r -p "  nvim-config repo: " NVIM_REPO_URL || true
-        read -r -p "  ai-config repo:   " AI_REPO_URL   || true
-        if [[ "${PROFILE}" == "workstation" ]]; then
-            echo
-            info "Optional role flags (press Enter to accept default):"
 
-            local nvim_enabled ai_enabled
-            read -r -p "  Enable nvim role? [Y/n]: " nvim_enabled
-            nvim_enabled=$([[ "${nvim_enabled,,}" == "n" ]] && echo "false" || echo "true")
+        if _role_is_suppressed "nvim"; then
+            NVIM_REPO_URL=""
+            info "  nvim-config repo: skipped (nvim role suppressed by CLI flags)"
+        else
+            read -r -p "  nvim-config repo: " NVIM_REPO_URL || true
+        fi
 
-            read -r -p "  Enable ai-tools role? [Y/n]: " ai_enabled
-            ai_enabled=$([[ "${ai_enabled,,}" == "n" ]] && echo "false" || echo "true")
+        if _role_is_suppressed "ai-tools"; then
+            AI_REPO_URL=""
+            info "  ai-config repo:   skipped (ai-tools role suppressed by CLI flags)"
+        else
+            read -r -p "  ai-config repo:   " AI_REPO_URL || true
+        fi
+
+        echo
+        info "Optional role flags (press Enter to accept default):"
+
+        if _role_is_suppressed "nvim"; then
+            nvim_enabled="false"
+            info "  nvim role: disabled (suppressed by CLI flags)"
+        else
+            local nvim_prompt_answer
+            read -r -p "  Enable nvim role? [Y/n]: " nvim_prompt_answer || true
+            nvim_enabled=$([[ "${nvim_prompt_answer,,}" == "n" ]] && echo "false" || echo "true")
+        fi
+
+        if _role_is_suppressed "ai-tools"; then
+            ai_enabled="false"
+            info "  ai-tools role: disabled (suppressed by CLI flags)"
+        else
+            local ai_prompt_answer
+            read -r -p "  Enable ai-tools role? [Y/n]: " ai_prompt_answer || true
+            ai_enabled=$([[ "${ai_prompt_answer,,}" == "n" ]] && echo "false" || echo "true")
         fi
     else
         NVIM_REPO_URL=""
         AI_REPO_URL=""
+        nvim_enabled="false"
+        ai_enabled="false"
         info "Skipping nvim/ai-config repo URLs — not applicable for '${PROFILE}' profile."
     fi
 
@@ -553,6 +586,12 @@ machine_name: "${MACHINE_NAME}"
 nvim_config_repo_url: "${NVIM_REPO_URL}"
 ai_config_repo_url:   "${AI_REPO_URL}"
 
+# ── Role feature flags ─────────────────────────────────────────────────────
+# common is always required and cannot be disabled.
+dotfiles_nvim_enabled:     ${nvim_enabled}
+dotfiles_ai_tools_enabled: ${ai_enabled}
+dotfiles_sync_enabled:     true
+
 # ── Git global identity ────────────────────────────────────────────────────
 projects_base: ${PROJECTS_BASE}
 git_name: "${GIT_NAME}"
@@ -566,7 +605,7 @@ EOF
 
         # Projects list — empty list if none were gathered
         echo ""
-        echo "# ── Git projects ──────────────────────────────────────────────────────────"
+        echo "# ── Git projects ─────────────────────────────────────────────────────────"
         if [[ -n "${git_projects_yaml}" ]]; then
             echo "git_projects:"
             printf '%b' "${git_projects_yaml}"
@@ -639,27 +678,23 @@ ensure_ssh_config_include() {
 setup_ssh_keys() {
     # dotfiles is public — no deploy key needed for the sync service (HTTPS).
     # This phase only runs when at least one private companion repo URL was provided.
-
-    if [[ -z "${NVIM_REPO_URL}" && -z "${AI_REPO_URL}" ]]; then
-        info "No private companion repos configured — skipping SSH deploy key generation."
-        info "The sync service will use HTTPS for the dotfiles repo."
+    if [[ -z "${NVIM_REPO_URL}" ]] && [[ -z "${AI_REPO_URL}" ]]; then
+        info "No companion repo URLs provided — skipping SSH key generation."
         return 0
     fi
 
     header "SSH Deploy Keys"
-
-    info "Generating per-repo SSH deploy keys for private companion repos."
-    info "Each key grants read-only access to one repository."
-    echo
 
     mkdir -p "${HOME}/.ssh/config.d"
     chmod 700 "${HOME}/.ssh" "${HOME}/.ssh/config.d"
 
     local conf_file="${HOME}/.ssh/config.d/10-dotfiles.conf"
 
-    # install.sh owns this file. The ssh Ansible role (Phase 2, step 4)
-    # will later manage the broader config.d structure.
-    cat > "${conf_file}" << 'SSHEOF'
+    # Only create/reset the file if it doesn't already exist. install.sh owns
+    # this file; the ssh Ansible role (Phase 2, step 4) will later manage the
+    # broader config.d structure.
+    if [[ ! -f "${conf_file}" ]]; then
+        cat > "${conf_file}" << 'SSHEOF'
 # dotfiles companion repo deploy keys — generated by install.sh
 # One Host alias per private repository. IdentitiesOnly yes prevents SSH from
 # falling back to other loaded keys, ensuring the right key is always used.
@@ -670,7 +705,8 @@ setup_ssh_keys() {
 #
 # Note: the dotfiles repo itself is public and uses HTTPS — no entry here.
 SSHEOF
-    chmod 600 "${conf_file}"
+        chmod 600 "${conf_file}"
+    fi
 
     # dotfiles_nvim — only if a nvim-config URL was provided
     if [[ -n "${NVIM_REPO_URL}" ]]; then
@@ -740,7 +776,6 @@ run_ansible() {
     if [[ -n "${ARG_ONLY_ROLES}" ]]; then
         local only_tags
         only_tags="common,${ARG_ONLY_ROLES}"
-        # Deduplicate while preserving order (common always first)
         only_tags=$(echo "${only_tags}" | tr ',' '\n' | awk '!seen[$0]++' | tr '\n' ',' | sed 's/,$//')
         ansible_cmd+=(--tags "${only_tags}")
         info "Role filter (--only-roles): ${only_tags}"
