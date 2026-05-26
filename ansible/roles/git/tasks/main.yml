@@ -121,10 +121,9 @@
     cmd: |
       set -e
       shopt -s dotglob nullglob
-      items=("{{ ansible_facts['env']['HOME'] }}/Development"/*)
-      if [[ ${#items[@]} -gt 0 ]]; then
-        mv "${items[@]}" "{{ projects_base_expanded }}/"
-      fi
+      for item in "{{ ansible_facts['env']['HOME'] }}/Development"/*; do
+        mv "$item" "{{ projects_base_expanded }}/"
+      done
     executable: /bin/bash
   when:
     - dotfiles_profile != 'minimal'
