@@ -25,6 +25,8 @@
 #   --playbook <site|server>                Playbook to run (default: site)
 #   --check                                 Ansible dry-run (--check --diff)
 #   --skip-ssh                              Skip SSH deploy key generation
+#   --skip-roles <role1,role2,...>         Comma-separated list of roles to skip (by directory name)
+#   --only-roles <role1,role2,...>         Comma-separated list of roles to run exclusively (by directory name)
 #   --no-prereqs                            Skip prerequisite check/install
 #   -h, --help                              Show this help
 
@@ -110,6 +112,15 @@ OPTIONS
       used as-is. Useful when your personal SSH key already has access to
       all required repositories.
 
+    --skip-roles <role1,role2,...>
+      Comma-separated list of roles to skip when running the playbook. Role
+      names correspond to the directory names under ansible/roles/.
+
+    --only-roles <role1,role2,...>
+      Comma-separated list of roles to run exclusively. Only the specified
+      roles will be run, and all others skipped. Role names correspond to the
+      directory names under ansible/roles/. Cannot be used with --skip-roles.
+
   --no-prereqs
       Skip the prerequisite check and installation step. Use when you know
       git, python3 >= 3.9, and ansible-core >= 2.14 are already present.
@@ -145,12 +156,19 @@ SSH DEPLOY KEYS
   If neither nvim-config nor ai-config URLs are provided, the SSH phase is
   skipped entirely. --skip-ssh is still available to bypass it explicitly.
 
+ROLES
+  All roles are included by default when running the playbook. Use the
+  --skip-roles or --only-roles flags to adjust which roles are run on a given
+  execution. Role names correspond to the directory names under ansible/roles/.
+
 EXAMPLES
   ./install.sh                                    Interactive first run
   ./install.sh --check                            Dry run — preview changes
   ./install.sh --profile workstation              Skip profile prompt
   ./install.sh --profile server --playbook server Server deployment
   ./install.sh --no-prereqs --skip-ssh            Re-run Ansible only
+  ./install.sh --only-roles git,sync              Run only git and sync roles
+  ./install.sh --skip-roles nvim,ai-tools         Run all but nvim and ai-tools roles
 EOF
 }
 
