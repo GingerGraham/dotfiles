@@ -104,9 +104,9 @@
   when: git_projects | length > 0
 
 # ── XDG Projects migration ────────────────────────────────────────────────────
-# Only runs when projects_base is not ~/Development (i.e. new install or migrating).
-# Does NOT move files — creates a ~/Development symlink for backward compat.
-# Users control actual file migration manually.
+# Only runs when projects_base is not ~/Development.
+# Moves existing ~/Development contents into ~/Projects, then replaces
+# ~/Development with a compatibility symlink.
 
 - name: git | migration | check for legacy ~/Development directory
   ansible.builtin.stat:
@@ -116,12 +116,42 @@
     - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
 
+- name: git | migration | move ~/Development contents to Projects
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      shopt -s dotglob nullglob
+      items=("{{ ansible_facts['env']['HOME'] }}/Development"/*)
+      if [[ ${#items[@]} -gt 0 ]]; then
+        mv "${items[@]}" "{{ projects_base_expanded }}/"
+      fi
+    executable: /bin/bash
+  when:
+    - dotfiles_profile != 'minimal'
+    - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
+    - legacy_dev_stat is defined
+    - legacy_dev_stat.stat.exists
+    - legacy_dev_stat.stat.isdir
+    - not legacy_dev_stat.stat.islnk
+  changed_when: true
+
+- name: git | migration | remove now-empty ~/Development directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/Development"
+    state: absent
+  when:
+    - dotfiles_profile != 'minimal'
+    - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
+    - legacy_dev_stat is defined
+    - legacy_dev_stat.stat.exists
+    - legacy_dev_stat.stat.isdir
+    - not legacy_dev_stat.stat.islnk
+
 - name: git | migration | create ~/Development → Projects symlink
   ansible.builtin.file:
     src: "{{ projects_base_expanded }}"
     dest: "{{ ansible_facts['env']['HOME'] }}/Development"
     state: link
-    force: true
   when:
     - dotfiles_profile != 'minimal'
     - projects_base_expanded != ansible_facts['env']['HOME'] + '/Development'
