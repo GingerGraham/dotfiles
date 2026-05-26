@@ -39,10 +39,11 @@ unset _bash_logger_loaded
 # Zsh doesn't support ^^ and throws "bad substitution". Redefine the function
 # using zsh-native ${(U)var} syntax when running under zsh.
 # Remove this shim once upstream resolves the issue:
-# https://github.com/GingerGraham/bash-logger/issues/<NUMBER>
+# https://github.com/GingerGraham/bash-logger/issues/114
 if [[ -n "${ZSH_VERSION:-}" ]] && declare -f _get_log_level_value &>/dev/null; then
     _get_log_level_value() {
-        local level_name="${(U)1}"
+        local _temp="${1:u}"
+        local level_name="${_temp:-}"
         local line_num="${2:-}"
         case "${level_name}" in
             "DEBUG")                     echo "$LOG_LEVEL_DEBUG"     ;;
