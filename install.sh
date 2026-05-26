@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.6"
+VERSION="1.0.7"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -525,41 +525,43 @@ generate_host_vars() {
 
     if [[ "${PROFILE}" == "workstation" ]]; then
         echo
-        info "Companion repo SSH URLs (leave blank to skip cloning):"
-
-        if _role_is_suppressed "nvim"; then
-            NVIM_REPO_URL=""
-            info "  nvim-config repo: skipped (nvim role suppressed by CLI flags)"
-        else
-            read -r -p "  nvim-config repo: " NVIM_REPO_URL || true
-        fi
-
-        if _role_is_suppressed "ai-tools"; then
-            AI_REPO_URL=""
-            info "  ai-config repo:   skipped (ai-tools role suppressed by CLI flags)"
-        else
-            read -r -p "  ai-config repo:   " AI_REPO_URL || true
-        fi
-
+        info "Optional roles — answer N to disable, or provide a repo URL to enable:"
         echo
-        info "Optional role flags (press Enter to accept default):"
 
+        # nvim ─────────────────────────────────────────────────────────────────
         if _role_is_suppressed "nvim"; then
             nvim_enabled="false"
+            NVIM_REPO_URL=""
             info "  nvim role: disabled (suppressed by CLI flags)"
         else
             local nvim_prompt_answer
             read -r -p "  Enable nvim role? [Y/n]: " nvim_prompt_answer || true
-            nvim_enabled=$([[ "${nvim_prompt_answer,,}" == "n" ]] && echo "false" || echo "true")
+            if [[ "${nvim_prompt_answer,,}" == "n" ]]; then
+                nvim_enabled="false"
+                NVIM_REPO_URL=""
+            else
+                nvim_enabled="true"
+                read -r -p "  nvim-config repo SSH URL (leave blank to skip cloning): " NVIM_REPO_URL || true
+            fi
         fi
 
+        echo
+
+        # ai-tools ─────────────────────────────────────────────────────────────
         if _role_is_suppressed "ai-tools"; then
             ai_enabled="false"
+            AI_REPO_URL=""
             info "  ai-tools role: disabled (suppressed by CLI flags)"
         else
             local ai_prompt_answer
             read -r -p "  Enable ai-tools role? [Y/n]: " ai_prompt_answer || true
-            ai_enabled=$([[ "${ai_prompt_answer,,}" == "n" ]] && echo "false" || echo "true")
+            if [[ "${ai_prompt_answer,,}" == "n" ]]; then
+                ai_enabled="false"
+                AI_REPO_URL=""
+            else
+                ai_enabled="true"
+                read -r -p "  ai-config repo SSH URL (leave blank to skip cloning):   " AI_REPO_URL || true
+            fi
         fi
     else
         NVIM_REPO_URL=""
