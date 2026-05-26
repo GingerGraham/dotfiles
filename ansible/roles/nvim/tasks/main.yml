@@ -276,10 +276,30 @@
     - not (_nvim_config_git_stat.stat.exists | default(false))
   changed_when: true
 
+# Check if we have local changes in the existing config before we attempt to clone or pull.
+# If we do have local changes, skip the git operation to avoid data loss and warn the user to commit or stash their changes.
+- name: Check for local modifications in nvim-config
+  ansible.builtin.command: # noqa: command-instead-of-module
+    cmd: git status --porcelain
+    chdir: "{{ nvim_config_dir }}"
+  register: _nvim_git_status
+  changed_when: false
+  failed_when: false
+  when: _nvim_config_dir_stat.stat.exists
+
+- name: Warn and skip update when local modifications exist
+  ansible.builtin.debug:
+    msg: >-
+      nvim-config has local modifications — skipping pull to avoid data loss.
+      Commit or stash changes in {{ nvim_config_dir }}, then re-run to sync.
+  when:
+    - _nvim_config_dir_stat.stat.exists
+    - _nvim_git_status.stdout | default('') | length > 0
+
 # ansible.builtin.git handles clone-or-update in a single task.
 # update: "{{ nvim_config_update }}" controls whether subsequent runs pull.
-# force: false prevents the module from discarding local edits on pull; if
-# the working tree is dirty the task will fail with a clear message.
+# force: false is kept as a safety net but the porcelain check above means
+# we only reach this task when the working tree is clean or the dir is absent.
 - name: Clone or update nvim-config repository
   ansible.builtin.git:
     repo: "{{ _nvim_effective_repo_url }}"
@@ -288,6 +308,9 @@
     update: "{{ nvim_config_update | bool }}"
     force: false
   register: _nvim_config_git_result
+  when: >-
+    not _nvim_config_dir_stat.stat.exists
+    or (_nvim_git_status.stdout | default('') | length == 0)
 
 - name: Report nvim-config clone/update status
   ansible.builtin.debug:
