@@ -30,7 +30,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.4"
+VERSION="1.0.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -66,10 +66,10 @@ else
     _RED="" _GREEN="" _YELLOW="" _BLUE="" _BOLD="" _RESET=""
 fi
 
-info()   { echo "${_GREEN}[INFO]${_RESET}  $*"; }
-warn()   { echo "${_YELLOW}[WARN]${_RESET}  $*"; }
+info()   { echo "${_GREEN}[INFO]${_RESET}  $*" >&2; }
+warn()   { echo "${_YELLOW}[WARN]${_RESET}  $*" >&2; }
 error()  { echo "${_RED}[ERROR]${_RESET} $*" >&2; }
-header() { echo; echo "${_BOLD}${_BLUE}── $* ${_RESET}"; echo; }
+header() { { echo; echo "${_BOLD}${_BLUE}── $* ${_RESET}"; echo; } >&2; }
 die()    { error "$*"; exit 1; }
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
