@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/you/dotfiles.git"
+REPO_URL="https://github.com/GingerGraham/dotfiles.git"
 DEFAULT_PROJECTS_BASE="${HOME}/Projects"
 CLONE_SUBPATH="Personal/GitHub/dotfiles"
 
