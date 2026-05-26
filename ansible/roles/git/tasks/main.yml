@@ -1,0 +1,124 @@
+- name: git | resolve projects_base path
+  set_fact:
+    projects_base_expanded: "{{ projects_base | replace('~', ansible_env.HOME) }}"
+
+# ── Config directories ────────────────────────────────────────────────────────
+
+- name: git | ensure ~/.config/git/profiles exists
+  file:
+    path: "{{ ansible_env.HOME }}/.config/git/profiles"
+    state: directory
+    mode: '0700'
+
+# ── Static config files ───────────────────────────────────────────────────────
+
+- name: git | deploy global gitignore
+  copy:
+    src: ignore
+    dest: "{{ ansible_env.HOME }}/.config/git/ignore"
+    mode: '0644'
+
+- name: git | deploy global gitattributes
+  copy:
+    src: attributes
+    dest: "{{ ansible_env.HOME }}/.config/git/attributes"
+    mode: '0644'
+
+# ── ~/.gitconfig ──────────────────────────────────────────────────────────────
+# Rendered on every run. Stable template — only global settings and two [include]
+# lines. Does not contain any project-specific includeIf blocks.
+
+- name: git | deploy ~/.gitconfig
+  template:
+    src: gitconfig.j2
+    dest: "{{ ansible_env.HOME }}/.gitconfig"
+    mode: '0600'
+
+# ── project-includes ──────────────────────────────────────────────────────────
+# Rendered on every run from host_vars. The shell function git-add-project also
+# updates this file and host_vars/localhost.yml, so they stay in sync.
+
+- name: git | deploy project-includes
+  template:
+    src: project-includes.j2
+    dest: "{{ ansible_env.HOME }}/.config/git/project-includes"
+    mode: '0600'
+
+# ── projects.yml manifest ─────────────────────────────────────────────────────
+# Written ONCE from host_vars (force: no). The live source of truth thereafter.
+# Updated by git-add-project / git-update-project / git-remove-project.
+# Rebuild from host_vars: delete this file and re-run, or git-sync-projects --from-host-vars.
+
+- name: git | write projects.yml manifest (first run only)
+  template:
+    src: projects.yml.j2
+    dest: "{{ ansible_env.HOME }}/.config/git/projects.yml"
+    mode: '0600'
+    force: false
+
+# ── Profile .inc files ────────────────────────────────────────────────────────
+# Written ONCE per project (force: no). Managed live by git-update-project.
+# The git config --file approach in the shell functions handles field-level
+# updates without rewriting the whole file.
+
+- name: git | deploy profile .inc files (first run only per project)
+  template:
+    src: profile.inc.j2
+    dest: "{{ ansible_env.HOME }}/.config/git/profiles/{{ (item.context + '-' + item.provider) | lower | replace(' ', '-') }}.inc"
+    mode: '0600'
+    force: false
+  loop: "{{ git_projects }}"
+  loop_control:
+    label: "{{ item.context }}/{{ item.provider }}"
+  when: git_projects | length > 0
+
+# ── local.inc ─────────────────────────────────────────────────────────────────
+# Machine-local overrides: credential helpers, personal tokens, etc.
+# Never managed by Ansible beyond initial creation.
+
+- name: git | create local.inc if absent
+  copy:
+    content: |
+      # Machine-local git config — never managed by Ansible.
+      # Credential helpers, host-specific settings, etc. go here.
+    dest: "{{ ansible_env.HOME }}/.config/git/profiles/local.inc"
+    mode: '0600'
+    force: false
+
+# ── Project directories ───────────────────────────────────────────────────────
+
+- name: git | create project directories
+  file:
+    path: "{{ projects_base_expanded }}/{{ item.context }}/{{ item.provider }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ git_projects }}"
+  loop_control:
+    label: "{{ item.context }}/{{ item.provider }}"
+  when: git_projects | length > 0
+
+# ── XDG Projects migration ────────────────────────────────────────────────────
+# Only runs when projects_base is not ~/Development (i.e. new install or migrating).
+# Does NOT move files — creates a ~/Development symlink for backward compat.
+# Users control actual file migration manually.
+
+- name: git | migration | check for legacy ~/Development directory
+  stat:
+    path: "{{ ansible_env.HOME }}/Development"
+  register: legacy_dev_stat
+  when:
+    - profile != 'minimal'
+    - projects_base_expanded != ansible_env.HOME + '/Development'
+
+- name: git | migration | create ~/Development → Projects symlink
+  file:
+    src: "{{ projects_base_expanded }}"
+    dest: "{{ ansible_env.HOME }}/Development"
+    state: link
+  when:
+    - profile != 'minimal'
+    - projects_base_expanded != ansible_env.HOME + '/Development'
+    - legacy_dev_stat is defined
+    - legacy_dev_stat.stat.exists
+    - legacy_dev_stat.stat.isdir
+    - not legacy_dev_stat.stat.islnk

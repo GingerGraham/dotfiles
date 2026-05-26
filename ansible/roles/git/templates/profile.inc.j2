@@ -1,0 +1,19 @@
+# Profile: {{ item.context }}/{{ item.provider }}
+# Created by Ansible — not overwritten on re-run (force: no).
+# To update: git-update-project {{ item.context }} {{ item.provider }} --email <email>
+#            git-update-project {{ item.context }} {{ item.provider }} --signing-key <fingerprint>
+#            git-update-project {{ item.context }} {{ item.provider }} --name <name>
+# To force a full rebuild: delete this file and re-run Ansible or git-sync-projects.
+
+[user]
+    email = {{ item.email }}
+    name = {{ item.name | default(git_name) }}
+{% if item.signing_key is defined and item.signing_key %}
+    signingkey = {{ item.signing_key }}
+
+[commit]
+    gpgsign = true
+
+[tag]
+    gpgsign = true
+{% endif %}

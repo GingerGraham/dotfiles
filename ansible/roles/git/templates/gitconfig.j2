@@ -1,0 +1,56 @@
+# Managed by Ansible (roles/git). Do not edit directly.
+# Machine-local overrides → ~/.config/git/profiles/local.inc
+# Project identities     → ~/.config/git/project-includes
+# Add a project          → git-add-project <context> <provider> <email>
+
+[core]
+    excludesfile = ~/.config/git/ignore
+    attributesfile = ~/.config/git/attributes
+    editor = {{ git_editor | default('vim') }}
+
+[user]
+    name = {{ git_name }}
+    email = {{ git_default_email }}
+{% if git_default_signing_key is defined and git_default_signing_key | length > 0 %}
+    signingkey = {{ git_default_signing_key }}
+{% endif %}
+
+[commit]
+    gpgsign = {{ 'true' if (git_default_signing_key is defined and git_default_signing_key | length > 0) else 'false' }}
+
+[tag]
+    gpgsign = {{ 'true' if (git_default_signing_key is defined and git_default_signing_key | length > 0) else 'false' }}
+
+[init]
+    defaultBranch = main
+
+[push]
+    autoSetupRemote = true
+
+[pull]
+    rebase = false
+
+[diff]
+    tool = {{ git_diff_tool | default('vimdiff') }}
+
+[merge]
+    tool = {{ git_merge_tool | default('vimdiff') }}
+
+[color]
+    ui = true
+
+[filter "lfs"]
+    required = true
+    clean = git-lfs clean -- %f
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+
+# ── Project-specific identities ───────────────────────────────────────────────
+# Managed by Ansible and git-add-project. Do not add includeIf blocks manually.
+[include]
+    path = ~/.config/git/project-includes
+
+# ── Machine-local overrides ───────────────────────────────────────────────────
+# Credential helpers, work-in-progress settings — never managed by Ansible.
+[include]
+    path = ~/.config/git/profiles/local.inc

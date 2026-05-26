@@ -1,0 +1,26 @@
+# Git projects manifest — source of truth for the live system.
+#
+# Written by Ansible on first deploy only (not overwritten on re-run).
+# Updated live by: git-add-project, git-update-project, git-remove-project.
+# Rebuilt from host_vars by: git-sync-projects --from-host-vars
+#
+# If this file and host_vars/localhost.yml diverge (e.g. a project was added
+# via git-add-project on a machine where DOTFILES_REPO_DIR was not set),
+# run: git-sync-projects --status  to review differences.
+
+projects_base: {{ projects_base }}
+projects:
+{% for project in git_projects %}
+  - context: {{ project.context }}
+    provider: {{ project.provider }}
+    email: {{ project.email }}
+{% if project.signing_key is defined and project.signing_key %}
+    signing_key: {{ project.signing_key }}
+{% endif %}
+{% if project.name is defined and project.name %}
+    name: {{ project.name }}
+{% endif %}
+{% if project.ssh_key is defined and project.ssh_key %}
+    ssh_key: {{ project.ssh_key }}
+{% endif %}
+{% endfor %}

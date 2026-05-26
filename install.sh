@@ -46,8 +46,10 @@ ARG_BECOME_PASS="false"
 # Populated during execution (by generate_host_vars or read from existing file)
 PROFILE=""
 MACHINE_NAME=""
-GIT_PERSONAL_EMAIL=""
-GIT_WORK_EMAIL=""
+PROJECTS_BASE=""
+GIT_NAME=""
+GIT_DEFAULT_EMAIL=""
+GIT_DEFAULT_SIGNING_KEY=""
 NVIM_REPO_URL=""
 AI_REPO_URL=""
 
@@ -339,13 +341,16 @@ check_prereqs() {
 # Profile note: nvim_config_repo_url and ai_config_repo_url are only prompted
 # for the 'workstation' profile. Server and minimal profiles do not run the
 # nvim or ai-tools roles, so collecting these values would be misleading.
-# This design choice is documented here and in the shell role README.
+#
+# Git note: the old git_personal_email / git_work_email fields are replaced by
+# git_name, git_default_email, and a git_projects list. At least one project
+# is expected for a workstation profile, but the loop can be skipped — projects
+# can be added later with git-add-project once the shell is deployed.
 
 _read_yaml_scalar() {
-    # Reads a bare scalar value from a simple YAML file.
+    # Reads a bare scalar value from a simple YAML file (no yq dependency).
     # Usage: _read_yaml_scalar <key> <file>
-    local key="$1"
-    local file="$2"
+    local key="$1" file="$2"
     grep "^${key}:" "${file}" 2>/dev/null \
         | sed "s/^${key}: *//" \
         | tr -d '"' \
@@ -359,16 +364,16 @@ generate_host_vars() {
 
     if [[ -f "${host_vars_file}" ]]; then
         info "host_vars/localhost.yml already exists — skipping. Delete it to regenerate."
-        # Read URLs from the existing file so the SSH phase can use them.
+        # Read back the values the SSH phase and Ansible run need.
         NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
-        AI_REPO_URL=$(_read_yaml_scalar  "ai_config_repo_url"   "${host_vars_file}")
-        PROFILE=$(_read_yaml_scalar "dotfiles_profile" "${host_vars_file}")
+        AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
+        PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         return 0
     fi
 
     header "Machine Configuration"
     info "Creating ansible/host_vars/localhost.yml"
-    info "This file is gitignored and will never be overwritten by Ansible."
+    info "This file is gitignored and will never be committed or overwritten by Ansible."
     echo
 
     # ── Profile ───────────────────────────────────────────────────────────────
@@ -383,8 +388,8 @@ generate_host_vars() {
         read -r -p "Profile [1]: " choice || true
         case "${choice:-1}" in
             1|workstation) PROFILE="workstation" ;;
-            2|server)      PROFILE="server" ;;
-            3|minimal)     PROFILE="minimal" ;;
+            2|server)      PROFILE="server"      ;;
+            3|minimal)     PROFILE="minimal"     ;;
             *)             PROFILE="workstation" ;;
         esac
     fi
@@ -400,16 +405,70 @@ generate_host_vars() {
         MACHINE_NAME="${MACHINE_NAME:-${default_hostname}}"
     fi
     info "Machine name: ${MACHINE_NAME}"
+    echo
 
-    # ── Git emails ────────────────────────────────────────────────────────────
-    while [[ -z "${GIT_PERSONAL_EMAIL}" ]]; do
-        read -r -p "Personal git email: " GIT_PERSONAL_EMAIL || true
+    # ── Git identity ──────────────────────────────────────────────────────────
+    # Gathers the global identity (default fallback) and a projects list.
+    # Projects map context/provider pairs to specific email addresses.
+    # This replaces the old git_personal_email / git_work_email approach.
+
+    echo "Git global identity (used when no project-specific profile matches):"
+    while [[ -z "${GIT_NAME}" ]]; do
+        read -r -p "  Your full name: " GIT_NAME || true
     done
-    read -r -p "Work git email (leave blank if not applicable): " GIT_WORK_EMAIL || true
+    while [[ -z "${GIT_DEFAULT_EMAIL}" ]]; do
+        read -r -p "  Default email:  " GIT_DEFAULT_EMAIL || true
+    done
+    read -r -p "  Default GPG signing key fingerprint (optional, Enter to skip): " \
+        GIT_DEFAULT_SIGNING_KEY || true
+    echo
+
+    # ── Projects base ─────────────────────────────────────────────────────────
+    read -r -p "Projects base directory [~/Projects]: " PROJECTS_BASE || true
+    PROJECTS_BASE="${PROJECTS_BASE:-~/Projects}"
+    echo
+
+    # ── Git projects ──────────────────────────────────────────────────────────
+    # Gather context/provider pairs. At least one is recommended for workstation.
+    # The loop is optional — skip it by pressing Enter at the first context prompt.
+    # Additional projects can always be added later with: git-add-project
+
+    local git_projects_yaml=""
+
+    if [[ "${PROFILE}" != "minimal" ]]; then
+        echo "Git projects — context/provider pairs (e.g. Personal/GitHub, Acme/AzureDevOps)."
+        echo "Press Enter at the context prompt to finish. Add more later with: git-add-project"
+        echo
+
+        while true; do
+            local ctx prov email key
+            read -r -p "  Context (or Enter to finish): " ctx || true
+            [[ -z "${ctx}" ]] && break
+
+            read -r -p "  Provider for ${ctx} (GitHub/GitLab/Bitbucket/AzureDevOps/other): " prov || true
+            [[ -z "${prov}" ]] && { warn "Provider cannot be empty — skipping."; continue; }
+
+            while [[ -z "${email}" ]]; do
+                read -r -p "  Email for ${ctx}/${prov}: " email || true
+            done
+
+            read -r -p "  GPG signing key for ${ctx}/${prov} (optional, Enter to skip): " key || true
+
+            # Append to the YAML block — indented for the git_projects list
+            git_projects_yaml+="  - context: \"${ctx}\"\n"
+            git_projects_yaml+="    provider: \"${prov}\"\n"
+            git_projects_yaml+="    email: \"${email}\"\n"
+            [[ -n "${key}" ]] && git_projects_yaml+="    signing_key: \"${key}\"\n"
+
+            info "Added ${ctx}/${prov}"
+            echo
+            # Reset email for next iteration
+            email=""
+            key=""
+        done
+    fi
 
     # ── Companion repo URLs ───────────────────────────────────────────────────
-    # Only prompted for workstation profile. Server and minimal profiles do not
-    # run the nvim or ai-tools Ansible roles, so these URLs would go unused.
     if [[ "${PROFILE}" == "workstation" ]]; then
         echo
         info "Companion repo SSH URLs (leave blank to skip cloning):"
@@ -423,7 +482,9 @@ generate_host_vars() {
 
     # ── Write file ────────────────────────────────────────────────────────────
     mkdir -p "$(dirname "${host_vars_file}")"
-    cat > "${host_vars_file}" << EOF
+
+    {
+        cat << EOF
 # Generated by install.sh on $(date '+%Y-%m-%d')
 # Gitignored — do not commit this file.
 # Delete this file and re-run install.sh to regenerate interactively.
@@ -431,11 +492,34 @@ generate_host_vars() {
 
 dotfiles_profile: ${PROFILE}
 machine_name: "${MACHINE_NAME}"
-git_personal_email: "${GIT_PERSONAL_EMAIL}"
-git_work_email: "${GIT_WORK_EMAIL}"
+
+# ── Companion repos ────────────────────────────────────────────────────────
 nvim_config_repo_url: "${NVIM_REPO_URL}"
-ai_config_repo_url: "${AI_REPO_URL}"
+ai_config_repo_url:   "${AI_REPO_URL}"
+
+# ── Git global identity ────────────────────────────────────────────────────
+projects_base: ${PROJECTS_BASE}
+git_name: "${GIT_NAME}"
+git_default_email: "${GIT_DEFAULT_EMAIL}"
 EOF
+
+        # Signing key is optional — only write if provided
+        if [[ -n "${GIT_DEFAULT_SIGNING_KEY}" ]]; then
+            echo "git_default_signing_key: \"${GIT_DEFAULT_SIGNING_KEY}\""
+        fi
+
+        # Projects list — empty list if none were gathered
+        echo ""
+        echo "# ── Git projects ──────────────────────────────────────────────────────────"
+        if [[ -n "${git_projects_yaml}" ]]; then
+            echo "git_projects:"
+            printf '%b' "${git_projects_yaml}"
+        else
+            echo "git_projects: []"
+            echo "# Add projects later with: git-add-project <context> <provider> <email>"
+        fi
+
+    } > "${host_vars_file}"
 
     info "Created ${host_vars_file}"
 }

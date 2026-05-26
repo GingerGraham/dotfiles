@@ -23,3 +23,6 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 export HISTSIZE=10000
 export HISTFILESIZE=20000
 export HISTCONTROL="ignoredups:erasedups"
+
+# ── Dotfiles repository ───────────────────────────────────────────────────────
+export DOTFILES_REPO_DIR="${HOME}/Projects/Personal/GitHub/dotfiles"
