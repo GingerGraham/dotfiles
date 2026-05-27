@@ -2,6 +2,8 @@
 # dotfiles managed
 # Thin stub — delegates entirely to loader.sh
 
+# shellcheck disable=SC2034
+DOTFILES_LOGGER_NAME="zshrc"
 SHELL_CONFIG_DIR="${HOME}/.config/shell"
 
 if [[ -f "${SHELL_CONFIG_DIR}/loader.sh" ]]; then

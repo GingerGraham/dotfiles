@@ -11,6 +11,8 @@ elif [[ -f /etc/bash.bashrc ]]; then
     source /etc/bash.bashrc
 fi
 
+# shellcheck disable=SC2034
+DOTFILES_LOGGER_NAME="bashrc"
 SHELL_CONFIG_DIR="${HOME}/.config/shell"
 
 if [[ -f "${SHELL_CONFIG_DIR}/loader.sh" ]]; then
