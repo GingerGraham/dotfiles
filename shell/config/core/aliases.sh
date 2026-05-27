@@ -94,13 +94,13 @@ fi
 # ── Shell-specific ────────────────────────────────────────────────────────────
 if [[ -n "${ZSH_VERSION}" ]]; then
     alias zshconfig='${VISUAL:-vim} "${HOME}/.zshrc"'
-    alias zshsource='source "${HOME}/.zshrc"'
+    # alias zshsource='source "${HOME}/.zshrc"'
     alias zshreload="exec zsh"
     alias history="history 1"
 fi
 
 if [[ -n "${BASH_VERSION}" ]]; then
     alias bashconfig='${VISUAL:-vim} "${HOME}/.bashrc"'
-    alias bashsource='source "${HOME}/.bashrc"'
+    # alias bashsource='source "${HOME}/.bashrc"'
     alias bashreload="exec bash"
 fi

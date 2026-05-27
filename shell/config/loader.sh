@@ -17,7 +17,13 @@ for _bl_path in \
         source "${_bl_path}"
         # init_logger must be called after sourcing — script name auto-detection
         # returns "unknown" from RC file context so we set it explicitly.
-        init_logger --name "shell" --level INFO
+        # DOTFILES_LOGGER_NAME and DOTFILES_LOG_LEVEL are injected by the
+        # bashsource/zshsource functions; both fall back to safe defaults for
+        # a normal shell startup.
+        init_logger \
+            --name  "${DOTFILES_LOGGER_NAME:-shell}" \
+            --level "${DOTFILES_LOG_LEVEL:-INFO}"
+        unset DOTFILES_LOG_LEVEL DOTFILES_LOGGER_NAME
         _bash_logger_loaded=true
         break
     fi

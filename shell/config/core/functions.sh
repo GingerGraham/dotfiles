@@ -120,17 +120,46 @@ get-my-functions() {
     fi
 }
 
-# ── Misc utilities ────────────────────────────────────────────────────────────
-get-go-version() {
-    if command -v go &>/dev/null; then
-        GO_VERSION="$(go version | awk '{print $3}' | tr -d 'go')"
-        export GO_VERSION
-    else
-        log_error "go is not installed"
-        return 1
-    fi
+# ── Shell Sourcing ────────────────────────────────────────
+# Private helper — not intended to be called directly.
+# Usage: _dotfiles_source_rc <rc_file> <logger_name> [--debug|--info|--notice|
+#                             --warn|--error|--critical|--alert|--emergency]
+_dotfiles_source_rc() {
+    local rc_file="$1"
+    local logger_name="$2"
+    shift 2
+    local log_level="INFO"
+
+    for arg in "$@"; do
+        case "$arg" in
+            --debug)     log_level="DEBUG"     ;;
+            --info)      log_level="INFO"       ;;
+            --notice)    log_level="NOTICE"     ;;
+            --warn)      log_level="WARN"       ;;
+            --error)     log_level="ERROR"      ;;
+            --critical)  log_level="CRITICAL"   ;;
+            --alert)     log_level="ALERT"      ;;
+            --emergency) log_level="EMERGENCY"  ;;
+            *)
+                echo "dotfiles: unknown option: $arg" >&2
+                echo "  valid levels: --debug --info --notice --warn --error --critical --alert --emergency" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    export DOTFILES_LOG_LEVEL="$log_level"
+    export DOTFILES_LOGGER_NAME="$logger_name"
+    # shellcheck disable=SC1090
+    source "$rc_file"
+    unset DOTFILES_LOG_LEVEL DOTFILES_LOGGER_NAME 2>/dev/null || true
 }
 
+# shellcheck disable=SC2148
+[[ -n "${BASH_VERSION:-}" ]] && bashsource() { _dotfiles_source_rc ~/.bashrc "bashrc" "$@"; }
+[[ -n "${ZSH_VERSION:-}" ]]  && zshsource()  { _dotfiles_source_rc ~/.zshrc  "zshrc"  "$@"; }
+
+# ── Misc utilities ────────────────────────────────────────────────────────────
 get-python-versions() {
     echo "[INFO] Python versions found:"
     for version in /usr/bin/python3*; do
