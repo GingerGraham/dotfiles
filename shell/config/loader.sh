@@ -40,31 +40,33 @@ unset _bash_logger_loaded
 # using zsh-native ${(U)var} syntax when running under zsh.
 # Remove this shim once upstream resolves the issue:
 # https://github.com/GingerGraham/bash-logger/issues/114
-if [[ -n "${ZSH_VERSION:-}" ]] && declare -f _get_log_level_value &>/dev/null; then
-    _get_log_level_value() {
-        local _temp="${1:u}"
-        local level_name="${_temp:-}"
-        local line_num="${2:-}"
-        case "${level_name}" in
-            "DEBUG")                     echo "$LOG_LEVEL_DEBUG"     ;;
-            "INFO")                      echo "$LOG_LEVEL_INFO"      ;;
-            "NOTICE")                    echo "$LOG_LEVEL_NOTICE"    ;;
-            "WARN"|"WARNING")            echo "$LOG_LEVEL_WARN"      ;;
-            "ERROR"|"ERR")               echo "$LOG_LEVEL_ERROR"     ;;
-            "CRITICAL"|"CRIT")           echo "$LOG_LEVEL_CRITICAL"  ;;
-            "ALERT")                     echo "$LOG_LEVEL_ALERT"     ;;
-            "EMERGENCY"|"EMERG"|"FATAL") echo "$LOG_LEVEL_EMERGENCY" ;;
-            *)
-                if [[ "$1" =~ ^[0-7]$ ]]; then
-                    echo "$1"
-                else
-                    [[ -n "$line_num" ]] && echo "Warning: Invalid log level '$1' at line $line_num, using INFO" >&2
-                    echo "$LOG_LEVEL_INFO"
-                fi
-                ;;
-        esac
-    }
-fi
+# As of 2026-05-27 Issue 114 is fixed - commenting out initially prior to removal.
+
+# if [[ -n "${ZSH_VERSION:-}" ]] && declare -f _get_log_level_value &>/dev/null; then
+#     _get_log_level_value() {
+#         local _temp="${1:u}"
+#         local level_name="${_temp:-}"
+#         local line_num="${2:-}"
+#         case "${level_name}" in
+#             "DEBUG")                     echo "$LOG_LEVEL_DEBUG"     ;;
+#             "INFO")                      echo "$LOG_LEVEL_INFO"      ;;
+#             "NOTICE")                    echo "$LOG_LEVEL_NOTICE"    ;;
+#             "WARN"|"WARNING")            echo "$LOG_LEVEL_WARN"      ;;
+#             "ERROR"|"ERR")               echo "$LOG_LEVEL_ERROR"     ;;
+#             "CRITICAL"|"CRIT")           echo "$LOG_LEVEL_CRITICAL"  ;;
+#             "ALERT")                     echo "$LOG_LEVEL_ALERT"     ;;
+#             "EMERGENCY"|"EMERG"|"FATAL") echo "$LOG_LEVEL_EMERGENCY" ;;
+#             *)
+#                 if [[ "$1" =~ ^[0-7]$ ]]; then
+#                     echo "$1"
+#                 else
+#                     [[ -n "$line_num" ]] && echo "Warning: Invalid log level '$1' at line $line_num, using INFO" >&2
+#                     echo "$LOG_LEVEL_INFO"
+#                 fi
+#                 ;;
+#         esac
+#     }
+# fi
 
 # ── OS / WSL / Distro detection (runs once) ──────────────────────────────────
 _raw_os="$(uname -s)"
