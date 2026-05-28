@@ -223,10 +223,21 @@ elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
     [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
 else
     log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
-    # Ensure a usable PS1 exists if the system one wasn't already set.
-    # /etc/bashrc should have set one already; this is a last resort.
-    if [[ -n "${BASH_VERSION:-}" && -z "${PS1:-}" ]]; then
-        PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        # We own the prompt in this branch — don't defer to whatever /etc/bash.bashrc
+        # set. Ubuntu ships a plain PS1 there; the colour upgrade normally happens in
+        # the user ~/.bashrc we've replaced. Replicate that logic here.
+        if [[ -x /usr/bin/tput ]] && tput setaf 1 &>/dev/null; then
+            PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+        else
+            PS1='\u@\h:\w\$ '
+        fi
+        # Preserve xterm/rxvt window title, same as Ubuntu default ~/.bashrc does
+        case "${TERM}" in
+            xterm*|rxvt*)
+                PS1="\[\e]0;\u@\h: \w\a\]${PS1}"
+                ;;
+        esac
     fi
 fi
 
