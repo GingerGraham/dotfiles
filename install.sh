@@ -415,6 +415,60 @@ _read_yaml_scalar() {
         || true
 }
 
+# ── Backfill a companion repo URL into an existing host_vars file ─────────────
+# Called when host_vars already exists but a role is being explicitly targeted
+# via --only-roles and its URL is currently empty.
+#
+# Args:
+#   $1  role name          (e.g. "nvim")
+#   $2  url_key            (e.g. "nvim_config_repo_url")
+#   $3  enabled_key        (e.g. "dotfiles_nvim_enabled")
+#   $4  prompt label       (e.g. "nvim-config repo SSH URL")
+#   $5  host_vars_file     path to the YAML file
+#
+# Side effects:
+#   - Prompts the user if the conditions are met
+#   - Patches $url_key and $enabled_key in the file via sed
+#   - Updates the NVIM_REPO_URL / AI_REPO_URL global as appropriate
+_backfill_role_url() {
+    local role="$1" url_key="$2" enabled_key="$3" label="$4" file="$5"
+    local current_url
+
+    # Only act when this role is explicitly being targeted and not suppressed
+    ! _role_is_suppressed "${role}" || return 0
+    [[ -n "${ARG_ONLY_ROLES}" ]] || return 0
+    echo "${ARG_ONLY_ROLES}" | tr ',' '\n' | grep -qx "${role}" || return 0
+
+    current_url=$(_read_yaml_scalar "${url_key}" "${file}")
+    [[ -z "${current_url}" ]] || return 0   # Already set — nothing to do
+
+    header "Backfilling ${role} configuration"
+    warn "${role} was skipped on the original run — its repo URL is empty in host_vars."
+    info "Provide the URL now to enable it, or press Enter to leave it disabled."
+    echo
+
+    local new_url=""
+    read -r -p "  ${label} (leave blank to skip): " new_url || true
+
+    if [[ -z "${new_url}" ]]; then
+        info "No URL provided — ${role} will remain disabled."
+        return 0
+    fi
+
+    # Patch the URL key in the file
+    sed -i "s|^${url_key}:.*|${url_key}: \"${new_url}\"|" "${file}"
+    # Flip the enabled flag to true
+    sed -i "s|^${enabled_key}:.*|${enabled_key}: true|" "${file}"
+
+    info "Updated ${url_key} in host_vars."
+
+    # Update the global variable for the SSH phase
+    case "${role}" in
+        nvim)     NVIM_REPO_URL="${new_url}" ;;
+        ai-tools) AI_REPO_URL="${new_url}"   ;;
+    esac
+}
+
 generate_host_vars() {
     local host_vars_file="${REPO_ROOT}/ansible/host_vars/localhost.yml"
 
@@ -427,6 +481,17 @@ generate_host_vars() {
         # Honour CLI suppression — don't hand suppressed role URLs to the SSH phase.
         _role_is_suppressed "nvim"     && NVIM_REPO_URL=""
         _role_is_suppressed "ai-tools" && AI_REPO_URL=""
+
+        # ── Backfill empty URLs for roles being explicitly re-run ─────────────
+        # If --only-roles targets a role whose URL was left empty on the first
+        # run (e.g. the user answered N then, but now wants to add the role),
+        # prompt for just those values and patch them into the existing file.
+        # This avoids forcing the user to delete host_vars and start over.
+        _backfill_role_url "nvim"     "nvim_config_repo_url" "dotfiles_nvim_enabled" \
+            "nvim-config repo SSH URL" "${host_vars_file}"
+        _backfill_role_url "ai-tools" "ai_config_repo_url"   "dotfiles_ai_tools_enabled" \
+            "ai-config repo SSH URL"  "${host_vars_file}"
+
         return 0
     fi
 
