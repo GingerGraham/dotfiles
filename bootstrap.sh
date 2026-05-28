@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="1.0.2"
 REPO_URL="https://github.com/GingerGraham/dotfiles.git"
 DEFAULT_PROJECTS_BASE="${HOME}/Projects"
 CLONE_SUBPATH="Personal/GitHub/dotfiles"
+
+# ── Print bootstrap script version ────────────────────────────────────────────
+echo "Bootstrap script version ${VERSION}"
 
 # ── Parse bootstrap's own args, collect the rest for pass-through ─────────────
 
@@ -53,7 +57,9 @@ fi
 # ── Clone ─────────────────────────────────────────────────────────────────────
 
 if [[ -d "${clone_target}/.git" ]]; then
-    echo "Repo already exists at ${clone_target} — skipping clone."
+    echo "Repo already exists at ${clone_target} — pulling latest changes..."
+    git -C "${clone_target}" pull --ff-only \
+        || echo "WARNING: git pull failed (local changes or network issue) — proceeding with existing state." >&2
 else
     echo "Cloning dotfiles to ${clone_target}..."
     mkdir -p "${clone_target}"
