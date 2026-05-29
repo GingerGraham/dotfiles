@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.9"
+VERSION="1.0.10"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -212,11 +212,19 @@ parse_args() {
                 [[ -z "${2:-}" ]] && die "--skip-roles requires a comma-separated list of role names"
                 ARG_SKIP_ROLES="$2"
                 shift 2
+                while [[ $# -gt 0 && "${1}" != --* && "${1}" != -* ]]; do
+                    ARG_SKIP_ROLES="${ARG_SKIP_ROLES},${1}"
+                    shift
+                done
                 ;;
             --only-roles)
                 [[ -z "${2:-}" ]] && die "--only-roles requires a comma-separated list of role names"
                 ARG_ONLY_ROLES="$2"
                 shift 2
+                while [[ $# -gt 0 && "${1}" != --* && "${1}" != -* ]]; do
+                    ARG_ONLY_ROLES="${ARG_ONLY_ROLES},${1}"
+                    shift
+                done
                 ;;
             --check)      ARG_CHECK="true"; shift ;;
             --skip-ssh)   ARG_SKIP_SSH="true"; shift ;;
