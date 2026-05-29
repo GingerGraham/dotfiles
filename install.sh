@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.10"
+VERSION="1.0.11"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -342,6 +342,19 @@ install_prereqs() {
                 esac
             done
             [[ ${#pkgs[@]} -gt 0 ]] && sudo zypper install -y "${pkgs[@]}"
+            ;;
+        pacman)
+            local pkgs=()
+            for dep in "${missing[@]}"; do
+                case "${dep}" in
+                    git)                     pkgs+=(git) ;;
+                    python3|python3-upgrade) pkgs+=(python3) ;;
+                    ansible|ansible-upgrade) pkgs+=(ansible) ;;
+                esac
+            done
+            if [[ ${#pkgs[@]} -gt 0 ]]; then
+                sudo pacman -Sy --noconfirm "${pkgs[@]}"
+            fi
             ;;
         *)
             die "Cannot install prerequisites: unknown package manager. Install git, python3 >= 3.9, and ansible-core >= 2.14 manually, then re-run with --no-prereqs."
