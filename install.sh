@@ -883,7 +883,6 @@ setup_become() {
 }
 
 cleanup_become() {
-    [[ "${_SUDOERS_WRITTEN}" == "true" ]] || return 0
     [[ -f "${_SUDOERS_DROPIN}" ]] || return 0
 
     if sudo -n rm -f "${_SUDOERS_DROPIN}"; then
@@ -891,9 +890,6 @@ cleanup_become() {
         return 0
     fi
 
-    # sudo -n failed — session expired or drop-in not yet picked up.
-    # Check any fd for a usable TTY, not just stdin (process substitution
-    # leaves fd 0 as a pipe even when the terminal is visible).
     if [[ -t 0 ]] || [[ -t 1 ]] || [[ -t 2 ]]; then
         warn "Sudo session expired — re-authenticating to remove the sudoers drop-in..."
         if sudo rm -f "${_SUDOERS_DROPIN}"; then
@@ -902,7 +898,6 @@ cleanup_become() {
         fi
     fi
 
-    # All attempts failed.
     echo >&2
     error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     error "  SECURITY WARNING: sudoers drop-in was NOT removed"
@@ -915,6 +910,7 @@ cleanup_become() {
     error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo >&2
 }
+
 # ── Phase 4: Ansible ──────────────────────────────────────────────────────────
 run_ansible() {
     header "Ansible"
