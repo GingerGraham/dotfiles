@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.12"
+VERSION="1.0.13"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -886,17 +886,15 @@ cleanup_become() {
     [[ "${_SUDOERS_WRITTEN}" == "true" ]] || return 0
     [[ -f "${_SUDOERS_DROPIN}" ]] || return 0
 
-    # The drop-in itself grants NOPASSWD, so sudo should work here.
-    # If the sudo session has expired AND the drop-in is somehow not being
-    # read (e.g. sudoers.d include order, PAM cache flush), the rm will fail.
-    if sudo -n rm -f "${_SUDOERS_DROPIN}" 2>/dev/null; then
+    if sudo -n rm -f "${_SUDOERS_DROPIN}"; then
         info "Temporary sudoers drop-in removed."
         return 0
     fi
 
-    # -n failed: session expired and drop-in wasn't picked up in time.
-    # Try re-prompting if we have a TTY.
-    if [[ -t 0 ]]; then
+    # sudo -n failed — session expired or drop-in not yet picked up.
+    # Check any fd for a usable TTY, not just stdin (process substitution
+    # leaves fd 0 as a pipe even when the terminal is visible).
+    if [[ -t 0 ]] || [[ -t 1 ]] || [[ -t 2 ]]; then
         warn "Sudo session expired — re-authenticating to remove the sudoers drop-in..."
         if sudo rm -f "${_SUDOERS_DROPIN}"; then
             info "Temporary sudoers drop-in removed."
@@ -904,7 +902,7 @@ cleanup_become() {
         fi
     fi
 
-    # All attempts failed — make the security risk impossible to miss.
+    # All attempts failed.
     echo >&2
     error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     error "  SECURITY WARNING: sudoers drop-in was NOT removed"
@@ -917,7 +915,6 @@ cleanup_become() {
     error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo >&2
 }
-
 # ── Phase 4: Ansible ──────────────────────────────────────────────────────────
 run_ansible() {
     header "Ansible"
