@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.15"
+VERSION="1.0.16"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -853,9 +853,10 @@ SSHEOF
 
 # ── Phase 3b: Sudo / become setup ────────────────────────────────────────────
 # Validates sudo access once interactively, then on Linux writes a scoped
-# NOPASSWD drop-in so Ansible's become pipe isn't blocked by use_pty
-# (enabled by default on Ubuntu 22.04+). On macOS, use_pty is not an issue
-# and --ask-become-pass is forwarded directly to Ansible instead.
+# NOPASSWD drop-in so Ansible's become pipe isn't blocked by use_pty.
+# The drop-in explicitly disables use_pty for this user so that cleanup_become
+# can remove it non-interactively via sudo -n — Fedora and Manjaro both enable
+# use_pty by default which would otherwise block passwordless non-TTY sudo.
 setup_become() {
     [[ "${ARG_BECOME_PASS}" == "true" ]] || return 0
 
@@ -866,7 +867,8 @@ setup_become() {
 
     if [[ "$(uname -s)" == "Linux" ]]; then
         info "Writing temporary sudoers drop-in for Ansible run..."
-        echo "${USER} ALL=(ALL) NOPASSWD: ALL" \
+        printf 'Defaults:%s !use_pty\n%s ALL=(ALL) NOPASSWD: ALL\n' \
+            "${USER}" "${USER}" \
             | sudo tee "${_SUDOERS_DROPIN}" > /dev/null
         sudo chmod 0440 "${_SUDOERS_DROPIN}"
 
@@ -885,19 +887,17 @@ setup_become() {
 cleanup_become() {
     [[ -f "${_SUDOERS_DROPIN}" ]] || return 0
 
-    if sudo -n rm -f "${_SUDOERS_DROPIN}"; then
+    # !use_pty in the drop-in means sudo -n works without a TTY even on
+    # Fedora/Manjaro where use_pty is on by default. If this fails the file
+    # is either already gone or the drop-in is unreadable — either way we
+    # cannot do better than warn.
+    if sudo -n rm -f "${_SUDOERS_DROPIN}" 2>/dev/null; then
         info "Temporary sudoers drop-in removed."
         return 0
     fi
 
-    if [[ -t 0 ]] || [[ -t 1 ]] || [[ -t 2 ]]; then
-        warn "Sudo session expired — re-authenticating to remove the sudoers drop-in..."
-        if sudo rm -f "${_SUDOERS_DROPIN}"; then
-            info "Temporary sudoers drop-in removed."
-            return 0
-        fi
-    fi
-
+    # sudo -n failed despite NOPASSWD + !use_pty — something unexpected.
+    # File is still present; make the security risk impossible to miss.
     echo >&2
     error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     error "  SECURITY WARNING: sudoers drop-in was NOT removed"
