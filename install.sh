@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.16"
+VERSION="1.0.17"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -885,16 +885,26 @@ setup_become() {
 }
 
 cleanup_become() {
+    error "DEBUG: cleanup_become called, _SUDOERS_DROPIN=${_SUDOERS_DROPIN}"
+    error "DEBUG: file exists check: $(test -f "${_SUDOERS_DROPIN}" && echo YES || echo NO)"
     [[ -f "${_SUDOERS_DROPIN}" ]] || return 0
 
     # !use_pty in the drop-in means sudo -n works without a TTY even on
     # Fedora/Manjaro where use_pty is on by default. If this fails the file
     # is either already gone or the drop-in is unreadable — either way we
     # cannot do better than warn.
-    if sudo -n rm -f "${_SUDOERS_DROPIN}" 2>/dev/null; then
+    error "DEBUG: attempting sudo -n rm"
+    sudo -n rm -f "${_SUDOERS_DROPIN}"
+    local rc=$?
+    error "DEBUG: sudo -n rm exit code: ${rc}"
+    if [[ ${rc} -eq 0 ]]; then
         info "Temporary sudoers drop-in removed."
         return 0
     fi
+    # if sudo -n rm -f "${_SUDOERS_DROPIN}" 2>/dev/null; then
+    #     info "Temporary sudoers drop-in removed."
+    #     return 0
+    # fi
 
     # sudo -n failed despite NOPASSWD + !use_pty — something unexpected.
     # File is still present; make the security risk impossible to miss.
