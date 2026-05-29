@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.8"
+VERSION="1.0.9"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -47,6 +47,12 @@ ARG_BECOME_PASS="false"
 ARG_PROJECTS_BASE=""
 ARG_SKIP_ROLES=""
 ARG_ONLY_ROLES=""
+
+# ── Become / sudo state ───────────────────────────────────────────────────────
+# Tracks whether a temporary sudoers drop-in was written so cleanup_become()
+# can remove it on exit, even if Ansible fails or the user hits Ctrl-C.
+_SUDOERS_DROPIN="/etc/sudoers.d/99-dotfiles-install"
+_SUDOERS_WRITTEN="false"
 
 # Populated during execution (by generate_host_vars or read from existing file)
 PROFILE=""
@@ -824,6 +830,44 @@ SSHEOF
     read -r -p "Press Enter once all deploy keys have been added to GitHub..." || true
 }
 
+# ── Phase 3b: Sudo / become setup ────────────────────────────────────────────
+# Validates sudo access once interactively, then on Linux writes a scoped
+# NOPASSWD drop-in so Ansible's become pipe isn't blocked by use_pty
+# (enabled by default on Ubuntu 22.04+). On macOS, use_pty is not an issue
+# and --ask-become-pass is forwarded directly to Ansible instead.
+setup_become() {
+    [[ "${ARG_BECOME_PASS}" == "true" ]] || return 0
+
+    info "Validating sudo access..."
+    if ! sudo -v; then
+        die "sudo authentication failed — check your password and try again."
+    fi
+
+    if [[ "$(uname -s)" == "Linux" ]]; then
+        info "Writing temporary sudoers drop-in for Ansible run..."
+        echo "${USER} ALL=(ALL) NOPASSWD: ALL" \
+            | sudo tee "${_SUDOERS_DROPIN}" > /dev/null
+        sudo chmod 0440 "${_SUDOERS_DROPIN}"
+
+        if ! sudo visudo -c -f "${_SUDOERS_DROPIN}" &>/dev/null; then
+            sudo rm -f "${_SUDOERS_DROPIN}"
+            die "sudoers drop-in failed validation — aborting."
+        fi
+
+        _SUDOERS_WRITTEN="true"
+        info "Temporary NOPASSWD drop-in written — will be removed after Ansible completes."
+    fi
+    # macOS: no drop-in needed; --ask-become-pass is passed directly to
+    # ansible-playbook in run_ansible() instead.
+}
+
+cleanup_become() {
+    if [[ "${_SUDOERS_WRITTEN}" == "true" ]] && [[ -f "${_SUDOERS_DROPIN}" ]]; then
+        sudo rm -f "${_SUDOERS_DROPIN}"
+        info "Temporary sudoers drop-in removed."
+    fi
+}
+
 # ── Phase 4: Ansible ──────────────────────────────────────────────────────────
 run_ansible() {
     header "Ansible"
@@ -835,8 +879,15 @@ run_ansible() {
         || die "Playbook not found: ${playbook_dir}/${playbook}"
 
     local ansible_cmd=(ansible-playbook "${playbook}")
-    [[ "${ARG_CHECK}"       == "true" ]] && ansible_cmd+=(--check --diff)
-    [[ "${ARG_BECOME_PASS}" == "true" ]] && ansible_cmd+=(--ask-become-pass)
+    [[ "${ARG_CHECK}" == "true" ]] && ansible_cmd+=(--check --diff)
+
+    # On Linux, setup_become() has already handled sudo via a NOPASSWD drop-in,
+    # so --ask-become-pass must NOT be passed — it would trigger a second prompt
+    # that Ansible cannot satisfy (use_pty incompatibility on Ubuntu 22.04+).
+    # On macOS, use_pty is not an issue so the flag is passed through directly.
+    if [[ "${ARG_BECOME_PASS}" == "true" ]] && [[ "$(uname -s)" == "Darwin" ]]; then
+        ansible_cmd+=(--ask-become-pass)
+    fi
 
     # --only-roles: always include common, then the requested roles.
     # Deduplication handles the case where the caller explicitly includes common.
@@ -921,6 +972,11 @@ main() {
     else
         info "Skipping SSH key generation (--skip-ssh)."
     fi
+
+    # Phase 3b — Sudo setup (validate + drop-in on Linux, validate only on macOS)
+    # Trap ensures the drop-in is removed even on Ansible failure or Ctrl-C.
+    trap cleanup_become EXIT INT TERM
+    setup_become
 
     # Phase 4 — Ansible
     run_ansible
