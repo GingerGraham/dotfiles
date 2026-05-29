@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.14"
+VERSION="1.0.15"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -1016,16 +1016,20 @@ main() {
         info "Skipping SSH key generation (--skip-ssh)."
     fi
 
-    # Phase 3b — Sudo setup (validate + drop-in on Linux, validate only on macOS)
-    # Trap ensures the drop-in is removed even on Ansible failure or Ctrl-C.
-    trap cleanup_become EXIT INT TERM
+   # Phase 3b — Sudo setup
+    trap cleanup_become INT TERM ERR   # abnormal exits only, NOT EXIT
     setup_become
 
     # Phase 4 — Ansible
     run_ansible
 
-    # Phase 5 — Summary
+    # Phase 5 — Cleanup (explicit on happy path)
+    cleanup_become
+
+    # Phase 6 — Summary
     post_run
+
+    trap - INT TERM ERR   # disarm — cleanup already done
 }
 
 main "$@"
