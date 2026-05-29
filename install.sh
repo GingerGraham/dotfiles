@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.11"
+VERSION="1.0.12"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -883,10 +883,39 @@ setup_become() {
 }
 
 cleanup_become() {
-    if [[ "${_SUDOERS_WRITTEN}" == "true" ]] && [[ -f "${_SUDOERS_DROPIN}" ]]; then
-        sudo rm -f "${_SUDOERS_DROPIN}"
+    [[ "${_SUDOERS_WRITTEN}" == "true" ]] || return 0
+    [[ -f "${_SUDOERS_DROPIN}" ]] || return 0
+
+    # The drop-in itself grants NOPASSWD, so sudo should work here.
+    # If the sudo session has expired AND the drop-in is somehow not being
+    # read (e.g. sudoers.d include order, PAM cache flush), the rm will fail.
+    if sudo -n rm -f "${_SUDOERS_DROPIN}" 2>/dev/null; then
         info "Temporary sudoers drop-in removed."
+        return 0
     fi
+
+    # -n failed: session expired and drop-in wasn't picked up in time.
+    # Try re-prompting if we have a TTY.
+    if [[ -t 0 ]]; then
+        warn "Sudo session expired — re-authenticating to remove the sudoers drop-in..."
+        if sudo rm -f "${_SUDOERS_DROPIN}"; then
+            info "Temporary sudoers drop-in removed."
+            return 0
+        fi
+    fi
+
+    # All attempts failed — make the security risk impossible to miss.
+    echo >&2
+    error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    error "  SECURITY WARNING: sudoers drop-in was NOT removed"
+    error ""
+    error "  ${_SUDOERS_DROPIN} grants passwordless sudo to ${USER}."
+    error "  Remove it manually before doing anything else:"
+    error ""
+    error "    sudo rm ${_SUDOERS_DROPIN}"
+    error ""
+    error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo >&2
 }
 
 # ── Phase 4: Ansible ──────────────────────────────────────────────────────────
