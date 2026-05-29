@@ -66,44 +66,55 @@
 # Section 2 — Package manager installation (nvim_install_method == 'package')
 # ============================================================================
 
-# ── RHEL family (not Fedora): EPEL required for neovim ───────────────────────
-# Fedora ships neovim in its standard repos. RHEL, Rocky, AlmaLinux, and
-# CentOS Stream do not — neovim lives in EPEL.
-- name: Ensure EPEL repository is enabled (RHEL-family, non-Fedora)
+# ── RedHat family (Fedora, RHEL, Rocky, Alma, CentOS Stream) ─────────────────
+- name: Install neovim via dnf (RedHat family)
   ansible.builtin.dnf:
-    name: epel-release
-    state: present
-  become: true
-  when:
-    - _nvim_needs_install | bool
-    - nvim_install_method == 'package'
-    - ansible_facts['os_family'] == 'RedHat'
-    - ansible_facts['distribution'] != 'Fedora'
-
-# Update apt cache before installing on Debian/Ubuntu. The generic
-# ansible.builtin.package module does not accept update_cache, so this
-# is a separate distro-specific step.
-- name: Update apt package cache (Debian / Ubuntu)
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
-  become: true
-  when:
-    - _nvim_needs_install | bool
-    - nvim_install_method == 'package'
-    - ansible_facts['os_family'] == 'Debian'
-
-# Single generic install task for all Linux package managers.
-# ansible.builtin.package auto-detects dnf / apt / zypper from the OS family.
-- name: Install neovim via system package manager (Linux)
-  ansible.builtin.package:
     name: neovim
     state: present
   become: true
   when:
     - _nvim_needs_install | bool
     - nvim_install_method == 'package'
-    - ansible_facts['system'] == 'Linux'
+    - ansible_facts['os_family'] == 'RedHat'
+
+# ── Debian family (Ubuntu, Debian, Mint) ─────────────────────────────────────
+# apt cache update is handled by the preceding task in this section.
+- name: Install neovim via apt (Debian family)
+  ansible.builtin.apt:
+    name: neovim
+    state: present
+  become: true
+  when:
+    - _nvim_needs_install | bool
+    - nvim_install_method == 'package'
+    - ansible_facts['os_family'] == 'Debian'
+
+# ── openSUSE / SLES ───────────────────────────────────────────────────────────
+# No ansible.builtin.zypper exists; community.general.zypper requires the
+# collection. ansible.builtin.command avoids the dependency entirely.
+- name: Install neovim via zypper (Suse family)
+  ansible.builtin.command:
+    cmd: zypper install -y --no-confirm neovim
+  become: true
+  register: _nvim_zypper_result
+  changed_when: "'already installed' not in _nvim_zypper_result.stdout"
+  when:
+    - _nvim_needs_install | bool
+    - nvim_install_method == 'package'
+    - ansible_facts['os_family'] == 'Suse'
+
+# ── Arch / Manjaro ────────────────────────────────────────────────────────────
+# Same reasoning as zypper — no builtin module, no community.general dependency.
+- name: Install neovim via pacman (Arch family)
+  ansible.builtin.command:
+    cmd: pacman -S --noconfirm neovim
+  become: true
+  register: _nvim_pacman_result
+  changed_when: "'neovim is up to date' not in _nvim_pacman_result.stdout"
+  when:
+    - _nvim_needs_install | bool
+    - nvim_install_method == 'package'
+    - ansible_facts['os_family'] == 'Archlinux'
 
 # Homebrew has no ansible.builtin backend; ansible.builtin.command is used
 # instead of community.general.homebrew to avoid the collection dependency.

@@ -49,7 +49,8 @@ effects) when `nvim_config_repo_url` is empty.
 | Fedora | `dnf install neovim` |
 | RHEL / Rocky / Alma | EPEL enabled, then `dnf install neovim` |
 | Ubuntu / Debian | `apt install neovim` |
-| openSUSE / SLES | `zypper install neovim` |
+| openSUSE / SLES | `zypper install neovim` (via ansible.builtin.command) |
+| Arch / Manjaro  | `pacman -S neovim` (via ansible.builtin.command)      |
 | macOS | `brew install neovim` |
 
 ### When the packaged version is too old
