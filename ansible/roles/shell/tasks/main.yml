@@ -36,6 +36,7 @@
           echo "$link"
         fi
       done
+    executable: /bin/bash
   register: _legacy_symlink_find
   changed_when: false
 
