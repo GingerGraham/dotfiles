@@ -145,3 +145,6 @@
     dest: "{{ shell_config_dir }}/env/90-local.sh"
     mode: "0644"
     force: false
+
+- name: shell | migration | process pre-existing .zshrc content
+  ansible.builtin.include_tasks: migration.yml

@@ -189,9 +189,9 @@ if command -v oh-my-posh &>/dev/null; then
 elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
-elif [[ -n "${ZSH_VERSION}" ]] && [[ -f /usr/share/zsh/manjaro-zsh-prompt ]]; then
-    # Distro-native prompt — Manjaro/Arch. Config already sourced in distro/arch.sh.
-    source /usr/share/zsh/manjaro-zsh-prompt
+elif [[ -n "${ZSH_VERSION}" ]] && [[ -n "${_DOTFILES_DISTRO_PROMPT_FILE:-}" ]] && [[ -f "${_DOTFILES_DISTRO_PROMPT_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${_DOTFILES_DISTRO_PROMPT_FILE}"
     export DOTFILES_PROMPT_ENGINE="distro-native"
     log_debug "loader: using distro-native zsh prompt"
 else
@@ -214,6 +214,7 @@ else
     fi
 fi
 
+unset _DOTFILES_DISTRO_PROMPT_FILE
 unset -f _source_if_cmd _source_if_any_cmd
 
 # ── Tier 2: platform/ ─────────────────────────────────────────────────────────
@@ -267,10 +268,15 @@ unset _lazy_file
 unset -f _register_lazy_stubs
 
 # ── Local overrides (always last) ─────────────────────────────────────────────
-# shellcheck disable=SC1090
 _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 # shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
+
+# ── Migration pending warning ─────────────────────────────────────────────────
+if [[ -f "${_local_env}" ]] && grep -qF "DOTFILES_MIGRATION_PENDING" "${_local_env}" 2>/dev/null; then
+    log_warn "Unreviewed content from your previous .zshrc is in ${_local_env}"
+    log_warn "Review it, uncomment what you want to keep, then remove the DOTFILES_MIGRATION_PENDING block to clear this warning."
+fi
 unset _local_env
 
 # ── PATH deduplication ────────────────────────────────────────────────────────
