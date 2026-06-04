@@ -21,7 +21,7 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | Scenario                                         | Behaviour                                      |
 | ------------------------------------------------ | ---------------------------------------------- |
 | linuxDotFiles symlink at `~/.bashrc` etc.        | Removed; replaced with dotfiles symlink        |
-| Real file (non-symlink) at `~/.bashrc` etc.      | Backed up to `~/.bashrc.pre-dotfiles.bak`; replaced |
+| Real file (non-symlink) at `~/.bashrc` etc. | Backed up to `~/.config/dotfiles/migration/<filename>.pre-dotfiles.bak`; replaced |
 | `~/.config/shell` is already the correct symlink | No change (Ansible no-op)                      |
 | `~/.config/shell` is a real directory            | **Role fails with instructions** — manual step required |
 | `90-local.sh` already exists                     | Left untouched (`force: false`)                |

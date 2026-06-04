@@ -271,13 +271,18 @@ unset -f _register_lazy_stubs
 _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 # shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
+unset _local_env
 
 # ── Migration pending warning ─────────────────────────────────────────────────
-if [[ -f "${_local_env}" ]] && grep -qF "DOTFILES_MIGRATION_PENDING" "${_local_env}" 2>/dev/null; then
-    log_warn "Unreviewed content from your previous .zshrc is in ${_local_env}"
-    log_warn "Review it, uncomment what you want to keep, then remove the DOTFILES_MIGRATION_PENDING block to clear this warning."
+_migration_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/migration"
+if [[ -d "${_migration_dir}" ]]; then
+    for _bak in "${_migration_dir}"/*.pre-dotfiles.bak; do
+        [[ -f "${_bak}" ]] || continue
+        log_warn "Migration backup: ${_bak}"
+        log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
+    done
 fi
-unset _local_env
+unset _migration_dir _bak
 
 # ── PATH deduplication ────────────────────────────────────────────────────────
 # Run after all tiers so every tool that extended PATH is already done.

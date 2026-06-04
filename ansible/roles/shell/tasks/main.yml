@@ -99,10 +99,16 @@
 # Any real (non-symlink) stub files are backed up with a .pre-dotfiles.bak
 # suffix before being replaced. force: false means existing backups are
 # preserved — a second Ansible run will not overwrite them.
+- name: shell | migration | ensure migration backup directory exists
+  ansible.builtin.file:
+    path: "{{ dotfiles_migration_dir }}"
+    state: directory
+    mode: "0700"
+
 - name: Back up existing non-symlink stub files
   ansible.builtin.copy:
     src: "{{ item.item.dest }}"
-    dest: "{{ item.item.dest }}.pre-dotfiles.bak"
+    dest: "{{ dotfiles_migration_dir }}/{{ item.item.dest | basename }}.pre-dotfiles.bak"
     remote_src: true
     force: false
     mode: "0644"

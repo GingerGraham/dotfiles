@@ -1,100 +1,30 @@
 # ============================================================================
-# Section 7 — Migrate pre-existing .zshrc content into 90-local.sh
+# Section 7 — Warn if migration backups exist
 # ============================================================================
-# If a .zshrc.pre-dotfiles.bak exists, read it, strip lines that match known
-# distro boilerplate (now handled natively by dotfiles), and if anything
-# meaningful remains, append a commented migration block to 90-local.sh.
+# Backup files are written by the stub deployment tasks in main.yml whenever
+# a real (non-symlink) file was found at a stub destination. The user's
+# original content is preserved intact — no parsing or transformation.
 #
-# The sentinel comment DOTFILES_MIGRATION_PENDING is the signal loader.sh uses
-# to emit a startup warning. Removing the block (after reviewing/uncommenting
-# what you want) clears the warning.
-#
-# This section is idempotent: it checks for the sentinel before acting, so
-# re-running Ansible on a machine where the user has already cleared the block
-# does nothing.
+# This task simply reports what was backed up so the user knows to review.
 
-- name: shell | migration | check for .zshrc backup
-  ansible.builtin.stat:
-    path: "{{ ansible_facts['env']['HOME'] }}/.zshrc.pre-dotfiles.bak"
-  register: _zshrc_bak
+- name: shell | migration | check for backup files
+  ansible.builtin.find:
+    paths: "{{ dotfiles_migration_dir }}"
+    patterns: "*.pre-dotfiles.bak"
+  register: _migration_backups
 
-- name: shell | migration | check if 90-local.sh already has migration block
-  ansible.builtin.command:
-    cmd: grep -qF "DOTFILES_MIGRATION_PENDING" "{{ shell_config_dir }}/env/90-local.sh"
-  register: _migration_sentinel_check
-  changed_when: false
-  failed_when: false
-  when: _zshrc_bak.stat.exists
-
-- name: shell | migration | read strip patterns
-  ansible.builtin.set_fact:
-    _strip_patterns: >-
-      {{
-        lookup('file', role_path + '/files/zshrc-migration-strip-patterns.txt')
-        | split('\n')
-        | reject('match', '^\\s*#')
-        | reject('match', '^\\s*$')
-        | list
-      }}
-  when:
-    - _zshrc_bak.stat.exists
-    - _migration_sentinel_check.rc != 0
-
-- name: shell | migration | read backup content
-  ansible.builtin.slurp:
-    src: "{{ ansible_facts['env']['HOME'] }}/.zshrc.pre-dotfiles.bak"
-  register: _zshrc_bak_content
-  when:
-    - _zshrc_bak.stat.exists
-    - _migration_sentinel_check.rc != 0
-
-- name: shell | migration | filter backup to non-boilerplate lines
-  ansible.builtin.set_fact:
-    _migration_lines: >-
-      {{
-        (_zshrc_bak_content.content | b64decode).split('\n')
-        | reject('match', '^\\s*#')
-        | reject('match', '^\\s*$')
-        | reject('in', _strip_patterns)
-        | list
-      }}
-  when:
-    - _zshrc_bak.stat.exists
-    - _migration_sentinel_check.rc != 0
-    - _zshrc_bak_content is defined
-
-- name: shell | migration | append migration block to 90-local.sh
-  ansible.builtin.blockinfile:
-    path: "{{ shell_config_dir }}/env/90-local.sh"
-    marker: "# {mark} DOTFILES_MIGRATION_PENDING"
-    marker_begin: "BEGIN"
-    marker_end: "END"
-    block: |
-      # Content below was found in your .zshrc before dotfiles was installed.
-      # Boilerplate lines handled natively by dotfiles have been stripped.
-      #
-      # Review what remains. Uncomment anything you want to keep, then DELETE
-      # this entire block (including the BEGIN/END marker lines) to clear the
-      # startup warning.
-      #
-      # Your original .zshrc is preserved at ~/.zshrc.pre-dotfiles.bak
-      #
-      {% for line in _migration_lines %}
-      # {{ line }}
-      {% endfor %}
-  when:
-    - _zshrc_bak.stat.exists
-    - _migration_sentinel_check.rc != 0
-    - _migration_lines is defined
-    - _migration_lines | length > 0
-
-- name: shell | migration | report clean migration (nothing to preserve)
+- name: shell | migration | report backed up files
   ansible.builtin.debug:
     msg: >-
-      .zshrc backup contained only known distro boilerplate — no migration
-      block written to 90-local.sh.
-  when:
-    - _zshrc_bak.stat.exists
-    - _migration_sentinel_check.rc != 0
-    - _migration_lines is defined
-    - _migration_lines | length == 0
+      Backed up to {{ dotfiles_migration_dir }}/{{ item.path | basename }}.
+      Review it and add anything you want to keep to
+      {{ shell_config_dir }}/env/90-local.sh
+  loop: "{{ _migration_backups.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: _migration_backups.files | length > 0
+
+- name: shell | migration | confirm clean migration
+  ansible.builtin.debug:
+    msg: "No pre-existing shell config files found — clean install."
+  when: _migration_backups.files | length == 0
