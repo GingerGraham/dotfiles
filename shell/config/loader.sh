@@ -40,40 +40,6 @@ if [[ "${_bash_logger_loaded}" == "false" ]]; then
 fi
 unset _bash_logger_loaded
 
-# ── zsh compatibility shim for bash-logger ────────────────────────────────────
-# bash-logger uses ${var^^} (bash-only uppercase expansion) in _get_log_level_value.
-# Zsh doesn't support ^^ and throws "bad substitution". Redefine the function
-# using zsh-native ${(U)var} syntax when running under zsh.
-# Remove this shim once upstream resolves the issue:
-# https://github.com/GingerGraham/bash-logger/issues/114
-# As of 2026-05-27 Issue 114 is fixed - commenting out initially prior to removal.
-
-# if [[ -n "${ZSH_VERSION:-}" ]] && declare -f _get_log_level_value &>/dev/null; then
-#     _get_log_level_value() {
-#         local _temp="${1:u}"
-#         local level_name="${_temp:-}"
-#         local line_num="${2:-}"
-#         case "${level_name}" in
-#             "DEBUG")                     echo "$LOG_LEVEL_DEBUG"     ;;
-#             "INFO")                      echo "$LOG_LEVEL_INFO"      ;;
-#             "NOTICE")                    echo "$LOG_LEVEL_NOTICE"    ;;
-#             "WARN"|"WARNING")            echo "$LOG_LEVEL_WARN"      ;;
-#             "ERROR"|"ERR")               echo "$LOG_LEVEL_ERROR"     ;;
-#             "CRITICAL"|"CRIT")           echo "$LOG_LEVEL_CRITICAL"  ;;
-#             "ALERT")                     echo "$LOG_LEVEL_ALERT"     ;;
-#             "EMERGENCY"|"EMERG"|"FATAL") echo "$LOG_LEVEL_EMERGENCY" ;;
-#             *)
-#                 if [[ "$1" =~ ^[0-7]$ ]]; then
-#                     echo "$1"
-#                 else
-#                     [[ -n "$line_num" ]] && echo "Warning: Invalid log level '$1' at line $line_num, using INFO" >&2
-#                     echo "$LOG_LEVEL_INFO"
-#                 fi
-#                 ;;
-#         esac
-#     }
-# fi
-
 # ── OS / WSL / Distro detection (runs once) ──────────────────────────────────
 _raw_os="$(uname -s)"
 case "${_raw_os}" in
@@ -100,11 +66,13 @@ if [[ "${DOTFILES_OS}" == "Linux" && -f /etc/os-release ]]; then
         fedora|rhel|centos|rocky|almalinux) DOTFILES_DISTRO="rhel" ;;
         ubuntu|debian|linuxmint|pop)        DOTFILES_DISTRO="debian" ;;
         opensuse*|sles)                     DOTFILES_DISTRO="suse" ;;
+        manjaro|arch|endeavouros|garuda) DOTFILES_DISTRO="arch" ;;
         *)
             case "${_distro_id_like}" in
                 *rhel*|*fedora*|*centos*) DOTFILES_DISTRO="rhel"   ;;
                 *debian*|*ubuntu*)        DOTFILES_DISTRO="debian" ;;
                 *suse*)                   DOTFILES_DISTRO="suse"   ;;
+                *arch*)                   DOTFILES_DISTRO="arch"    ;;
                 *)                        DOTFILES_DISTRO="unknown" ;;
             esac
             ;;
@@ -221,6 +189,11 @@ if command -v oh-my-posh &>/dev/null; then
 elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
+elif [[ -n "${ZSH_VERSION}" ]] && [[ -f /usr/share/zsh/manjaro-zsh-prompt ]]; then
+    # Distro-native prompt — Manjaro/Arch. Config already sourced in distro/arch.sh.
+    source /usr/share/zsh/manjaro-zsh-prompt
+    export DOTFILES_PROMPT_ENGINE="distro-native"
+    log_debug "loader: using distro-native zsh prompt"
 else
     log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
     if [[ -n "${BASH_VERSION:-}" ]]; then
