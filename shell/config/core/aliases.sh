@@ -80,6 +80,11 @@ if command -v get-my-functions &>/dev/null; then
     alias rs="clear && get-my-functions"
 fi
 
+# ── get-my-installers shortcut ─────────────────────────────────────────────────
+if command -v get-my-installers &>/dev/null; then
+    alias installers="get-my-installers"
+fi
+
 # ── SSH hosts ─────────────────────────────────────────────────────────────────
 # Overridden by core/ssh.sh once list-ssh-hosts is defined
 alias sshhosts='grep -E "^Host\s" "${HOME}/.ssh/config"'

@@ -91,7 +91,9 @@ elevate-cmd() {
 }
 
 # ── Introspection: list loaded functions and aliases ──────────────────────────
+# install-* functions are excluded — use get-my-installers (alias: installers) to list them.
 get-my-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
     echo
     echo "[INFO] Loaded functions:"
     if [[ -n "${BASH_VERSION}" ]]; then
@@ -99,15 +101,19 @@ get-my-functions() {
         declare -F \
             | awk '{print $3}' \
             | grep -v '^_' \
+            | grep -v '^install-' \
             | while read -r fn; do
-                grep -rlq "^${fn}[[:space:]]*()" "${SHELL_CONFIG_DIR:-${HOME}/.config/shell}" 2>/dev/null \
+                grep -rlq "^${fn}[[:space:]]*()" "${_config_dir}" 2>/dev/null \
                     && echo "${fn}"
               done \
             | sort | column
     elif [[ -n "${ZSH_VERSION}" ]]; then
         grep -Eho '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' \
-            "${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"/**/*.sh 2>/dev/null \
-            | sed 's/()//' | awk -F: '{print $NF}' | grep -v '^_' | sort | column
+            "${_config_dir}"/**/*.sh 2>/dev/null \
+            | sed 's/[[:space:]]*()//' | awk -F: '{print $NF}' \
+            | grep -v '^_' \
+            | grep -v '^install-' \
+            | sort -u | column
     fi
 
     echo
@@ -118,6 +124,27 @@ get-my-functions() {
         # shellcheck disable=SC2154
         alias -L | sed 's/alias //g' | awk -F= '{print $1}' | sort | column
     fi
+    echo
+    echo "[INFO] Run 'get-my-installers' (or 'installers') to list install commands."
+}
+
+# ── Introspection: list install-* functions ───────────────────────────────────
+get-my-installers() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    echo
+    echo "[INFO] Install commands (lazy-loaded on first use):"
+    if [[ -n "${BASH_VERSION}" ]]; then
+        declare -F \
+            | awk '{print $3}' \
+            | grep '^install-' \
+            | sort | column
+    elif [[ -n "${ZSH_VERSION}" ]]; then
+        grep -Eho '^install-[a-zA-Z0-9_-]+[[:space:]]*\(\)' \
+            "${_config_dir}"/**/*.sh 2>/dev/null \
+            | sed 's/[[:space:]]*()//' \
+            | sort -u | column
+    fi
+    echo
 }
 
 # ── Shell Sourcing ────────────────────────────────────────
