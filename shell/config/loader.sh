@@ -280,6 +280,7 @@ if [[ -d "${_migration_dir}" ]]; then
         log_warn "Migration backup: ${_bak}"
         log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
     done < <(find "${_migration_dir}" -maxdepth 1 -name "*.pre-dotfiles.bak" -type f 2>/dev/null)
+    log_warn "Migration pending: review backup files and merge any needed content into env/90-local.sh, then remove ${_migration_dir} to clear this warning."
 fi
 unset _migration_dir _bak
 
