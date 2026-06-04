@@ -181,42 +181,6 @@ if [[ "${DOTFILES_SHELL}" == "zsh" ]] && {
     [[ -f "${SHELL_CONFIG_DIR}/tools/zsh-plugins.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/zsh-plugins.sh"
 fi
 
-# Prompt engine — mutually exclusive; omp wins if both are present.
-# OMZ guard also requires zsh since it only makes sense there.
-if command -v oh-my-posh &>/dev/null; then
-    # shellcheck disable=SC1091
-    [[ -f "${SHELL_CONFIG_DIR}/tools/omp.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omp.sh"
-elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
-    # shellcheck disable=SC1091
-    [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
-elif [[ -n "${ZSH_VERSION}" ]] && [[ -n "${_DOTFILES_DISTRO_PROMPT_FILE:-}" ]] && [[ -f "${_DOTFILES_DISTRO_PROMPT_FILE}" ]]; then
-    # shellcheck disable=SC1090
-    source "${_DOTFILES_DISTRO_PROMPT_FILE}"
-    export DOTFILES_PROMPT_ENGINE="distro-native"
-    log_debug "loader: using distro-native zsh prompt"
-else
-    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
-    if [[ -n "${BASH_VERSION:-}" ]]; then
-        # We own the prompt in this branch — don't defer to whatever /etc/bash.bashrc
-        # set. Ubuntu ships a plain PS1 there; the colour upgrade normally happens in
-        # the user ~/.bashrc we've replaced. Replicate that logic here.
-        if [[ -x /usr/bin/tput ]] && tput setaf 1 &>/dev/null; then
-            PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-        else
-            PS1='\u@\h:\w\$ '
-        fi
-        # Preserve xterm/rxvt window title, same as Ubuntu default ~/.bashrc does
-        case "${TERM}" in
-            xterm*|rxvt*)
-                PS1="\[\e]0;\u@\h: \w\a\]${PS1}"
-                ;;
-        esac
-    fi
-fi
-
-unset _DOTFILES_DISTRO_PROMPT_FILE
-unset -f _source_if_cmd _source_if_any_cmd
-
 # ── Tier 2: platform/ ─────────────────────────────────────────────────────────
 case "${DOTFILES_OS}" in
     Linux) _platform_file="${SHELL_CONFIG_DIR}/platform/linux.sh" ;;
@@ -267,6 +231,42 @@ done
 unset _lazy_file
 unset -f _register_lazy_stubs
 
+# Prompt engine — mutually exclusive; omp wins if both are present.
+# OMZ guard also requires zsh since it only makes sense there.
+if command -v oh-my-posh &>/dev/null; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/omp.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omp.sh"
+elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
+elif [[ -n "${ZSH_VERSION}" ]] && [[ -n "${_DOTFILES_DISTRO_PROMPT_FILE:-}" ]] && [[ -f "${_DOTFILES_DISTRO_PROMPT_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${_DOTFILES_DISTRO_PROMPT_FILE}"
+    export DOTFILES_PROMPT_ENGINE="distro-native"
+    log_debug "loader: using distro-native zsh prompt"
+else
+    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        # We own the prompt in this branch — don't defer to whatever /etc/bash.bashrc
+        # set. Ubuntu ships a plain PS1 there; the colour upgrade normally happens in
+        # the user ~/.bashrc we've replaced. Replicate that logic here.
+        if [[ -x /usr/bin/tput ]] && tput setaf 1 &>/dev/null; then
+            PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+        else
+            PS1='\u@\h:\w\$ '
+        fi
+        # Preserve xterm/rxvt window title, same as Ubuntu default ~/.bashrc does
+        case "${TERM}" in
+            xterm*|rxvt*)
+                PS1="\[\e]0;\u@\h: \w\a\]${PS1}"
+                ;;
+        esac
+    fi
+fi
+
+unset _DOTFILES_DISTRO_PROMPT_FILE
+unset -f _source_if_cmd _source_if_any_cmd
+
 # ── Local overrides (always last) ─────────────────────────────────────────────
 _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 # shellcheck disable=SC1090
@@ -276,11 +276,10 @@ unset _local_env
 # ── Migration pending warning ─────────────────────────────────────────────────
 _migration_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/migration"
 if [[ -d "${_migration_dir}" ]]; then
-    for _bak in "${_migration_dir}"/*.pre-dotfiles.bak; do
-        [[ -f "${_bak}" ]] || continue
+    while IFS= read -r _bak; do
         log_warn "Migration backup: ${_bak}"
         log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
-    done
+    done < <(find "${_migration_dir}" -maxdepth 1 -name "*.pre-dotfiles.bak" -type f 2>/dev/null)
 fi
 unset _migration_dir _bak
 
