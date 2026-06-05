@@ -2,6 +2,19 @@
 # Shell configuration loader — sources all tiers in order.
 # This file is the single entry point; stubs in ~/.bashrc and ~/.zshrc source it.
 
+# ── Defensive bash state reset ────────────────────────────────────────────────
+# Some distro /etc/bashrc files (notably openSUSE) are multi-shell universal
+# files that may enable POSIX mode, set shell options, or leave state that
+# breaks bash-specific syntax in subsequently sourced files.
+# Reset to known-good bash state before loading anything.
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    set +o posix          2>/dev/null || true  # openSUSE /etc/bash.bashrc
+    set +o noglob         2>/dev/null || true  # ksh compat fragments
+    unset POSIXLY_CORRECT 2>/dev/null || true  # GNU tools posix trigger
+fi
+
+# ── Environment setup ───────────────────────────────────────────────────────────
+
 SHELL_CONFIG_DIR="${HOME}/.config/shell"
 export SHELL_CONFIG_DIR
 

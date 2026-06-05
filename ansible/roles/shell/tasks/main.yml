@@ -104,6 +104,8 @@
     path: "{{ dotfiles_migration_dir }}"
     state: directory
     mode: "0700"
+  when:
+    - _stub_stats.results | selectattr('stat.exists') | selectattr('stat.islnk', 'equalto', false) | list | length > 0
 
 - name: Back up existing non-symlink stub files
   ansible.builtin.copy:
