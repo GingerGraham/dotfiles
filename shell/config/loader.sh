@@ -275,14 +275,17 @@ unset _local_env
 
 # ── Migration pending warning ─────────────────────────────────────────────────
 _migration_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/migration"
-if [[ -d "${_migration_dir}" ]]; then
-    log_warn "Migration pending: review backup files and merge any needed content into env/90-local.sh, then remove ${_migration_dir} to clear this warning."
-    while IFS= read -r _bak; do
-        log_warn "Migration backup: ${_bak}"
-        log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
-    done < <(find "${_migration_dir}" -maxdepth 1 -name "*.pre-dotfiles.bak" -type f 2>/dev/null)
-fi
-unset _migration_dir _bak
+_migration_found=false
+while IFS= read -r _bak; do
+    if [[ -z "${_bak}" ]]; then continue; fi
+    if [[ "${_migration_found}" == "false" ]]; then
+        log_warn "Migration pending: review backup files and merge any needed content into env/90-local.sh, then remove ${_migration_dir} to clear this warning."
+        _migration_found=true
+    fi
+    log_warn "Migration backup: ${_bak}"
+    log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
+done < <(find "${_migration_dir}" -maxdepth 1 -name "*.pre-dotfiles.bak" -type f 2>/dev/null)
+unset _migration_dir _migration_found _bak
 
 # ── PATH deduplication ────────────────────────────────────────────────────────
 # Run after all tiers so every tool that extended PATH is already done.
