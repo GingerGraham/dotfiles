@@ -182,9 +182,12 @@ _dotfiles_source_rc() {
     unset DOTFILES_LOG_LEVEL DOTFILES_LOGGER_NAME 2>/dev/null || true
 }
 
-# shellcheck disable=SC2148
-[[ -n "${BASH_VERSION:-}" ]] && bashsource() { _dotfiles_source_rc ~/.bashrc "bashrc" "$@"; }
-[[ -n "${ZSH_VERSION:-}" ]]  && zshsource()  { _dotfiles_source_rc ~/.zshrc  "zshrc"  "$@"; }
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    bashsource() { _dotfiles_source_rc ~/.bashrc "bashrc" "$@"; }
+fi
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    zshsource() { _dotfiles_source_rc ~/.zshrc "zshrc" "$@"; }
+fi
 
 # ── Misc utilities ────────────────────────────────────────────────────────────
 get-python-versions() {
