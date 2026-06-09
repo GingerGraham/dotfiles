@@ -1197,6 +1197,15 @@ gpg-push-github() {
 
     log_info "Selected key: ${selected_keyid}"
 
+    # ── Key title (label shown on GitHub) ─────────────────────────────────────
+    local default_title
+    default_title="$(hostname -s 2>/dev/null || hostname)"
+    local key_title
+    echo
+    read -r -p "  Key title for GitHub [${default_title}]: " key_title
+    key_title="${key_title:-${default_title}}"
+    log_info "Key will be uploaded as: ${key_title}"
+
     # ── Export public key to temp file ────────────────────────────────────────
     local tmp_file
     tmp_file="$(mktemp /tmp/gpg-github-XXXXXX.asc)"
@@ -1212,7 +1221,7 @@ gpg-push-github() {
     # ── Push to GitHub ────────────────────────────────────────────────────────
     log_info "Pushing public key to GitHub (${gh_user})..."
     local gh_output gh_rc
-    gh_output="$(gh gpg-key add "${tmp_file}" 2>&1)"
+    gh_output="$(gh gpg-key add "${tmp_file}" --title "${key_title}" 2>&1)"
     gh_rc=$?
     rm -f "${tmp_file}"
 
