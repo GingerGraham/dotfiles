@@ -21,8 +21,10 @@ Master key  [C]    certify only — sign other keys and subkeys
 The master key is used only for certifying: creating subkeys, signing other people's keys, and extending expiry. Day-to-day operations use subkeys exclusively. This means:
 
 - If a subkey is compromised, it can be revoked and replaced without losing your identity
-- The master key can be exported and stored offline (Bitwarden, encrypted USB) so it is never exposed during normal use
+- The master key can be exported and stored offline (Bitwarden, encrypted USB) and then **removed from the local keyring** so it is never exposed during normal use
 - Git commit signing uses the `[S]` subkey fingerprint, not the master key
+
+When the master key is needed again (adding a subkey, extending expiry, certifying another key), import it from Bitwarden, perform the operation, then remove it again.
 
 ## Prerequisites
 
@@ -62,7 +64,7 @@ If starting from scratch:
 gpg-create-key
 ```
 
-The wizard prompts for name, email, optional comment, expiry (default 2 years), and whether to add an authentication subkey. It creates the master `[C]` key and `[S]`/`[E]` subkeys in one pass, then prints the recommended next steps.
+The wizard prompts for name, email, optional comment, master key expiry (default: no expiry), and subkey expiry (default: 2 years). It creates the master `[C]` key and `[S]`/`[E]` subkeys in one pass, then prints the recommended next steps with the specific commands for your new key's fingerprint.
 
 ### 3. Generate a revocation certificate
 
@@ -92,13 +94,25 @@ This stores four Bitwarden secure notes:
 
 Re-running `gpg-export-bitwarden` after a rotation updates the existing notes rather than creating duplicates.
 
-### 5. Wire up git commit signing
+### 5. Remove the master key from local keyring
+
+Once the master key is backed up, remove its secret material from this machine:
+
+```bash
+gpg-remove-master <fingerprint>
+```
+
+The function verifies you've confirmed the backup, then removes only the primary secret key — subkeys remain intact. Afterwards the key shows as `sec#` in `gpg --list-secret-keys`, meaning the public key and subkeys are present but the master secret is offline.
+
+Your subkeys are sufficient for all day-to-day operations: signing commits, encrypting files, and SSH authentication.
+
+### 6. Wire up git commit signing
 
 ```bash
 gpg-list-signing-keys your@email.com
 ```
 
-This prints the long key ID of your `[S]` subkey and the exact `git-add-project` command to run. Copy the key ID and use it when adding a git project context:
+This prints the long key ID of your `[S]` subkey and the exact `git-add-project` command to run:
 
 ```bash
 git-add-project Personal GitHub your@email.com <signing-subkey-id>
@@ -122,81 +136,59 @@ Then re-run Ansible to apply it to `~/.gitconfig`.
 
 ### Extending expiry
 
-Keys are created with a 2-year default. Extend before they expire — GPG will warn you with `Key is expired` errors if you let them lapse.
-
 ```bash
 gpg-extend-expiry <fingerprint> 2y
 ```
 
-This extends both the master key and all subkeys. After extending, re-export to Bitwarden to keep the backup current:
+This extends both the master key and all subkeys. The master secret key must be present locally — if it has been removed, import it first:
 
 ```bash
-gpg-export-bitwarden <fingerprint>
+export BW_SESSION=$(bw unlock --raw)
+gpg-import-bitwarden
+gpg-extend-expiry <fingerprint> 2y
+gpg-export-bitwarden <fingerprint>    # update backup with new expiry
+gpg-remove-master <fingerprint>       # take master offline again
 ```
 
 ### Rotating a subkey
 
-Rotation replaces an individual subkey without changing your identity. Use this for annual key hygiene or if a subkey is compromised:
+Rotation replaces an individual subkey without changing your identity:
 
 ```bash
 gpg-rotate-subkey <master-fp> <subkey-fp> sign 2y
 ```
 
-Interactive mode (no arguments) will list available subkeys and prompt for each value. After rotation:
+Interactive mode (no arguments) will list available subkeys and prompt for each value. The same import-operate-export-remove workflow applies when the master is offline.
+
+After rotation:
 
 1. Update git projects that reference the old subkey ID: `git-update-project <ctx> <prov> --signing-key <new-subkey-id>`
 2. Re-export to Bitwarden: `gpg-export-bitwarden <master-fp>`
-3. Upload the updated public key to any keyservers you use
+3. Remove master again: `gpg-remove-master <master-fp>`
 
-### Adding a subkey
-
-```bash
-gpg-add-subkey <fingerprint> sign 2y     # add a signing subkey
-gpg-add-subkey <fingerprint> encr 2y     # add an encryption subkey
-gpg-add-subkey <fingerprint> auth 2y     # add an auth subkey
-```
-
-Interactive mode (no arguments) prompts for all values.
-
-### Revoking a key
-
-If a key is compromised, apply the revocation certificate immediately:
+### Restoring the master key temporarily
 
 ```bash
-gpg-revoke <fingerprint> --apply
+export BW_SESSION=$(bw unlock --raw)
+gpg-import-bitwarden                  # imports the full secret key
+# ... perform master-key operations ...
+gpg-export-bitwarden <fingerprint>    # update backup if anything changed
+gpg-remove-master <fingerprint>       # take it offline again
 ```
 
-Without `--apply`, the command only generates (or locates) the certificate without applying it. After applying, upload to a keyserver to propagate the revocation:
+### New machine from existing backup
 
 ```bash
-gpg --keyserver keys.openpgp.org --send-keys <fingerprint>
+export BW_SESSION=$(bw unlock --raw)
+gpg-import-bitwarden "GPG Subkeys Only — …"   # import subkeys only
+gpg-trust <fingerprint>                        # set ultimate trust
 ```
 
-## Export and import reference
-
-### File-based exports
-
-For offline backup to encrypted USB or similar:
-
-```bash
-gpg-export <fingerprint> ~/secure-backup/      # public + full secret key
-gpg-export-master <fingerprint> ~/secure/      # master key only (no subkeys)
-gpg-export-subkeys <fingerprint> ~/transfer/   # subkeys only (no master)
-```
-
-The subkeys-only export is useful when setting up a new machine where you want signing capability but do not want the master key present. Import it with `gpg-import`, then set trust:
+Import the subkeys-only note rather than the full secret key — there is no reason to put the master key on a new daily-use machine.
 
 ```bash
 gpg-import ~/transfer/gpg-<fp>-subkeys-only.asc
 gpg-trust <fingerprint>
-```
-
-### Bitwarden import
-
-```bash
-export BW_SESSION=$(bw unlock --raw)
-gpg-import-bitwarden                            # interactive search
-gpg-import-bitwarden "GPG Secret Key — …"      # by exact note name
 ```
 
 ### Agent management
@@ -227,8 +219,10 @@ gpg-card-status      # show YubiKey / smartcard status
 | Function | Description |
 |---|---|
 | `gpg-create-key` | Interactive wizard: master `[C]` + `[S]` + `[E]` subkeys |
+| `gpg-add-uid [fp]` | Add an email address / identity to an existing key |
 | `gpg-add-subkey [fp] [type] [expiry]` | Add a subkey to an existing master key |
 | `gpg-extend-expiry [fp] [expiry]` | Extend expiry on master key and all subkeys |
+| `gpg-remove-master [fp]` | Remove master secret key from local keyring (keeps subkeys) |
 | `gpg-rotate-subkey [master-fp] [subkey-fp] [type] [expiry]` | Retire a subkey and add a replacement |
 | `gpg-revoke [fp] [--apply]` | Generate or apply a revocation certificate |
 | `gpg-export [fp] [dir]` | Export public and full secret key to files |
@@ -239,7 +233,7 @@ gpg-card-status      # show YubiKey / smartcard status
 | `gpg-import-bitwarden [note-name]` | Import a key from a Bitwarden secure note |
 | `gpg-trust [fp] [level]` | Set owner trust (default: `ultimate`) |
 
-All functions with optional arguments support interactive prompts when arguments are omitted. Pass `--help` to any function to see its usage.
+All functions with optional arguments support interactive prompts when arguments are omitted.
 
 ### lazy/installers.sh
 

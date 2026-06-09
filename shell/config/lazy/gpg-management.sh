@@ -10,14 +10,18 @@
 #     └─ Subkey [A]    — Authenticate: SSH, API (optional)
 #
 # The master key's private material should be exported and stored offline
-# (Bitwarden, encrypted USB, etc.) and then optionally removed from the
-# local keyring so only subkeys remain. Subkeys can be rotated without
-# creating a new identity.
+# (Bitwarden, encrypted USB, etc.) and then removed from the local keyring
+# so only subkeys remain. Subkeys can be rotated without creating a new
+# identity. If the master key is needed again (new subkey, expiry extension,
+# certifying another key), import it from Bitwarden, perform the operation,
+# then remove it again.
 #
 # Public functions:
 #   gpg-create-key        Interactive wizard: master [C] + subkeys [S][E][A]
+#   gpg-add-uid           Add an email address / identity to an existing key
 #   gpg-add-subkey        Add a new subkey to an existing master key
 #   gpg-extend-expiry     Extend expiry on a key or subkey
+#   gpg-remove-master     Remove master secret key material from local keyring
 #   gpg-revoke            Generate or apply a revocation certificate
 #   gpg-export            Export public + secret keys to files
 #   gpg-export-master     Export master key secret material only (for offline backup)
@@ -27,7 +31,6 @@
 #   gpg-import-bitwarden  Pull a key from a Bitwarden secure note and import it
 #   gpg-rotate-subkey     Expire current subkey and generate a replacement
 #   gpg-trust             Set owner trust level on a key
-#   gpg-add-uid           Add a new UID (email address / identity) to an existing key
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -54,10 +57,7 @@ _gpg_require_bw() {
 
 _gpg_bw_logged_in() {
     local status
-    # grep -P (PCRE) is not available on macOS without Homebrew — use grep -o + sed
-    status="$(bw status 2>/dev/null \
-        | grep -o '"status":"[^"]*"' \
-        | sed 's/"status":"//;s/"//')"
+    status="$(bw status 2>/dev/null | grep -oP '"status":"[^"]+"' | grep -oP '[^"]+$')"
     if [[ "${status}" != "unlocked" ]]; then
         log_error "Bitwarden vault is not unlocked (status: ${status:-unknown})"
         log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
@@ -90,8 +90,13 @@ _gpg_fingerprint() {
 # Interactive wizard to create a master [C] key + [S][E] subkeys.
 # Optionally adds an [A] authentication subkey.
 #
-# The master key is generated with --expert so capabilities can be set
-# precisely. All three subkeys use separate key material.
+# Master key gets a long or no expiry — it is stored offline.
+# Subkeys get a shorter expiry for day-to-day use.
+#
+# After running:
+#   1. Generate a revocation certificate immediately
+#   2. Export and back up to Bitwarden
+#   3. Remove master secret key from local keyring with gpg-remove-master
 #
 # Usage:
 #   gpg-create-key
@@ -110,7 +115,7 @@ gpg-create-key() {
     echo
 
     # Collect identity
-    local name email comment expiry_years auth_subkey
+    local name email comment auth_subkey
     read -r -p "  Full name:  " name
     [[ -z "${name}" ]] && { log_error "Name is required"; return 1; }
 
@@ -119,13 +124,21 @@ gpg-create-key() {
 
     read -r -p "  Comment (optional, e.g. 'personal' or 'work'): " comment
 
+    # Collect expiry — master and subkeys separately
     echo
-    echo "  Key expiry (years). Subkeys will use the same expiry."
-    echo "  Recommended: 2 years — short enough to limit exposure,"
-    echo "  long enough not to be annoying. You can always extend."
-    read -r -p "  Expiry in years [2]: " expiry_years
-    expiry_years="${expiry_years:-2}"
-    local expiry="${expiry_years}y"
+    echo "  Master key expiry."
+    echo "  The master [C] key is used only to certify subkeys and is stored"
+    echo "  offline after creation. A very long expiry or no expiry is fine here."
+    read -r -p "  Master key expiry (e.g. 10y, 0 for no expiry) [0]: " master_expiry_input
+    master_expiry_input="${master_expiry_input:-0}"
+    local master_expiry="${master_expiry_input}"
+
+    echo
+    echo "  Subkey expiry. Subkeys are used daily — a shorter expiry limits"
+    echo "  exposure if a subkey is compromised. You can always extend."
+    read -r -p "  Subkey expiry in years [2]: " subkey_expiry_years
+    subkey_expiry_years="${subkey_expiry_years:-2}"
+    local subkey_expiry="${subkey_expiry_years}y"
 
     echo
     read -r -p "  Add authentication [A] subkey for SSH? [y/N]: " auth_subkey
@@ -137,16 +150,11 @@ gpg-create-key() {
 
     echo
     log_info "Creating master key [C] for: ${uid}"
-    log_info "Expiry: ${expiry}"
+    log_info "Master expiry: ${master_expiry} | Subkey expiry: ${subkey_expiry}"
     echo
     echo "  You will be prompted to set a passphrase. Use a strong, unique"
     echo "  passphrase — this protects your master key."
     echo
-
-    # Generate master key (certify only) using batch mode where possible,
-    # then add subkeys interactively via --edit-key.
-    # We use a parameter file for the master key so the UID and expiry are set
-    # consistently, then drop into --edit-key for the subkeys.
 
     local param_file
     param_file="$(mktemp /tmp/gpg-keygen-XXXXXX)"
@@ -160,7 +168,7 @@ Key-Usage: cert
 Name-Real: ${name}
 $([ -n "${comment}" ] && echo "Name-Comment: ${comment}")
 Name-Email: ${email}
-Expire-Date: ${expiry}
+Expire-Date: ${master_expiry}
 %ask-passphrase
 %commit
 %echo Master key done
@@ -188,17 +196,14 @@ EOF
     log_info "Master key created: ${fp}"
     echo
     log_info "Adding sign [S] subkey..."
-
-    # Add [S] subkey: ed25519
-    gpg --batch --yes --quick-add-key "${fp}" ed25519 sign "${expiry}"
+    gpg --batch --yes --quick-add-key "${fp}" ed25519 sign "${subkey_expiry}"
 
     log_info "Adding encrypt [E] subkey..."
-    # Add [E] subkey: cv25519 (ECDH — the encrypt equivalent of ed25519)
-    gpg --batch --yes --quick-add-key "${fp}" cv25519 encr "${expiry}"
+    gpg --batch --yes --quick-add-key "${fp}" cv25519 encr "${subkey_expiry}"
 
     if [[ "${auth_subkey,,}" == "y" ]]; then
         log_info "Adding authenticate [A] subkey..."
-        gpg --batch --yes --quick-add-key "${fp}" ed25519 auth "${expiry}"
+        gpg --batch --yes --quick-add-key "${fp}" ed25519 auth "${subkey_expiry}"
     fi
 
     echo
@@ -206,22 +211,289 @@ EOF
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
 
     echo
-    echo "═══════════════════════════════════════════════════════════"
-    echo "  Recommended next steps:"
+    echo "═══════════════════════════════════════════════════════════════════"
+    echo "  Key created: ${fp}"
     echo
-    echo "  1. Generate a revocation certificate (do this now):"
+    echo "  Complete these steps before using the key:"
+    echo
+    echo "  1. Generate a revocation certificate:"
     echo "       gpg-revoke ${fp}"
     echo
-    echo "  2. Export and back up your master key:"
-    echo "       gpg-export-bitwarden ${fp}    # store in Bitwarden"
-    echo "     or:"
-    echo "       gpg-export-master ${fp}       # export to encrypted file"
+    echo "  2. Export and back up to Bitwarden (includes revocation cert):"
+    echo "       gpg-export-bitwarden ${fp}"
+    echo "     or export to file:"
+    echo "       gpg-export-master ${fp}"
     echo
-    echo "  3. Use the signing subkey ID with git:"
+    echo "  3. Remove master secret key from this machine:"
+    echo "       gpg-remove-master ${fp}"
+    echo "     The master key is only needed to certify new subkeys or other"
+    echo "     keys. Your subkeys remain and are enough for day-to-day use."
+    echo "     Re-import from Bitwarden if you need the master key again."
+    echo
+    echo "  4. Wire up git signing:"
     echo "       gpg-list-signing-keys ${email}"
     echo "       git-add-project <context> <provider> ${email} <signing-subkey-id>"
-    echo "═══════════════════════════════════════════════════════════"
+    echo "═══════════════════════════════════════════════════════════════════"
     echo
+}
+
+# ── UID management ────────────────────────────────────────────────────────────
+
+# gpg-add-uid
+# Add an email address / identity to an existing key.
+# Useful for: GitHub noreply addresses, work aliases, alternate emails.
+#
+# Usage:
+#   gpg-add-uid
+#   gpg-add-uid <fingerprint>
+gpg-add-uid() {
+    local fp="${1:-}"
+
+    echo
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Add UID to GPG Key"
+    echo "  Adds an email address / identity to an existing key."
+    echo "  Useful for: GitHub noreply, work aliases, alternate emails."
+    echo "═══════════════════════════════════════════════════════════"
+
+    if [[ -z "${fp}" ]]; then
+        # List available keys with numbering for easier selection
+        local -a fps=()
+        local -a labels=()
+        local i=1
+        echo
+        log_info "Available keys:"
+        echo
+        while IFS= read -r line; do
+            if [[ "${line}" =~ ^uid ]]; then
+                local uid_val
+                uid_val="$(echo "${line}" | sed 's/^uid[[:space:]]*//' | sed 's/\[.*\][[:space:]]*//')"
+                labels+=("${uid_val}")
+            elif [[ "${line}" =~ ^sec ]]; then
+                local key_fp=""
+            elif [[ "${line}" =~ ^[[:space:]]+Key ]]; then
+                key_fp="$(echo "${line}" | grep -oP '[0-9A-F]{40}')"
+            fi
+        done < <(gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null)
+
+        # Simpler approach: collect fps and first UIDs together
+        fps=()
+        labels=()
+        while IFS=: read -r type _ _ _ _ _ _ _ _ val _; do
+            if [[ "${type}" == "sec" ]]; then
+                : # next fpr will be the master fp
+            elif [[ "${type}" == "fpr" ]] && [[ ${#fps[@]} -eq ${#labels[@]} ]]; then
+                fps+=("${val}")
+            elif [[ "${type}" == "uid" ]] && [[ ${#fps[@]} -gt ${#labels[@]} ]]; then
+                labels+=("${val}")
+            fi
+        done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+
+        if [[ ${#fps[@]} -eq 0 ]]; then
+            log_error "No secret keys found. Create one with: gpg-create-key"
+            return 1
+        fi
+
+        for i in "${!fps[@]}"; do
+            printf "  %d.  %s\n" "$((i+1))" "${labels[$i]}"
+            printf "      Fingerprint: %s\n" "${fps[$i]}"
+            echo
+        done
+
+        local sel
+        read -r -p "  Select key number [1]: " sel
+        sel="${sel:-1}"
+        fp="${fps[$((sel-1))]}"
+    fi
+
+    _gpg_require_key "${fp}" || return 1
+
+    log_info "Selected: $(gpg --list-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^uid/{print $10; exit}')"
+
+    echo
+    log_info "Current UIDs on this key:"
+    gpg --list-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^uid/{print "  • " $10}'
+
+    echo
+    echo "  Enter details for the new UID."
+    echo "  For a GitHub noreply address, leave name blank to reuse the"
+    echo "  existing name and enter: <id>+username@users.noreply.github.com"
+    echo
+
+    # Name — blank reuses existing primary UID name
+    local existing_name
+    existing_name="$(gpg --list-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^uid/{print $10; exit}' \
+        | sed 's/ (.*//' | sed 's/ <.*//')"
+
+    local new_name
+    read -r -p "  Full name (blank to reuse existing name): " new_name
+    if [[ -z "${new_name}" ]]; then
+        new_name="${existing_name}"
+        log_info "Using existing name: ${new_name}"
+    fi
+
+    local new_email
+    read -r -p "  Email: " new_email
+    [[ -z "${new_email}" ]] && { log_error "Email is required"; return 1; }
+
+    local new_comment
+    read -r -p "  Comment (optional, e.g. 'github' or 'work'): " new_comment
+
+    # Build UID string
+    local new_uid="${new_name}"
+    [[ -n "${new_comment}" ]] && new_uid="${new_uid} (${new_comment})"
+    new_uid="${new_uid} <${new_email}>"
+
+    echo
+    log_info "New UID:  ${new_uid}"
+    log_info "On key:   ${fp}"
+    read -r -p "  Confirm? [Y/n]: " confirm
+    [[ "${confirm,,}" == "n" ]] && { log_info "Cancelled"; return 0; }
+
+    gpg --batch --yes --quick-add-uid "${fp}" "${new_uid}"
+    local add_rc=$?
+    if [[ ${add_rc} -ne 0 ]]; then
+        log_error "Failed to add UID (exit ${add_rc})"
+        return 1
+    fi
+
+    log_info "UID added successfully."
+
+    # Re-apply ultimate ownertrust — GPG marks newly-added UIDs [unknown]
+    # until ownertrust is re-asserted on the key.
+    echo "${fp}:6:" | gpg --import-ownertrust 2>/dev/null \
+        || log_warn "Could not set ownertrust automatically; run: gpg-trust ${fp}"
+
+    echo
+    echo "  Your existing primary UID is unchanged."
+    echo "  For a GitHub noreply address, leaving your real email as primary"
+    echo "  is usually correct — GitHub verifies against any UID on the key."
+    echo
+
+    # Offer to change primary UID
+    read -r -p "  Set '${new_uid}' as the primary UID? [y/N]: " make_primary
+    if [[ "${make_primary,,}" == "y" ]]; then
+        gpg --batch --yes --quick-set-primary-uid "${fp}" "${new_uid}"
+        log_info "Primary UID updated."
+    fi
+
+    echo
+    log_info "Updated key:"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+
+    echo
+    echo "  Re-export to keep your Bitwarden backup current:"
+    echo "    gpg-export-bitwarden ${fp}"
+}
+
+# ── Master key removal ────────────────────────────────────────────────────────
+
+# gpg-remove-master
+# Remove master secret key material from the local keyring.
+# Subkeys remain — they are sufficient for signing, encryption, and SSH.
+#
+# After removal the key shows as 'sec#' (stub only) in gpg --list-secret-keys.
+# To restore the master key: gpg-import-bitwarden or gpg-import <backup-file>
+#
+# When you need the master key again (adding subkeys, extending expiry,
+# certifying another key), import it, do the work, then remove it again.
+#
+# Usage:
+#   gpg-remove-master <fingerprint>
+#   gpg-remove-master                   # interactive key selection
+gpg-remove-master() {
+    local fp="${1:-}"
+
+    echo
+    echo "═══════════════════════════════════════════════════════════════════"
+    echo "  Remove Master Secret Key"
+    echo "  Removes the master [C] key's private material from this machine."
+    echo "  Subkeys remain intact for day-to-day use."
+    echo "═══════════════════════════════════════════════════════════════════"
+
+    if [[ -z "${fp}" ]]; then
+        fp="$(_gpg_prompt_key_id "Master key fingerprint")"
+    fi
+    _gpg_require_key "${fp}" || return 1
+
+    # Check whether master secret is actually present (not already sec#)
+    local sec_line
+    sec_line="$(gpg --list-secret-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^sec/{print $2; exit}')"
+
+    if [[ "${sec_line}" == "#" ]]; then
+        log_warn "Master secret key is already absent from local keyring (sec#)"
+        log_warn "Nothing to remove. Key in Bitwarden/offline backup is authoritative."
+        return 0
+    fi
+
+    echo
+    log_info "Key to remove master secret from:"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+
+    echo
+    echo "  ┌─────────────────────────────────────────────────────────────┐"
+    echo "  │  BEFORE YOU CONTINUE                                        │"
+    echo "  │                                                             │"
+    echo "  │  Ensure you have a backup of the master key:               │"
+    echo "  │    • Bitwarden (recommended): gpg-export-bitwarden ${fp:0:16}  │"
+    echo "  │    • File backup:             gpg-export-master ${fp:0:16}     │"
+    echo "  │                                                             │"
+    echo "  │  Without a backup you cannot add subkeys, extend expiry,   │"
+    echo "  │  or certify other keys. Recovery will not be possible.     │"
+    echo "  └─────────────────────────────────────────────────────────────┘"
+    echo
+    read -r -p "  Have you backed up the master key? [y/N]: " backed_up
+    if [[ "${backed_up,,}" != "y" ]]; then
+        echo
+        log_warn "Aborting. Back up the key first:"
+        echo "    gpg-export-bitwarden ${fp}"
+        echo "  or:"
+        echo "    gpg-export-master ${fp}"
+        return 1
+    fi
+
+    echo
+    echo "  This will remove the master [C] key secret material from:"
+    echo "    ${GNUPGHOME:-~/.gnupg}"
+    echo
+    echo "  Type 'yes' to confirm (anything else cancels):"
+    read -r -p "  > " confirm
+    if [[ "${confirm}" != "yes" ]]; then
+        log_info "Cancelled — master key not removed"
+        return 0
+    fi
+
+    # The '!' suffix targets only the primary key, leaving subkeys intact.
+    # GnuPG 2.1+ retains a sec# stub so the public key and subkeys remain usable.
+    log_info "Removing master secret key material..."
+    echo "${fp}!" | gpg --batch --yes --delete-secret-keys - 2>/dev/null
+    local del_rc=$?
+
+    if [[ ${del_rc} -ne 0 ]]; then
+        log_error "Deletion failed (exit ${del_rc})"
+        log_error "You can retry manually:"
+        log_error "  gpg --delete-secret-keys ${fp}!"
+        return 1
+    fi
+
+    echo
+    log_info "Master secret key removed. Updated key:"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    echo
+    log_info "The 'sec#' marker confirms the master secret is no longer stored locally."
+    echo
+    echo "  To restore the master key when needed:"
+    echo "    export BW_SESSION=\$(bw unlock --raw)"
+    echo "    gpg-import-bitwarden"
+    echo "  or:"
+    echo "    gpg-import <path-to-backup.asc>"
+    echo
+    echo "  After completing any master-key operations, remove it again:"
+    echo "    gpg-remove-master ${fp}"
 }
 
 # ── Subkey management ─────────────────────────────────────────────────────────
@@ -242,6 +514,17 @@ gpg-add-subkey() {
         fp="$(_gpg_prompt_key_id "Master key fingerprint")"
     fi
     _gpg_require_key "${fp}" || return 1
+
+    # Warn if master secret is absent — adding subkeys requires it
+    local sec_line
+    sec_line="$(gpg --list-secret-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^sec/{print $2; exit}')"
+    if [[ "${sec_line}" == "#" ]]; then
+        log_error "Master secret key is not present locally (sec#)"
+        log_error "Import it first, then re-run this command:"
+        log_error "  gpg-import-bitwarden   or   gpg-import <backup.asc>"
+        return 1
+    fi
 
     if [[ -z "${type}" ]]; then
         echo "  Subkey type:"
@@ -270,216 +553,16 @@ gpg-add-subkey() {
     echo
     log_info "Updated key:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
-}
-
-# gpg-add-uid
-# Add an additional UID (name + email) to an existing key.
-# Useful for adding a GitHub noreply address, a work alias, or any alternate
-# email to a key without creating a new key.
-#
-# GitHub signature verification accepts any UID on the key, so adding your
-# <id>+username@users.noreply.github.com means both your real email and the
-# noreply address will verify correctly.
-#
-# Usage:
-#   gpg-add-uid <fingerprint>    # prompts for UID details
-#   gpg-add-uid                  # prompts for key selection first
-#
-# After adding a UID, re-export to keep your Bitwarden backup current:
-#   gpg-export-bitwarden <fingerprint>
-gpg-add-uid() {
-    local fp="${1:-}"
-
-    # ── Key selection ────────────────────────────────────────────────────────
-    if [[ -z "${fp}" ]]; then
-        echo
-        echo "═══════════════════════════════════════════════════════════"
-        echo "  Add UID to GPG Key"
-        echo "  Adds an email address / identity to an existing key."
-        echo "  Useful for: GitHub noreply, work aliases, alternate emails."
-        echo "═══════════════════════════════════════════════════════════"
-        echo
-        log_info "Available keys:"
-        echo
-
-        # Build numbered list from --with-colons output.
-        # Bash 3.2 compat (macOS): no associative arrays, index via parallel arrays.
-        local fps=() labels=()
-        local _cur_fp="" _cur_uid_seen=0
-
-        while IFS=: read -r type _ _ _ _ _ _ _ _ field10 _; do
-            case "${type}" in
-                sec)
-                    _cur_fp=""
-                    _cur_uid_seen=0
-                    ;;
-                fpr)
-                    # First fpr record after sec is the master key fingerprint
-                    [[ -z "${_cur_fp}" ]] && _cur_fp="${field10}"
-                    ;;
-                uid)
-                    # Capture only the first UID per key for the label
-                    if [[ "${_cur_uid_seen}" -eq 0 && -n "${field10}" && -n "${_cur_fp}" ]]; then
-                        _cur_uid_seen=1
-                        fps+=("${_cur_fp}")
-                        labels+=("${field10}")
-                        local _idx=${#fps[@]}
-                        printf "  %d.  %s\n      Fingerprint: %s\n\n" \
-                            "${_idx}" "${field10}" "${_cur_fp}"
-                    fi
-                    ;;
-            esac
-        done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
-
-        if [[ ${#fps[@]} -eq 0 ]]; then
-            log_error "No secret keys found. Run gpg-create-key first."
-            return 1
-        fi
-
-        local choice
-        read -r -p "  Select key number [1]: " choice
-        choice="${choice:-1}"
-
-        if ! echo "${choice}" | grep -qE '^[0-9]+$' || \
-           [[ "${choice}" -lt 1 ]] || \
-           [[ "${choice}" -gt ${#fps[@]} ]]; then
-            log_error "Invalid selection: ${choice}"
-            return 1
-        fi
-
-        # Bash 3.2 compat: retrieve by walking the array with a counter
-        local _i=0
-        local _selected_label=""
-        for _f in "${fps[@]}"; do
-            _i=$((_i + 1))
-            if [[ "${_i}" -eq "${choice}" ]]; then
-                fp="${_f}"
-                break
-            fi
-        done
-        _i=0
-        for _l in "${labels[@]}"; do
-            _i=$((_i + 1))
-            if [[ "${_i}" -eq "${choice}" ]]; then
-                _selected_label="${_l}"
-                break
-            fi
-        done
-
-        echo
-        log_info "Selected: ${_selected_label}"
-    fi
-
-    _gpg_require_key "${fp}" || return 1
-
-    # ── Show existing UIDs ───────────────────────────────────────────────────
-    echo
-    log_info "Current UIDs on this key:"
-    local existing_uids=()
-    local _uid_field
-    while IFS=: read -r type _ _ _ _ _ _ _ _ _uid_field _; do
-        if [[ "${type}" == "uid" && -n "${_uid_field}" ]]; then
-            existing_uids+=("${_uid_field}")
-            printf "  • %s\n" "${_uid_field}"
-        fi
-    done < <(gpg --list-secret-keys --with-colons "${fp}" 2>/dev/null)
-
-    # ── Collect new UID details ──────────────────────────────────────────────
-    echo
-    echo "  Enter details for the new UID."
-    echo "  For a GitHub noreply address, leave name blank to reuse the"
-    echo "  existing name and enter: <id>+username@users.noreply.github.com"
-    echo
-
-    local new_name new_email new_comment
-    read -r -p "  Full name (blank to reuse existing name): " new_name
-
-    # Fall back to name component of first existing UID
-    if [[ -z "${new_name}" ]] && [[ ${#existing_uids[@]} -gt 0 ]]; then
-        # UID format: "Name (Comment) <email>" — strip everything from ( or < onwards
-        new_name="${existing_uids[0]%%(*}"
-        new_name="${new_name%%<*}"
-        # Trim trailing whitespace portably
-        new_name="$(echo "${new_name}" | sed 's/[[:space:]]*$//')"
-        log_info "Using existing name: ${new_name}"
-    fi
-    [[ -z "${new_name}" ]] && { log_error "Name is required"; return 1; }
-
-    read -r -p "  Email: " new_email
-    [[ -z "${new_email}" ]] && { log_error "Email is required"; return 1; }
-
-    # Warn if this email is already present on the key
-    local _u
-    for _u in "${existing_uids[@]}"; do
-        if echo "${_u}" | grep -qi "${new_email}"; then
-            log_warn "A UID matching '${new_email}' already exists: ${_u}"
-            local _confirm
-            read -r -p "  Add it anyway? [y/N]: " _confirm
-            [[ "${_confirm}" != "y" && "${_confirm}" != "Y" ]] && return 0
-            break
-        fi
-    done
-
-    read -r -p "  Comment (optional, e.g. 'github' or 'work'): " new_comment
-
-    # ── Build and confirm the new UID string ─────────────────────────────────
-    local new_uid="${new_name}"
-    [[ -n "${new_comment}" ]] && new_uid="${new_uid} (${new_comment})"
-    new_uid="${new_uid} <${new_email}>"
-
-    echo
-    log_info "New UID:  ${new_uid}"
-    log_info "On key:   ${fp}"
-    local _confirm
-    read -r -p "  Confirm? [Y/n]: " _confirm
-    [[ "${_confirm}" == "n" || "${_confirm}" == "N" ]] && return 0
-
-    # ── Add the UID ──────────────────────────────────────────────────────────
-    # --quick-add-uid requires GnuPG >= 2.1.13 — present on all current
-    # Fedora, Ubuntu 18.04+, Debian 10+, Arch, macOS (Homebrew gnupg).
-    gpg --batch --yes --quick-add-uid "${fp}" "${new_uid}"
-    local _rc=$?
-
-    if [[ ${_rc} -ne 0 ]]; then
-        log_error "Failed to add UID (gpg exit ${_rc})"
-        return 1
-    fi
-
-    log_info "UID added successfully."
-
-    # ── Optionally set as primary ────────────────────────────────────────────
-    echo
-    echo "  Your existing primary UID is unchanged."
-    echo "  For a GitHub noreply address, leaving your real email as primary"
-    echo "  is usually correct — GitHub verifies against any UID on the key."
-    echo
-    local _set_primary
-    read -r -p "  Set '${new_uid}' as the primary UID? [y/N]: " _set_primary
-
-    if [[ "${_set_primary}" == "y" || "${_set_primary}" == "Y" ]]; then
-        # --quick-set-primary-uid requires GnuPG >= 2.2.17
-        if gpg --batch --yes --quick-set-primary-uid "${fp}" "${new_uid}" 2>/dev/null; then
-            log_info "Primary UID updated."
-        else
-            log_warn "--quick-set-primary-uid not supported on this GPG version."
-            log_warn "Set it manually:"
-            log_warn "  gpg --edit-key ${fp}"
-            log_warn "  At the gpg> prompt: uid <N>  then: primary  then: save"
-        fi
-    fi
-
-    # ── Summary ──────────────────────────────────────────────────────────────
-    echo
-    log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
     echo
     echo "  Re-export to keep your Bitwarden backup current:"
     echo "    gpg-export-bitwarden ${fp}"
     echo
+    echo "  When done, remove the master secret key again:"
+    echo "    gpg-remove-master ${fp}"
 }
 
 # gpg-extend-expiry
-# Extend the expiry on a key or its subkeys.
+# Extend the expiry on a key and all its subkeys.
 #
 # Usage:
 #   gpg-extend-expiry <fingerprint> <new-expiry>   e.g. 2y, 1y
@@ -492,14 +575,24 @@ gpg-extend-expiry() {
     fi
     _gpg_require_key "${fp}" || return 1
 
+    # Warn if master secret is absent — extending expiry requires it
+    local sec_line
+    sec_line="$(gpg --list-secret-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^sec/{print $2; exit}')"
+    if [[ "${sec_line}" == "#" ]]; then
+        log_error "Master secret key is not present locally (sec#)"
+        log_error "Import it first, then re-run this command:"
+        log_error "  gpg-import-bitwarden   or   gpg-import <backup.asc>"
+        return 1
+    fi
+
     if [[ -z "${expiry}" ]]; then
         read -r -p "  New expiry (e.g. 2y, 1y): " expiry
         [[ -z "${expiry}" ]] && { log_error "Expiry is required"; return 1; }
     fi
 
-    log_info "Extending expiry for all subkeys of ${fp} to ${expiry}..."
-    # quick-set-expire with no subkey fingerprint extends the primary key;
-    # with '*' it extends all subkeys.
+    log_info "Extending expiry for ${fp} and all subkeys to ${expiry}..."
+    # quick-set-expire with '*' extends all subkeys; without it extends the primary
     gpg --batch --yes --quick-set-expire "${fp}" "${expiry}" '*'
     gpg --batch --yes --quick-set-expire "${fp}" "${expiry}"
 
@@ -507,8 +600,11 @@ gpg-extend-expiry() {
     log_info "Updated key:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
     echo
-    log_info "Remember to re-export and update your Bitwarden backup:"
-    log_info "  gpg-export-bitwarden ${fp}"
+    echo "  Re-export to keep your Bitwarden backup current:"
+    echo "    gpg-export-bitwarden ${fp}"
+    echo
+    echo "  When done, remove the master secret key again:"
+    echo "    gpg-remove-master ${fp}"
 }
 
 # gpg-rotate-subkey
@@ -525,6 +621,17 @@ gpg-rotate-subkey() {
         master_fp="$(_gpg_prompt_key_id "Master key fingerprint")"
     fi
     _gpg_require_key "${master_fp}" || return 1
+
+    # Warn if master secret is absent
+    local sec_line
+    sec_line="$(gpg --list-secret-keys --with-colons "${master_fp}" 2>/dev/null \
+        | awk -F: '/^sec/{print $2; exit}')"
+    if [[ "${sec_line}" == "#" ]]; then
+        log_error "Master secret key is not present locally (sec#)"
+        log_error "Import it first, then re-run this command:"
+        log_error "  gpg-import-bitwarden   or   gpg-import <backup.asc>"
+        return 1
+    fi
 
     if [[ -z "${subkey_fp}" ]]; then
         echo
@@ -558,19 +665,21 @@ gpg-rotate-subkey() {
     log_info "Rotation complete. Updated key:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${master_fp}"
     echo
-    log_info "Update your Bitwarden backup with the new subkey material:"
-    log_info "  gpg-export-bitwarden ${master_fp}"
+    echo "  Re-export to keep your Bitwarden backup current:"
+    echo "    gpg-export-bitwarden ${master_fp}"
+    echo
+    echo "  When done, remove the master secret key again:"
+    echo "    gpg-remove-master ${master_fp}"
 }
 
 # ── Revocation ────────────────────────────────────────────────────────────────
 
 # gpg-revoke
-# Generate a revocation certificate and optionally apply it.
-# Store the certificate alongside your key backup — it's your kill switch.
+# Generate a revocation certificate, or apply an existing one.
 #
 # Usage:
-#   gpg-revoke <fingerprint>    # generate certificate only
-#   gpg-revoke <fingerprint> --apply  # generate and immediately revoke
+#   gpg-revoke <fingerprint>           # generate certificate
+#   gpg-revoke <fingerprint> --apply   # generate and apply immediately
 gpg-revoke() {
     local fp="${1:-}" apply="${2:-}"
 
@@ -579,31 +688,30 @@ gpg-revoke() {
     fi
     _gpg_require_key "${fp}" || return 1
 
-    local revoke_dir="${GNUPGHOME:-${HOME}/.gnupg}/revocations"
-    mkdir -p "${revoke_dir}"
-    chmod 700 "${revoke_dir}"
-    local revoke_file="${revoke_dir}/${fp}-revocation.asc"
+    local rev_dir="${GNUPGHOME:-${HOME}/.gnupg}/revocations"
+    mkdir -p "${rev_dir}"
+    chmod 700 "${rev_dir}"
+    local rev_file="${rev_dir}/${fp}-revocation.asc"
 
     log_info "Generating revocation certificate for ${fp}..."
-    gpg --output "${revoke_file}" --gen-revoke "${fp}"
+    gpg --output "${rev_file}" --gen-revoke "${fp}"
+    local gen_rc=$?
 
-    if [[ $? -ne 0 ]]; then
-        log_error "Revocation certificate generation failed"
+    if [[ ${gen_rc} -ne 0 ]]; then
+        log_error "Failed to generate revocation certificate"
         return 1
     fi
 
-    chmod 600 "${revoke_file}"
-    log_info "Revocation certificate saved to: ${revoke_file}"
-    echo
-    echo "  Store this certificate safely — applying it will permanently"
-    echo "  revoke the key on any keyserver it has been uploaded to."
-    echo
+    chmod 600 "${rev_file}"
+    log_info "Revocation certificate saved: ${rev_file}"
 
     if [[ "${apply}" == "--apply" ]]; then
         echo
-        read -r -p "  Confirm: immediately revoke key ${fp}? [yes/N]: " confirm
+        log_warn "Applying the revocation certificate will immediately revoke this key."
+        log_warn "This cannot be undone. Type 'yes' to confirm:"
+        read -r -p "  > " confirm
         if [[ "${confirm}" == "yes" ]]; then
-            gpg --import "${revoke_file}"
+            gpg --import "${rev_file}"
             log_info "Key revoked. Upload to keyserver to propagate:"
             log_info "  gpg --keyserver keys.openpgp.org --send-keys ${fp}"
         else
@@ -677,9 +785,10 @@ gpg-export-master() {
     log_info "Master key exported to: ${out_file}"
     echo
     echo "  This contains your master [C] key material only."
-    echo "  Store it offline (Bitwarden, encrypted USB, etc.) and"
-    echo "  consider running gpg-export-subkeys to get a subkeys-only"
-    echo "  export for your day-to-day keyring."
+    echo "  Store it offline (Bitwarden, encrypted USB, etc.)."
+    echo
+    echo "  When ready to take the master offline:"
+    echo "    gpg-remove-master ${fp}"
 }
 
 # gpg-export-subkeys
@@ -838,6 +947,9 @@ print(json.dumps(t))
     [[ -f "${rev_file}" ]] && echo "    • GPG Revocation Certificate — ${label} (${fp})"
     echo
     log_info "Sync to ensure notes are persisted: bw sync"
+    echo
+    echo "  When ready to take the master key offline:"
+    echo "    gpg-remove-master ${fp}"
 }
 
 # ── Import functions ──────────────────────────────────────────────────────────
