@@ -680,17 +680,16 @@ git-sync-projects() {
 }
 
 # ── GitHub CLI token export ───────────────────────────────────────────────────
-# Sets GITHUB_PERSONAL_ACCESS_TOKEN from 'gh auth token' if gh is authenticated.
-# Required by tools (e.g. some Terraform providers, scripts) that read this env
-# var rather than using the gh credential helper.
-# The gh auth status check is fast (~50ms) and avoids a confusing empty export
-# when gh is present but not logged in.
+# Sets GITHUB_PERSONAL_ACCESS_TOKEN from the local gh credential store.
+# Uses gh auth token directly (local keyring read) — no network call.
+# Falls back cleanly if gh is not authenticated.
 if command -v gh &>/dev/null; then
-    if gh auth status &>/dev/null 2>&1; then
-        GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
-        export GITHUB_PERSONAL_ACCESS_TOKEN
+    _gh_token="$(gh auth token 2>/dev/null)"
+    if [[ -n "${_gh_token}" ]]; then
+        export GITHUB_PERSONAL_ACCESS_TOKEN="${_gh_token}"
         log_debug "git: GITHUB_PERSONAL_ACCESS_TOKEN set from gh auth token"
     else
-        log_debug "git: gh present but not authenticated — skipping token export"
+        log_debug "git: gh present but no token found — skipping GITHUB_PERSONAL_ACCESS_TOKEN"
     fi
+    unset _gh_token
 fi

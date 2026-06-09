@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# GitHub CLI shell completions — cached to avoid network calls at startup.
+# GitHub CLI completions — version-stamped cache.
 
-_gh_completion_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions/gh.${DOTFILES_SHELL}.sh"
+_gh_cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions"
+_gh_version="$(gh --version 2>/dev/null | head -1 | awk '{print $3}')"
 
-if [[ -n "${BASH_VERSION}" ]]; then
-    if [[ ! -f "${_gh_completion_cache}" ]]; then
-        mkdir -p "$(dirname "${_gh_completion_cache}")"
-        gh completion -s bash 2>/dev/null > "${_gh_completion_cache}" || rm -f "${_gh_completion_cache}"
+if [[ -n "${_gh_version}" ]]; then
+    _gh_cache="${_gh_cache_dir}/gh.${DOTFILES_SHELL}.${_gh_version}.sh"
+
+    if [[ ! -f "${_gh_cache}" ]]; then
+        mkdir -p "${_gh_cache_dir}"
+        rm -f "${_gh_cache_dir}/gh.${DOTFILES_SHELL}".*.sh 2>/dev/null
+        gh completion -s "${DOTFILES_SHELL}" 2>/dev/null > "${_gh_cache}" \
+            || rm -f "${_gh_cache}"
     fi
     # shellcheck disable=SC1090
-    [[ -f "${_gh_completion_cache}" ]] && source "${_gh_completion_cache}"
-elif [[ -n "${ZSH_VERSION}" ]]; then
-    if [[ ! -f "${_gh_completion_cache}" ]]; then
-        mkdir -p "$(dirname "${_gh_completion_cache}")"
-        gh completion -s zsh 2>/dev/null > "${_gh_completion_cache}" || rm -f "${_gh_completion_cache}"
-    fi
-    # shellcheck disable=SC1090
-    [[ -f "${_gh_completion_cache}" ]] && source "${_gh_completion_cache}"
+    [[ -f "${_gh_cache}" ]] && source "${_gh_cache}"
 fi
-unset _gh_completion_cache
+
+unset _gh_cache_dir _gh_version _gh_cache

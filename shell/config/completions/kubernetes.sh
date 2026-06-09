@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
-# kubectl shell completions — cached to avoid blocking API calls at startup.
+# kubectl shell completions — version-stamped cache, no API calls at startup.
 
-_kubectl_completion_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions/kubectl.${DOTFILES_SHELL}.sh"
+_kc_cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions"
 
-if [[ -n "${BASH_VERSION}" ]]; then
-    if [[ ! -f "${_kubectl_completion_cache}" ]]; then
-        mkdir -p "$(dirname "${_kubectl_completion_cache}")"
-        kubectl completion bash 2>/dev/null > "${_kubectl_completion_cache}" || rm -f "${_kubectl_completion_cache}"
+# --client prevents any contact with the API server.
+# Parse the clientVersion.gitVersion field directly from JSON — no jq required.
+_kc_version="$(kubectl version --client -o json 2>/dev/null \
+    | grep '"gitVersion"' | head -1 \
+    | sed 's/.*"gitVersion": *"\([^"]*\)".*/\1/')"
+
+if [[ -n "${_kc_version}" ]]; then
+    _kc_cache="${_kc_cache_dir}/kubectl.${DOTFILES_SHELL}.${_kc_version}.sh"
+
+    if [[ ! -f "${_kc_cache}" ]]; then
+        mkdir -p "${_kc_cache_dir}"
+        # Remove stale versions for this shell before writing the new one
+        rm -f "${_kc_cache_dir}/kubectl.${DOTFILES_SHELL}".*.sh 2>/dev/null
+        kubectl completion "${DOTFILES_SHELL}" 2>/dev/null > "${_kc_cache}" \
+            || rm -f "${_kc_cache}"
     fi
     # shellcheck disable=SC1090
-    [[ -f "${_kubectl_completion_cache}" ]] && source "${_kubectl_completion_cache}"
-    complete -o default -F __start_kubectl k 2>/dev/null || true
-elif [[ -n "${ZSH_VERSION}" ]]; then
-    if [[ ! -f "${_kubectl_completion_cache}" ]]; then
-        mkdir -p "$(dirname "${_kubectl_completion_cache}")"
-        kubectl completion zsh 2>/dev/null > "${_kubectl_completion_cache}" || rm -f "${_kubectl_completion_cache}"
-    fi
-    # shellcheck disable=SC1090
-    [[ -f "${_kubectl_completion_cache}" ]] && source "${_kubectl_completion_cache}"
+    [[ -f "${_kc_cache}" ]] && source "${_kc_cache}"
 fi
-unset _kubectl_completion_cache
+
+# bash only: make completions work for the 'k' alias
+[[ -n "${BASH_VERSION}" ]] && complete -o default -F __start_kubectl k 2>/dev/null || true
+
+unset _kc_cache_dir _kc_version _kc_cache
