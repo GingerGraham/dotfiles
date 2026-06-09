@@ -100,7 +100,6 @@ gpg-list-signing-keys() {
         echo "  No signing keys found${filter:+ matching '${filter}'}."
         echo
         echo "  To create a new key set, run: gpg-create-key"
-        echo "  (from lazy/gpg-management.sh — available without sourcing anything)"
     else
         echo
         echo "  → Pass the Key ID above to git-add-project:"
