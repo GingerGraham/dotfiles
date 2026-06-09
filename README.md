@@ -1,90 +1,47 @@
 # dotfiles
 
-## Overview
+An Ansible-native, XDG-compliant dotfiles system for Fedora/RHEL, Ubuntu/Debian, macOS, and WSL2.
+Manages shell configuration, git identity, SSH key structure, Neovim config, and AI tooling — and keeps itself up to date via a background sync timer.
 
-This repository is an Ansible-native dotfiles orchestrator for user-level configuration across Fedora/RHEL, Ubuntu/Debian, macOS, and WSL2. It manages dotfile deployment and role coordination only; it does not install packages or apply system-level machine configuration.
+> **Forking this repo?** The bootstrap URL below points to `GingerGraham/dotfiles`. Update it to your own fork's raw URL before sharing or using your fork's one-liner.
 
-## Repo Structure
+## Quick start
 
-```text
-.
-|-- ansible/      # Playbooks, inventory, group and host vars, and roles
-|-- shell/        # coming soon
-`-- install.sh    # coming soon
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh)
 ```
 
-## Companion Repos
+The bootstrap script clones the repo and hands off to `install.sh`. On first run you will be prompted for a profile, machine name, git identity, and optional companion repo URLs.
 
-| Repo                 | Visibility | Purpose                                        |
-| -------------------- | ---------- | ---------------------------------------------- |
-| dotfiles (this repo) | Private    | Shell config, git config, Ansible orchestrator |
-| nvim-config          | Public     | Neovim config - cloned to ~/.config/nvim/      |
-| ai-config            | Private    | ~/.claude/, Copilot config, AI tooling         |
+See the [docs/](docs/) directory for full documentation.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/installation.md](docs/installation.md) | Bootstrap, `install.sh` reference, all CLI options |
+| [docs/profiles.md](docs/profiles.md) | Workstation, server, and minimal profiles |
+| [docs/optional-components.md](docs/optional-components.md) | nvim and ai-tools roles — what they do and how to enable them |
+| [docs/shell-config.md](docs/shell-config.md) | Shell loading architecture, tiers, local overrides |
+| [docs/sync.md](docs/sync.md) | Background sync, DEV\_MODE, branch switching |
+
+## Supported platforms
+
+| Platform | Status |
+|---|---|
+| Fedora / RHEL / Rocky / Alma | ✅ Primary |
+| Ubuntu / Debian / Pop!\_OS | ✅ Supported |
+| openSUSE Tumbleweed / SLES | ✅ Supported |
+| Arch / Manjaro / EndeavourOS | ✅ Supported |
+| macOS | ✅ Supported |
+| WSL2 (systemd enabled) | ✅ Supported |
 
 ## Prerequisites
 
-- git
-- ansible-core >= 2.14
-- Python 3.9+
+`install.sh` checks for and will attempt to install:
 
-install.sh (coming soon) will eventually bootstrap prerequisites automatically. For now, install them manually.
+- `git`
+- `python3 >= 3.9`
+- `ansible-core >= 2.14`
 
-## Quick Start
-
-1. Clone this repository.
-2. Copy ansible/host_vars/localhost.yml.example to ansible/host_vars/localhost.yml and fill in your values.
-3. Run:
-
-```bash
-ansible-playbook ansible/site.yml
-```
-
-## Running Individual Roles
-
-```bash
-ansible-playbook ansible/site.yml --tags common
-ansible-playbook ansible/site.yml --tags git,shell
-```
-
-## Profiles
-
-| Profile     | Roles Activated                               |
-| ----------- | --------------------------------------------- |
-| workstation | common, shell, git, ssh, nvim, ai-tools, sync |
-| server      | common, shell, git, ssh, sync                 |
-| minimal     | common, shell, git, ssh                       |
-
-## Variable Reference
-
-| Variable             | Default                                         | Override in             | Purpose                                                                                                          |
-| -------------------- | ----------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| xdg_config_home      | {{ ansible_facts['env']['HOME'] }}/.config      | group_vars/all.yml      | Base XDG config directory used by roles to avoid hardcoded paths.                                                |
-| xdg_data_home        | {{ ansible_facts['env']['HOME'] }}/.local/share | group_vars/all.yml      | Base XDG data directory for role-managed data storage.                                                           |
-| xdg_cache_home       | {{ ansible_facts['env']['HOME'] }}/.cache       | group_vars/all.yml      | Base XDG cache directory for transient files.                                                                    |
-| xdg_state_home       | {{ ansible_facts['env']['HOME'] }}/.local/state | group_vars/all.yml      | Base XDG state directory for persistent runtime state.                                                           |
-| shell_config_dir     | {{ xdg_config_home }}/shell                     | group_vars/all.yml      | Destination path consumed by shell role.                                                                         |
-| git_config_dir       | {{ xdg_config_home }}/git                       | group_vars/all.yml      | Destination path consumed by git role.                                                                           |
-| nvim_config_dir      | {{ xdg_config_home }}/nvim                      | group_vars/all.yml      | Destination path consumed by nvim role.                                                                          |
-| dotfiles_profile     | workstation                                     | host_vars/localhost.yml | Selects which profile-driven role set should run on this machine.                                                |
-| nvim_config_repo_url | ""                                              | host_vars/localhost.yml | Source repository URL for cloning nvim config.                                                                   |
-| ai_config_repo_url   | ""                                              | host_vars/localhost.yml | Source repository URL for cloning AI tool config.                                                                |
-| claude_config_dest   | {{ ansible_facts['env']['HOME'] }}/.claude      | group_vars/all.yml      | Destination path for Claude configuration symlink or files.                                                      |
-| copilot_config_dest  | OS-specific expression in group_vars/all.yml    | group_vars/all.yml      | Destination path for GitHub Copilot configuration.                                                               |
-| dotfiles_is_wsl      | false                                           | Set by common role      | Canonical WSL detection fact. Set from ansible_kernel by the common role. Use this in all role when: conditions. |
-
-## Development / Testing
-
-- Dry run with diff output:
-
-```bash
-ansible-playbook ansible/site.yml --check --diff
-```
-
-- Run specific role tags:
-
-```bash
-ansible-playbook ansible/site.yml --tags common
-ansible-playbook ansible/site.yml --tags git,shell
-```
-
-- ansible/host_vars/localhost.yml is intentionally gitignored and should remain local.
+Pass `--no-prereqs` to skip this check if they are already present.
