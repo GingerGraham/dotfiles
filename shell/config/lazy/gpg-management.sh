@@ -31,6 +31,7 @@
 #   gpg-import-bitwarden  Pull a key from a Bitwarden secure note and import it
 #   gpg-rotate-subkey     Expire current subkey and generate a replacement
 #   gpg-trust             Set owner trust level on a key
+#   gpg-push-github       Push a signing key to the authenticated GitHub account
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -217,31 +218,30 @@ EOF
     log_info "Key creation complete. Summary:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
 
-    echo
-    echo "═══════════════════════════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════════════════════"
     echo "  Key created: ${fp}"
     echo
     echo "  Complete these steps before using the key:"
     echo
-    echo "  1. Generate a revocation certificate:"
+    echo "  1. Add any additional email addresses (GitHub noreply, work alias, etc.):"
+    echo "       gpg-add-uid ${fp}"
+    echo "     Then re-export to Bitwarden after adding UIDs."
+    echo
+    echo "  2. Generate a revocation certificate:"
     echo "       gpg-revoke ${fp}"
     echo
-    echo "  2. Export and back up to Bitwarden (includes revocation cert):"
+    echo "  3. Export and back up to Bitwarden (includes revocation cert):"
     echo "       gpg-export-bitwarden ${fp}"
     echo "     or export to file:"
     echo "       gpg-export-master ${fp}"
     echo
-    echo "  3. Remove master secret key from this machine:"
+    echo "  4. Remove master secret key from this machine:"
     echo "       gpg-remove-master ${fp}"
-    echo "     The master key is only needed to certify new subkeys or other"
-    echo "     keys. Your subkeys remain and are enough for day-to-day use."
-    echo "     Re-import from Bitwarden if you need the master key again."
     echo
-    echo "  4. Wire up git signing:"
+    echo "  5. Wire up git signing:"
     echo "       gpg-list-signing-keys ${email}"
     echo "       git-add-project <context> <provider> ${email} <signing-subkey-id>"
     echo "═══════════════════════════════════════════════════════════════════"
-    echo
 }
 
 # ── UID management ────────────────────────────────────────────────────────────
@@ -1071,4 +1071,167 @@ gpg-trust() {
     log_info "Setting trust level ${level} (${trust_val}) on ${fp}..."
     printf 'trust\n%s\ny\nquit\n' "${trust_val}" | gpg --command-fd 0 --batch --yes --edit-key "${fp}"
     log_info "Trust level set"
+}
+
+# ── GitHub integration ────────────────────────────────────────────────────────
+
+# gpg-push-github
+# Push a GPG public key to the authenticated GitHub account.
+#
+# Presents the list of local signing-capable keys, prompts for selection,
+# verifies gh CLI authentication, then uploads the public key.
+# Handles duplicate detection — GitHub rejects keys already present.
+#
+# Usage:
+#   gpg-push-github              # interactive key selection
+#   gpg-push-github <key-id>     # skip selection prompt
+gpg-push-github() {
+    local selected_keyid="${1:-}"
+
+    # ── Preflight: gh CLI present and authenticated ───────────────────────────
+    if ! command -v gh &>/dev/null; then
+        log_error "GitHub CLI (gh) is not installed"
+        log_error "Install it with: sudo dnf install gh   # Fedora"
+        log_error "                 sudo apt install gh   # Debian/Ubuntu"
+        log_error "Then authenticate: gh auth login"
+        return 1
+    fi
+
+    local gh_user
+    if ! gh_user="$(gh api user --jq '.login' 2>/dev/null)"; then
+        log_error "GitHub CLI is not authenticated (or the API call failed)"
+        log_error "Run: gh auth login"
+        log_error "     gh auth status   # to verify scope"
+        return 1
+    fi
+    log_info "Authenticated to GitHub as: ${gh_user}"
+
+    # ── Collect available signing keys into an array ──────────────────────────
+    # Parallel arrays: key IDs and their display labels
+    local key_ids=()
+    local key_labels=()
+    local uids=()
+
+    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
+        case "${type}" in
+            sec|pub)
+                uids=()
+                ;;
+            uid)
+                [[ -n "${uid}" ]] && uids+=("${uid}")
+                ;;
+            ssb|sub)
+                [[ "${caps}" != *s* ]] && continue
+                [[ ${#uids[@]} -eq 0 ]] && continue
+
+                local exp_str="no expiry"
+                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
+                    local exp_formatted
+                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || echo "${expiry}")"
+                    exp_str="expires: ${exp_formatted}"
+                fi
+
+                # Build a label from all UIDs on this key
+                local label="${uids[0]}"
+                [[ ${#uids[@]} -gt 1 ]] && label+=" (+$((${#uids[@]} - 1)) more)"
+                label+="  [${exp_str}]"
+
+                key_ids+=("${keyid}")
+                key_labels+=("${label}")
+                ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+
+    if [[ ${#key_ids[@]} -eq 0 ]]; then
+        log_error "No signing-capable keys found in local keyring"
+        log_error "Create one with: gpg-create-key"
+        return 1
+    fi
+
+    # ── Key selection ─────────────────────────────────────────────────────────
+    if [[ -n "${selected_keyid}" ]]; then
+        # Validate the supplied key ID is in our list
+        local found=0
+        local k
+        for k in "${key_ids[@]}"; do
+            [[ "${k}" == "${selected_keyid}" ]] && { found=1; break; }
+        done
+        if [[ ${found} -eq 0 ]]; then
+            log_error "Key ID '${selected_keyid}' not found among local signing keys"
+            log_error "Run gpg-list-signing-keys to see available keys"
+            return 1
+        fi
+    else
+        echo
+        echo "═══════════════════════════════════════════════════════════════════"
+        echo "  Push GPG Signing Key to GitHub"
+        echo "  GitHub account: ${gh_user}"
+        echo "═══════════════════════════════════════════════════════════════════"
+        echo
+        echo "  Available signing keys:"
+        echo
+        local i
+        for i in "${!key_ids[@]}"; do
+            printf "  %2d)  Key ID: %s\n" "$((i + 1))" "${key_ids[${i}]}"
+            printf "       UID:    %s\n" "${key_labels[${i}]}"
+            echo
+        done
+
+        local choice
+        while true; do
+            read -r -p "  Select key (1-${#key_ids[@]}, or q to quit): " choice
+            [[ "${choice}" == "q" || "${choice}" == "Q" ]] && {
+                log_info "Aborted"
+                return 0
+            }
+            if [[ "${choice}" =~ ^[0-9]+$ ]] \
+                && (( choice >= 1 && choice <= ${#key_ids[@]} )); then
+                selected_keyid="${key_ids[$((choice - 1))]}"
+                break
+            fi
+            log_warn "Invalid selection — enter a number between 1 and ${#key_ids[@]}"
+        done
+    fi
+
+    log_info "Selected key: ${selected_keyid}"
+
+    # ── Export public key to temp file ────────────────────────────────────────
+    local tmp_file
+    tmp_file="$(mktemp /tmp/gpg-github-XXXXXX.asc)"
+    chmod 600 "${tmp_file}"
+
+    if ! gpg --armor --export "${selected_keyid}" > "${tmp_file}" 2>/dev/null \
+            || [[ ! -s "${tmp_file}" ]]; then
+        log_error "Failed to export public key for: ${selected_keyid}"
+        rm -f "${tmp_file}"
+        return 1
+    fi
+
+    # ── Push to GitHub ────────────────────────────────────────────────────────
+    log_info "Pushing public key to GitHub (${gh_user})..."
+    local gh_output gh_rc
+    gh_output="$(gh gpg-key add "${tmp_file}" 2>&1)"
+    gh_rc=$?
+    rm -f "${tmp_file}"
+
+    if [[ ${gh_rc} -eq 0 ]]; then
+        log_info "Key successfully added to GitHub account: ${gh_user}"
+        echo
+        echo "  Verify with: gpg-github-keys"
+        echo "               gh gpg-key list"
+    else
+        # GitHub returns a 422 if the key already exists — surface that clearly
+        if echo "${gh_output}" | grep -qi "already exists\|key is already"; then
+            log_warn "Key ${selected_keyid} is already registered on GitHub (${gh_user})"
+            log_warn "No action needed — GitHub already has this key"
+        else
+            log_error "Failed to push key to GitHub"
+            log_error "gh output: ${gh_output}"
+            log_error "Check: gh auth status   — confirm 'admin:gpg_key' scope is granted"
+            log_error "       gh auth refresh --scopes admin:gpg_key   — to add the scope"
+        fi
+        return ${gh_rc}
+    fi
 }

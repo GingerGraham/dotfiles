@@ -12,6 +12,7 @@
 #   gpg-agent-restart     Restart the GPG agent
 #   gpg-agent-forget      Forget cached passphrases
 #   gpg-card-status       Show smartcard / YubiKey status (if sc-tool present)
+#   gpg-github-keys       List GPG keys registered on the authenticated GitHub account
 
 command -v gpg &>/dev/null || return 0
 
@@ -121,6 +122,31 @@ gpg-list-signing-keys() {
         echo "    git-add-project <context> <provider> <email> <Key ID>"
     fi
     echo
+}
+
+# gpg-github-keys
+# List GPG keys currently registered on the authenticated GitHub account.
+# Requires: gh CLI, authenticated via 'gh auth login'.
+#
+# Usage:
+#   gpg-github-keys
+gpg-github-keys() {
+    if ! command -v gh &>/dev/null; then
+        log_error "GitHub CLI (gh) is not installed"
+        log_error "Install it with: sudo dnf install gh   # Fedora"
+        log_error "                 sudo apt install gh   # Debian/Ubuntu"
+        return 1
+    fi
+
+    if ! gh auth status &>/dev/null 2>&1; then
+        log_error "GitHub CLI is not authenticated"
+        log_error "Run: gh auth login"
+        return 1
+    fi
+
+    log_info "GPG keys registered on GitHub:"
+    echo
+    gh gpg-key list
 }
 
 # gpg-show
