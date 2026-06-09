@@ -4,8 +4,6 @@
 - name: Set dotfiles repo root fact
   ansible.builtin.set_fact:
     dotfiles_repo_root: "{{ playbook_dir | dirname }}"
-  # playbook_dir resolves to the ansible/ directory at runtime.
-  # dirname gives the repo root regardless of where the repo was cloned.
 
 # ============================================================================
 # Section 2 — Verify shell config source exists in repo
@@ -25,41 +23,50 @@
 # ============================================================================
 # Section 3 — Migrate linuxDotFiles symlinks
 # ============================================================================
+# Stat each known legacy path directly — no filesystem scan required.
+# We know exactly which paths linuxDotFiles managed; checking only those
+# is both faster and immune to permission errors in unrelated directories.
 
-- name: Find all symlinks in HOME pointing into linuxDotFiles
-  ansible.builtin.shell:
-    cmd: |
-      set -o pipefail
-      find "$HOME" -type l | while read -r link; do
-        target=$(readlink "$link")
-        if echo "$target" | grep -q "linuxDotFiles"; then
-          echo "$link"
-        fi
-      done
-    executable: /bin/bash
-  register: _legacy_symlink_find
-  changed_when: false
-
-- name: Remove stale linuxDotFiles symlinks
-  ansible.builtin.file:
+- name: shell | migration | stat known legacy symlink paths
+  ansible.builtin.stat:
     path: "{{ item }}"
+  register: _legacy_stat
+  loop: "{{ shell_legacy_paths }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: shell | migration | remove stale linuxDotFiles symlinks
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
     state: absent
-  loop: "{{ _legacy_symlink_find.stdout_lines }}"
+  when:
+    - item.stat.exists
+    - item.stat.islnk
+    - "'linuxDotFiles' in (item.stat.lnk_target | default(''))"
+  loop: "{{ _legacy_stat.results }}"
   loop_control:
-    label: "{{ item }}"
+    label: "{{ item.stat.path | default(item.item) }}"
 
-- name: Report removed symlinks
+- name: shell | migration | report removed symlinks
   ansible.builtin.debug:
-    msg: "Removed stale linuxDotFiles symlink: {{ item }}"
-  loop: "{{ _legacy_symlink_find.stdout_lines }}"
+    msg: "Removed stale linuxDotFiles symlink: {{ item.stat.path }}"
+  when:
+    - item.stat.exists
+    - item.stat.islnk
+    - "'linuxDotFiles' in (item.stat.lnk_target | default(''))"
+  loop: "{{ _legacy_stat.results }}"
   loop_control:
-    label: "{{ item }}"
-  when: _legacy_symlink_find.stdout_lines | length > 0
+    label: "{{ item.stat.path | default(item.item) }}"
 
-- name: Report clean state
+- name: shell | migration | confirm no legacy symlinks found
   ansible.builtin.debug:
     msg: "No linuxDotFiles symlinks found — nothing to clean up."
-  when: _legacy_symlink_find.stdout_lines | length == 0
+  when: >-
+    _legacy_stat.results
+    | selectattr('stat.exists', 'equalto', true)
+    | selectattr('stat.islnk', 'equalto', true)
+    | selectattr('stat.lnk_target', 'search', 'linuxDotFiles')
+    | list | length == 0
 
 # ============================================================================
 # Section 4 — Deploy shell config directory symlink
@@ -96,9 +103,6 @@
   loop_control:
     label: "{{ item.dest }}"
 
-# Any real (non-symlink) stub files are backed up with a .pre-dotfiles.bak
-# suffix before being replaced. force: false means existing backups are
-# preserved — a second Ansible run will not overwrite them.
 - name: shell | migration | ensure migration backup directory exists
   ansible.builtin.file:
     path: "{{ dotfiles_migration_dir }}"
@@ -144,9 +148,6 @@
 # ============================================================================
 # Section 6 — Deploy machine-local env override (create once, never overwrite)
 # ============================================================================
-# shell_config_dir is a symlink into the repo, so this file lands at
-# shell/config/env/90-local.sh — which is gitignored. It is created on first
-# run and force: false ensures subsequent Ansible runs leave it untouched.
 - name: Deploy 90-local.sh machine override template
   ansible.builtin.template:
     src: env/90-local.sh.j2

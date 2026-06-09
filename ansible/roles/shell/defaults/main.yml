@@ -13,3 +13,35 @@ shell_stubs:
     dest: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
   - src: shell/zshenv
     dest: "{{ ansible_facts['env']['HOME'] }}/.zshenv"
+
+# ── Legacy linuxDotFiles paths ────────────────────────────────────────────────
+# Known paths that linuxDotFiles managed as symlinks in HOME.
+# Checked directly rather than scanning the filesystem — faster and avoids
+# permission errors in container overlay mounts and other restricted paths.
+shell_legacy_paths:
+  - "{{ ansible_facts['env']['HOME'] }}/.alias"
+  - "{{ ansible_facts['env']['HOME'] }}/.applets"
+  - "{{ ansible_facts['env']['HOME'] }}/.applets-config"
+  - "{{ ansible_facts['env']['HOME'] }}/.applets-feature-flags"
+  - "{{ ansible_facts['env']['HOME'] }}/.bash_profile"
+  - "{{ ansible_facts['env']['HOME'] }}/.bash-logger-version"
+  - "{{ ansible_facts['env']['HOME'] }}/.bashrc"
+  - "{{ ansible_facts['env']['HOME'] }}/.feature-flags"
+  - "{{ ansible_facts['env']['HOME'] }}/.gitconfig"
+  - "{{ ansible_facts['env']['HOME'] }}/.gitignore_global"
+  - "{{ ansible_facts['env']['HOME'] }}/.gitmessage.txt"
+  - "{{ ansible_facts['env']['HOME'] }}/.lock"
+  - "{{ ansible_facts['env']['HOME'] }}/.node"
+  - "{{ ansible_facts['env']['HOME'] }}/.omp"
+  - "{{ ansible_facts['env']['HOME'] }}/.omz"
+  - "{{ ansible_facts['env']['HOME'] }}/.pathVars"
+  - "{{ ansible_facts['env']['HOME'] }}/.profile"
+  - "{{ ansible_facts['env']['HOME'] }}/.shell_common"
+  - "{{ ansible_facts['env']['HOME'] }}/.tasks"
+  - "{{ ansible_facts['env']['HOME'] }}/.tmux.conf"
+  - "{{ ansible_facts['env']['HOME'] }}/.vimrc"
+  - "{{ ansible_facts['env']['HOME'] }}/.zprofile"
+  - "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+  - "{{ ansible_facts['env']['HOME'] }}/applets"
+  - "{{ ansible_facts['env']['HOME'] }}/CustomThemes"
+  - "{{ ansible_facts['env']['HOME'] }}/utils"
