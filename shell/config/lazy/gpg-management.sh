@@ -33,6 +33,24 @@
 #   gpg-trust             Set owner trust level on a key
 #   gpg-push-github       Push a signing key to the authenticated GitHub account
 
+# ── Portability helpers ───────────────────────────────────────────────────────
+
+# _read_prompt <prompt_string> <variable_name>
+# Portable prompt + read for bash and zsh.
+# zsh's read builtin does not support -p for a prompt string (that flag means
+# "read from coprocess"). Use printf to /dev/tty so the prompt always reaches
+# the terminal regardless of stdin/stderr redirection.
+_read_prompt() {
+    local _rp_prompt="$1"
+    local _rp_var="$2"
+    printf '%s' "${_rp_prompt}" >/dev/tty
+    IFS= read -r "${_rp_var}" </dev/tty
+}
+
+# _str_lower <string>
+# Portable lowercase — bash ${var,,} is not supported in zsh.
+_str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 _gpg_require_key() {
@@ -82,7 +100,7 @@ _gpg_prompt_key_id() {
         | grep -E '(^sec|^uid)' | sed 's/^/  /' >&2
     echo >&2
     local key_id
-    read -r -p "  ${prompt_label}: " key_id >&2
+    _read_prompt "  ${prompt_label}: " key_id
     echo "${key_id}"
 }
 
@@ -124,32 +142,32 @@ gpg-create-key() {
 
     # Collect identity
     local name email comment auth_subkey
-    read -r -p "  Full name:  " name
+    _read_prompt "  Full name:  " name
     [[ -z "${name}" ]] && { log_error "Name is required"; return 1; }
 
-    read -r -p "  Email:      " email
+    _read_prompt "  Email:      " email
     [[ -z "${email}" ]] && { log_error "Email is required"; return 1; }
 
-    read -r -p "  Comment (optional, e.g. 'personal' or 'work'): " comment
+    _read_prompt "  Comment (optional, e.g. 'personal' or 'work'): " comment
 
     # Collect expiry — master and subkeys separately
     echo
     echo "  Master key expiry."
     echo "  The master [C] key is used only to certify subkeys and is stored"
     echo "  offline after creation. A very long expiry or no expiry is fine here."
-    read -r -p "  Master key expiry (e.g. 10y, 0 for no expiry) [0]: " master_expiry_input
+    _read_prompt "  Master key expiry (e.g. 10y, 0 for no expiry) [0]: " master_expiry_input
     master_expiry_input="${master_expiry_input:-0}"
     local master_expiry="${master_expiry_input}"
 
     echo
     echo "  Subkey expiry. Subkeys are used daily — a shorter expiry limits"
     echo "  exposure if a subkey is compromised. You can always extend."
-    read -r -p "  Subkey expiry in years [2]: " subkey_expiry_years
+    _read_prompt "  Subkey expiry in years [2]: " subkey_expiry_years
     subkey_expiry_years="${subkey_expiry_years:-2}"
     local subkey_expiry="${subkey_expiry_years}y"
 
     echo
-    read -r -p "  Add authentication [A] subkey for SSH? [y/N]: " auth_subkey
+    _read_prompt "  Add authentication [A] subkey for SSH? [y/N]: " auth_subkey
 
     # Build the UID string
     local uid="${name}"
@@ -209,7 +227,7 @@ EOF
     log_info "Adding encrypt [E] subkey..."
     gpg --batch --yes --quick-add-key "${fp}" cv25519 encr "${subkey_expiry}"
 
-    if [[ "${auth_subkey,,}" == "y" ]]; then
+    if [[ "$(_str_lower "${auth_subkey}")" == "y" ]]; then
         log_info "Adding authenticate [A] subkey..."
         gpg --batch --yes --quick-add-key "${fp}" ed25519 auth "${subkey_expiry}"
     fi
@@ -218,7 +236,7 @@ EOF
     log_info "Key creation complete. Summary:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
 
-echo "═══════════════════════════════════════════════════════════════════"
+    echo "═══════════════════════════════════════════════════════════════════"
     echo "  Key created: ${fp}"
     echo
     echo "  Complete these steps before using the key:"
@@ -263,8 +281,6 @@ gpg-add-uid() {
     echo "  Useful for: GitHub noreply, work aliases, alternate emails."
     echo "═══════════════════════════════════════════════════════════"
 
-    # Replace the key-listing block in gpg-add-uid:
-
     if [[ -z "${fp}" ]]; then
         local -a fps=()
         local -a labels=()
@@ -306,7 +322,7 @@ gpg-add-uid() {
         fi
 
         local selection
-        read -r -p "  Select key number [1]: " selection
+        _read_prompt "  Select key number [1]: " selection
         selection="${selection:-1}"
         if ! [[ "${selection}" =~ ^[0-9]+$ ]] || \
         [[ "${selection}" -lt 1 || "${selection}" -gt ${#fps[@]} ]]; then
@@ -339,18 +355,18 @@ gpg-add-uid() {
         | sed 's/ (.*//' | sed 's/ <.*//')"
 
     local new_name
-    read -r -p "  Full name (blank to reuse existing name): " new_name
+    _read_prompt "  Full name (blank to reuse existing name): " new_name
     if [[ -z "${new_name}" ]]; then
         new_name="${existing_name}"
         log_info "Using existing name: ${new_name}"
     fi
 
     local new_email
-    read -r -p "  Email: " new_email
+    _read_prompt "  Email: " new_email
     [[ -z "${new_email}" ]] && { log_error "Email is required"; return 1; }
 
     local new_comment
-    read -r -p "  Comment (optional, e.g. 'github' or 'work'): " new_comment
+    _read_prompt "  Comment (optional, e.g. 'github' or 'work'): " new_comment
 
     # Build UID string
     local new_uid="${new_name}"
@@ -360,8 +376,9 @@ gpg-add-uid() {
     echo
     log_info "New UID:  ${new_uid}"
     log_info "On key:   ${fp}"
-    read -r -p "  Confirm? [Y/n]: " confirm
-    [[ "${confirm,,}" == "n" ]] && { log_info "Cancelled"; return 0; }
+    local confirm
+    _read_prompt "  Confirm? [Y/n]: " confirm
+    [[ "$(_str_lower "${confirm}")" == "n" ]] && { log_info "Cancelled"; return 0; }
 
     gpg --batch --yes --quick-add-uid "${fp}" "${new_uid}"
     local add_rc=$?
@@ -384,8 +401,9 @@ gpg-add-uid() {
     echo
 
     # Offer to change primary UID
-    read -r -p "  Set '${new_uid}' as the primary UID? [y/N]: " make_primary
-    if [[ "${make_primary,,}" == "y" ]]; then
+    local make_primary
+    _read_prompt "  Set '${new_uid}' as the primary UID? [y/N]: " make_primary
+    if [[ "$(_str_lower "${make_primary}")" == "y" ]]; then
         gpg --batch --yes --quick-set-primary-uid "${fp}" "${new_uid}"
         log_info "Primary UID updated."
     fi
@@ -456,8 +474,9 @@ gpg-remove-master() {
     echo "  │  or certify other keys. Recovery will not be possible.     │"
     echo "  └─────────────────────────────────────────────────────────────┘"
     echo
-    read -r -p "  Have you backed up the master key? [y/N]: " backed_up
-    if [[ "${backed_up,,}" != "y" ]]; then
+    local backed_up
+    _read_prompt "  Have you backed up the master key? [y/N]: " backed_up
+    if [[ "$(_str_lower "${backed_up}")" != "y" ]]; then
         echo
         log_warn "Aborting. Back up the key first:"
         echo "    gpg-export-bitwarden ${fp}"
@@ -471,7 +490,8 @@ gpg-remove-master() {
     echo "    ${GNUPGHOME:-~/.gnupg}"
     echo
     echo "  Type 'yes' to confirm (anything else cancels):"
-    read -r -p "  > " confirm
+    local confirm
+    _read_prompt "  > " confirm
     if [[ "${confirm}" != "yes" ]]; then
         log_info "Cancelled — master key not removed"
         return 0
@@ -541,7 +561,7 @@ gpg-add-subkey() {
         echo "    sign  — signing (git commits, tags, files)"
         echo "    encr  — encryption"
         echo "    auth  — authentication (SSH)"
-        read -r -p "  Type [sign]: " type
+        _read_prompt "  Type [sign]: " type
         type="${type:-sign}"
     fi
 
@@ -553,7 +573,7 @@ gpg-add-subkey() {
     esac
 
     if [[ -z "${expiry}" ]]; then
-        read -r -p "  Expiry (e.g. 2y, 1y, 0 for none) [2y]: " expiry
+        _read_prompt "  Expiry (e.g. 2y, 1y, 0 for none) [2y]: " expiry
         expiry="${expiry:-2y}"
     fi
 
@@ -597,7 +617,7 @@ gpg-extend-expiry() {
     fi
 
     if [[ -z "${expiry}" ]]; then
-        read -r -p "  New expiry (e.g. 2y, 1y): " expiry
+        _read_prompt "  New expiry (e.g. 2y, 1y): " expiry
         [[ -z "${expiry}" ]] && { log_error "Expiry is required"; return 1; }
     fi
 
@@ -649,12 +669,12 @@ gpg-rotate-subkey() {
         gpg --list-secret-keys --with-colons "${master_fp}" 2>/dev/null \
             | awk -F: '/^fpr/ && NR>1 {print "  " $10}'
         echo
-        read -r -p "  Subkey fingerprint to retire: " subkey_fp
+        _read_prompt "  Subkey fingerprint to retire: " subkey_fp
     fi
 
     if [[ -z "${type}" ]]; then
         echo "  Replacement subkey type (sign | encr | auth):"
-        read -r -p "  Type [sign]: " type
+        _read_prompt "  Type [sign]: " type
         type="${type:-sign}"
     fi
 
@@ -719,7 +739,8 @@ gpg-revoke() {
         echo
         log_warn "Applying the revocation certificate will immediately revoke this key."
         log_warn "This cannot be undone. Type 'yes' to confirm:"
-        read -r -p "  > " confirm
+        local confirm
+        _read_prompt "  > " confirm
         if [[ "${confirm}" == "yes" ]]; then
             gpg --import "${rev_file}"
             log_info "Key revoked. Upload to keyserver to propagate:"
@@ -972,7 +993,7 @@ print(json.dumps(t))
 gpg-import() {
     local file="${1:-}"
     if [[ -z "${file}" ]]; then
-        read -r -p "  Path to key file (.asc): " file
+        _read_prompt "  Path to key file (.asc): " file
     fi
     [[ ! -f "${file}" ]] && { log_error "File not found: ${file}"; return 1; }
 
@@ -1007,7 +1028,7 @@ for i,item in enumerate(gpg_items):
     print(f'  {i+1}. {item[\"name\"]}')
 "
         echo
-        read -r -p "  Note name (or partial match): " note_name
+        _read_prompt "  Note name (or partial match): " note_name
     fi
 
     log_info "Fetching note: ${note_name}"
@@ -1181,7 +1202,7 @@ gpg-push-github() {
 
         local choice
         while true; do
-            read -r -p "  Select key (1-${#key_ids[@]}, or q to quit): " choice
+            _read_prompt "  Select key (1-${#key_ids[@]}, or q to quit): " choice
             [[ "${choice}" == "q" || "${choice}" == "Q" ]] && {
                 log_info "Aborted"
                 return 0
@@ -1202,7 +1223,7 @@ gpg-push-github() {
     default_title="$(hostname -s 2>/dev/null || hostname)"
     local key_title
     echo
-    read -r -p "  Key title for GitHub [${default_title}]: " key_title
+    _read_prompt "  Key title for GitHub [${default_title}]: " key_title
     key_title="${key_title:-${default_title}}"
     log_info "Key will be uploaded as: ${key_title}"
 
@@ -1213,34 +1234,22 @@ gpg-push-github() {
 
     if ! gpg --armor --export "${selected_keyid}" > "${tmp_file}" 2>/dev/null \
             || [[ ! -s "${tmp_file}" ]]; then
-        log_error "Failed to export public key for: ${selected_keyid}"
+        log_error "Failed to export public key for ${selected_keyid}"
         rm -f "${tmp_file}"
         return 1
     fi
 
-    # ── Push to GitHub ────────────────────────────────────────────────────────
-    log_info "Pushing public key to GitHub (${gh_user})..."
-    local gh_output gh_rc
-    gh_output="$(gh gpg-key add "${tmp_file}" --title "${key_title}" 2>&1)"
-    gh_rc=$?
-    rm -f "${tmp_file}"
-
-    if [[ ${gh_rc} -eq 0 ]]; then
-        log_info "Key successfully added to GitHub account: ${gh_user}"
-        echo
-        echo "  Verify with: gpg-github-keys"
-        echo "               gh gpg-key list"
+    # ── Upload via gh CLI ─────────────────────────────────────────────────────
+    log_info "Uploading GPG key to GitHub..."
+    if gh gpg-key add "${tmp_file}" --title "${key_title}" 2>/dev/null; then
+        log_info "GPG key uploaded successfully"
+        log_info "View at: https://github.com/settings/keys"
     else
-        # GitHub returns a 422 if the key already exists — surface that clearly
-        if echo "${gh_output}" | grep -qi "already exists\|key is already"; then
-            log_warn "Key ${selected_keyid} is already registered on GitHub (${gh_user})"
-            log_warn "No action needed — GitHub already has this key"
-        else
-            log_error "Failed to push key to GitHub"
-            log_error "gh output: ${gh_output}"
-            log_error "Check: gh auth status   — confirm 'admin:gpg_key' scope is granted"
-            log_error "       gh auth refresh --scopes admin:gpg_key   — to add the scope"
-        fi
-        return ${gh_rc}
+        local gh_exit=$?
+        # Exit 1 from gh gpg-key add usually means duplicate key
+        log_warn "gh gpg-key add exited ${gh_exit} — key may already be registered"
+        log_warn "Check: https://github.com/settings/keys"
     fi
+
+    rm -f "${tmp_file}"
 }
