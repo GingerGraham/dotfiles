@@ -457,9 +457,55 @@ install-bitwarden() {
 # After installing, authenticate with:
 #   bw login
 #   export BW_SESSION=$(bw unlock --raw)
+# ── Internal helper: ensure npm is available, preferring nvm ─────────────────
+_bw_ensure_npm() {
+    # Case 1: npm already resolves as a real command (nvm active, or system npm)
+    if command -v npm &>/dev/null; then
+        return 0
+    fi
+
+    # Case 2: nvm stub registered (function exists) but not yet activated
+    if declare -f npm &>/dev/null || declare -f nvm &>/dev/null; then
+        log_info "Activating nvm to access npm..."
+        # Force-load nvm by calling the stub, which replaces itself
+        nvm --version &>/dev/null || true
+        command -v npm &>/dev/null && return 0
+    fi
+
+    # Case 3: nvm installed but stubs not registered (e.g. called outside interactive shell)
+    local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
+    if [[ -s "${nvm_dir}/nvm.sh" ]]; then
+        log_info "Sourcing nvm..."
+        # shellcheck disable=SC1091
+        source "${nvm_dir}/nvm.sh"
+        command -v npm &>/dev/null && return 0
+        log_info "nvm active but no node version installed — installing LTS..."
+        nvm install --lts
+        nvm use --lts
+        command -v npm &>/dev/null && return 0
+    fi
+
+    # Case 4: no nvm — offer package manager install of node
+    log_info "nvm not found — attempting to install Node.js via package manager..."
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
+    local elevation_cmd
+    elevation_cmd="$(get-elevation-command)" || return 1
+    case "${PACKAGE_MANAGER}" in
+        dnf)    ${elevation_cmd} dnf install -y nodejs npm ;;
+        yum)    ${elevation_cmd} yum install -y nodejs npm ;;
+        apt)    ${elevation_cmd} apt-get install -y nodejs npm ;;
+        zypper) ${elevation_cmd} zypper install -y nodejs npm ;;
+        pacman) ${elevation_cmd} pacman -S --noconfirm nodejs npm ;;
+        brew)   brew install node ;;
+        *) log_error "Cannot install Node.js: no supported package manager"; return 1 ;;
+    esac
+    command -v npm &>/dev/null && return 0
+
+    return 1
+}
+
 install-bw-cli() {
     log_info "Installing or updating Bitwarden CLI (bw)..."
-    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
 
     case "${DOTFILES_OS}" in
         Mac)
@@ -471,16 +517,34 @@ install-bw-cli() {
             fi
             ;;
         Linux)
-            # npm is the officially supported cross-distro install method for bw CLI
-            if command -v npm &>/dev/null; then
-                log_info "Installing via npm..."
-                npm install -g @bitwarden/cli
+            if _bw_ensure_npm; then
+                # Determine if npm's prefix is system-owned; if so, redirect to ~/.local
+                local npm_prefix install_prefix=""
+                npm_prefix="$(npm config get prefix 2>/dev/null)"
+                case "${npm_prefix}" in
+                    /usr/*|/opt/*|/usr|/opt)
+                        install_prefix="${HOME}/.local"
+                        log_info "System npm prefix (${npm_prefix}) — installing to ${install_prefix}"
+                        ;;
+                    *)
+                        log_info "npm prefix is user-writable (${npm_prefix})"
+                        ;;
+                esac
+
+                mkdir -p "${HOME}/.local/bin"
+                if [[ -n "${install_prefix}" ]]; then
+                    npm install -g --prefix "${install_prefix}" @bitwarden/cli
+                    if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
+                        log_warn "${HOME}/.local/bin is not on PATH — add it to env/90-local.sh"
+                    fi
+                else
+                    npm install -g @bitwarden/cli
+                fi
             else
-                # Fallback: download the pre-built binary from GitHub releases
-                log_info "npm not found — downloading pre-built binary from GitHub..."
-                local arch
+                # npm unavailable and could not be installed — fall back to pre-built binary
+                log_info "npm unavailable — downloading pre-built binary from GitHub..."
+                local arch bw_arch
                 arch="$(uname -m)"
-                local bw_arch
                 case "${arch}" in
                     x86_64)  bw_arch="linux-x64"   ;;
                     aarch64) bw_arch="linux-arm64"  ;;
@@ -498,9 +562,9 @@ install-bw-cli() {
                 local tmp_dir
                 tmp_dir="$(mktemp -d)"
                 local zip_url="https://github.com/bitwarden/clients/releases/download/cli-v${version}/bw-${bw_arch}-${version}.zip"
-
                 _download_file_robust "${zip_url}" "${tmp_dir}/bw.zip" || { rm -rf "${tmp_dir}"; return 1; }
                 unzip -q "${tmp_dir}/bw.zip" -d "${tmp_dir}"
+                mkdir -p "${HOME}/.local/bin"
                 install -m 755 "${tmp_dir}/bw" "${HOME}/.local/bin/bw"
                 rm -rf "${tmp_dir}"
                 log_info "bw CLI installed to ~/.local/bin/bw"
@@ -523,7 +587,7 @@ install-bw-cli() {
         echo "    gpg-export-bitwarden <fingerprint>"
     else
         log_warn "bw not found in PATH after install. You may need to restart your shell."
-        log_warn "Expected location: ~/.local/bin/bw"
+        log_warn "Expected location: ${HOME}/.local/bin/bw"
     fi
 }
 
