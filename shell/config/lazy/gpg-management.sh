@@ -68,13 +68,13 @@ _gpg_bw_logged_in() {
 # Prompt for a key ID, offering a list of available secret keys first.
 _gpg_prompt_key_id() {
     local prompt_label="${1:-Key ID or fingerprint}"
-    echo
-    log_info "Available secret keys:"
+    echo >&2
+    log_info "Available secret keys:" >&2
     gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null \
-        | grep -E '(^sec|^uid)' | sed 's/^/  /'
-    echo
+        | grep -E '(^sec|^uid)' | sed 's/^/  /' >&2
+    echo >&2
     local key_id
-    read -r -p "  ${prompt_label}: " key_id
+    read -r -p "  ${prompt_label}: " key_id >&2
     echo "${key_id}"
 }
 
@@ -256,54 +256,57 @@ gpg-add-uid() {
     echo "  Useful for: GitHub noreply, work aliases, alternate emails."
     echo "═══════════════════════════════════════════════════════════"
 
+    # Replace the key-listing block in gpg-add-uid:
+
     if [[ -z "${fp}" ]]; then
-        # List available keys with numbering for easier selection
         local -a fps=()
         local -a labels=()
         local i=1
         echo
         log_info "Available keys:"
         echo
-        while IFS= read -r line; do
-            if [[ "${line}" =~ ^uid ]]; then
-                local uid_val
-                uid_val="$(echo "${line}" | sed 's/^uid[[:space:]]*//' | sed 's/\[.*\][[:space:]]*//')"
-                labels+=("${uid_val}")
-            elif [[ "${line}" =~ ^sec ]]; then
-                local key_fp=""
-            elif [[ "${line}" =~ ^[[:space:]]+Key ]]; then
-                key_fp="$(echo "${line}" | grep -oP '[0-9A-F]{40}')"
-            fi
-        done < <(gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null)
 
-        # Simpler approach: collect fps and first UIDs together
-        fps=()
-        labels=()
-        while IFS=: read -r type _ _ _ _ _ _ _ _ val _; do
-            if [[ "${type}" == "sec" ]]; then
-                : # next fpr will be the master fp
-            elif [[ "${type}" == "fpr" ]] && [[ ${#fps[@]} -eq ${#labels[@]} ]]; then
-                fps+=("${val}")
-            elif [[ "${type}" == "uid" ]] && [[ ${#fps[@]} -gt ${#labels[@]} ]]; then
-                labels+=("${val}")
-            fi
+        # Parse --with-colons: only collect sec (master) records, not ssb/subkeys
+        local cur_fp="" cur_uid=""
+        while IFS=: read -r type _ _ _ _ _ _ _ _ uid _ _; do
+            case "${type}" in
+                sec)
+                    cur_fp=""
+                    cur_uid=""
+                    ;;
+                fpr)
+                    # First fpr after sec is the master key fingerprint
+                    if [[ -z "${cur_fp}" ]]; then
+                        cur_fp="${uid}"   # fpr field 10 is the fingerprint
+                    fi
+                    ;;
+                uid)
+                    if [[ -z "${cur_uid}" && -n "${cur_fp}" ]]; then
+                        cur_uid="${uid}"
+                        fps+=("${cur_fp}")
+                        labels+=("${cur_uid}")
+                        printf "  %d.  %s\n      Fingerprint: %s\n\n" \
+                            "${i}" "${cur_uid}" "${cur_fp}"
+                        (( i++ ))
+                    fi
+                    ;;
+            esac
         done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
 
         if [[ ${#fps[@]} -eq 0 ]]; then
-            log_error "No secret keys found. Create one with: gpg-create-key"
+            log_error "No secret keys found. Run gpg-create-key to create one."
             return 1
         fi
 
-        for i in "${!fps[@]}"; do
-            printf "  %d.  %s\n" "$((i+1))" "${labels[$i]}"
-            printf "      Fingerprint: %s\n" "${fps[$i]}"
-            echo
-        done
-
-        local sel
-        read -r -p "  Select key number [1]: " sel
-        sel="${sel:-1}"
-        fp="${fps[$((sel-1))]}"
+        local selection
+        read -r -p "  Select key number [1]: " selection
+        selection="${selection:-1}"
+        if ! [[ "${selection}" =~ ^[0-9]+$ ]] || \
+        [[ "${selection}" -lt 1 || "${selection}" -gt ${#fps[@]} ]]; then
+            log_error "Invalid selection"
+            return 1
+        fi
+        fp="${fps[$((selection - 1))]}"
     fi
 
     _gpg_require_key "${fp}" || return 1

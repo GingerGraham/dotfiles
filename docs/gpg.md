@@ -134,6 +134,45 @@ Then re-run Ansible to apply it to `~/.gitconfig`.
 
 ## Key lifecycle
 
+### Adding UIDs (email aliases)
+
+UIDs are always added to the **master key** (`[C]`), never to subkeys. Subkeys carry no identity — they inherit it from the master. `gpg-add-uid` only lists master keys for this reason; the signing subkey fingerprint you may see in `gpg --list-secret-keys` output is not a valid target for a UID.
+
+```bash
+gpg-add-uid                      # interactive: lists master keys, prompts for email
+gpg-add-uid <master-fingerprint> # non-interactive key selection
+```
+
+Common use cases:
+
+- GitHub noreply address: `<id>+username@users.noreply.github.com`
+- Work email alias
+- Alternate personal address
+
+GitHub verifies signed commits against **any UID on the key** — you do not need to set the GitHub noreply address as the primary UID, and doing so is usually wrong. Leave your real email as primary.
+
+After `gpg-add-uid` completes, the new UID will show as `[ unknown]` trust in `gpg --list-keys`. This is expected — ownertrust is set on the key as a whole, not per-UID, but GPG resets the display state when a UID is added. The function re-applies ultimate ownertrust automatically. If you see `[ unknown]` persisting, run:
+
+```bash
+gpg-trust <master-fingerprint>
+```
+
+Re-export to Bitwarden after adding a UID so your backup reflects the new identity:
+
+```bash
+gpg-export-bitwarden <master-fingerprint>
+```
+
+The master secret key must be present locally to add a UID. If it has been removed, import it first, add the UID, re-export, then remove it again:
+
+```bash
+export BW_SESSION=$(bw unlock --raw)
+gpg-import-bitwarden
+gpg-add-uid <fingerprint>
+gpg-export-bitwarden <fingerprint>
+gpg-remove-master <fingerprint>
+```
+
 ### Extending expiry
 
 ```bash
