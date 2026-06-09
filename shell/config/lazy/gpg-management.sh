@@ -1062,6 +1062,6 @@ gpg-trust() {
     esac
 
     log_info "Setting trust level ${level} (${trust_val}) on ${fp}..."
-    echo "${fp}:${trust_val}:" | gpg --import-ownertrust
+    printf 'trust\n%s\ny\nquit\n' "${trust_val}" | gpg --command-fd 0 --batch --yes --edit-key "${fp}"
     log_info "Trust level set"
 }
