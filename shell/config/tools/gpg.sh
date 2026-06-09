@@ -18,7 +18,6 @@ command -v gpg &>/dev/null || return 0
 
 # ── Aliases ───────────────────────────────────────────────────────────────────
 
-alias gpg-list="gpg-list"               # see function below — alias for discoverability
 alias gpg-ls="gpg-list"
 alias gpg-ls-secret="gpg-list-secret"
 
