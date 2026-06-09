@@ -41,63 +41,78 @@ gpg-list-secret() {
 # List signing-capable (sub)keys in a format suitable for use with git-add-project.
 # Outputs the long key ID and associated UIDs for easy copy-paste.
 #
+# Uses --with-colons output for reliable cross-platform parsing (GnuPG 2.x, macOS, Linux).
+#
 # Usage:
 #   gpg-list-signing-keys
 #   gpg-list-signing-keys <email>    # filter to keys matching an email
 #
 # Output format:
 #   [S]  Key ID: ABCDEF1234567890  (expires: 2026-06-01)
-#        UID:    Graham Watkins <graham@example.com>
+#        UID:    Graham Watts <graham@example.com>
 #   → Pass the Key ID to git-add-project as the signing_key argument.
 gpg-list-signing-keys() {
     local filter="${1:-}"
     local found=0
+    local uids=()
 
     echo
     echo "GPG signing keys available for use with git-add-project:"
     echo "─────────────────────────────────────────────────────────"
 
-    while IFS= read -r line; do
-        # pub/sub records: pub = primary key, sub = subkey
-        # capability flags: S=sign, E=encrypt, C=certify, A=auth
-        if [[ "${line}" =~ ^(pub|sub)[[:space:]] ]]; then
-            local caps="" key_id="" expiry=""
-            # Extract capability flags (field after key size/type, bracketed)
-            caps="$(echo "${line}" | grep -oP '\[.*?\]' | tr -d '[]')"
-            # Only proceed if this key has signing capability
-            [[ "${caps}" != *S* ]] && continue
-            # Extract the long key ID (16 hex chars after the /)
-            key_id="$(echo "${line}" | grep -oP '[0-9A-F]{16}')"
-            [[ -z "${key_id}" ]] && continue
-            # Extract expiry if present
-            expiry="$(echo "${line}" | grep -oP 'expires: [0-9-]+')"
-            [[ -n "${expiry}" ]] && expiry=" (${expiry})" || expiry=" (no expiry)"
-            # Collect UIDs for this key block
-            local uids=()
-            while IFS= read -r uid_line; do
-                [[ "${uid_line}" =~ ^uid ]] || break
-                local uid_val
-                uid_val="$(echo "${uid_line}" | sed 's/^uid[[:space:]]*//' | sed 's/^[[:space:]]*//')"
-                # Apply email filter if given
-                if [[ -z "${filter}" ]] || echo "${uid_val}" | grep -qi "${filter}"; then
-                    uids+=("${uid_val}")
+    # --with-colons fields (colon-delimited):
+    #   field 1:  record type (sec/ssb/uid/fpr/pub/sub)
+    #   field 5:  long key ID (8-byte hex, for sec/ssb/pub/sub records)
+    #   field 7:  expiry timestamp (unix epoch, empty if none)
+    #   field 10: UID string (for uid records); fingerprint (for fpr records)
+    #   field 12: key capabilities: e=encrypt s=sign a=auth c=certify
+    #             uppercase = primary key has that capability
+
+    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
+        case "${type}" in
+            sec|pub)
+                # Start of a new key block — reset UID accumulator
+                uids=()
+                ;;
+            uid)
+                [[ -n "${uid}" ]] && uids+=("${uid}")
+                ;;
+            ssb|sub)
+                # Only process signing-capable subkeys
+                [[ "${caps}" != *s* ]] && continue
+
+                # Apply email filter against collected UIDs
+                local matched_uids=()
+                local u
+                for u in "${uids[@]}"; do
+                    if [[ -z "${filter}" ]] || echo "${u}" | grep -qi "${filter}"; then
+                        matched_uids+=("${u}")
+                    fi
+                done
+                [[ ${#matched_uids[@]} -eq 0 ]] && continue
+
+                # Format expiry — portable across GNU date (Linux) and BSD date (macOS)
+                local exp_str="no expiry"
+                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
+                    local exp_formatted
+                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || echo "${expiry}")"
+                    exp_str="expires: ${exp_formatted}"
                 fi
-            done < <(gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null \
-                | grep -A 20 "${key_id}" | grep '^uid')
 
-            [[ ${#uids[@]} -eq 0 && -n "${filter}" ]] && continue
-
-            echo
-            printf "  [S]  Key ID: %s%s\n" "${key_id}" "${expiry}"
-            for uid in "${uids[@]}"; do
-                printf "       UID:    %s\n" "${uid}"
-            done
-            found=$((found + 1))
-        fi
-    done < <(gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null)
+                echo
+                printf "  [S]  Key ID: %s  (%s)\n" "${keyid}" "${exp_str}"
+                for u in "${matched_uids[@]}"; do
+                    printf "       UID:    %s\n" "${u}"
+                done
+                found=$((found + 1))
+                ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
 
     if [[ ${found} -eq 0 ]]; then
-        echo "  No signing keys found${filter:+ matching '${filter}'}."
+        echo "  No signing keys found${filter:+ matching \'${filter}\'}."
         echo
         echo "  To create a new key set, run: gpg-create-key"
     else

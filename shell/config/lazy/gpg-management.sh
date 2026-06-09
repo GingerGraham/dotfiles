@@ -27,6 +27,7 @@
 #   gpg-import-bitwarden  Pull a key from a Bitwarden secure note and import it
 #   gpg-rotate-subkey     Expire current subkey and generate a replacement
 #   gpg-trust             Set owner trust level on a key
+#   gpg-add-uid           Add a new UID (email address / identity) to an existing key
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -53,7 +54,10 @@ _gpg_require_bw() {
 
 _gpg_bw_logged_in() {
     local status
-    status="$(bw status 2>/dev/null | grep -oP '"status":"[^"]+"' | grep -oP '[^"]+$')"
+    # grep -P (PCRE) is not available on macOS without Homebrew — use grep -o + sed
+    status="$(bw status 2>/dev/null \
+        | grep -o '"status":"[^"]*"' \
+        | sed 's/"status":"//;s/"//')"
     if [[ "${status}" != "unlocked" ]]; then
         log_error "Bitwarden vault is not unlocked (status: ${status:-unknown})"
         log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
@@ -266,6 +270,212 @@ gpg-add-subkey() {
     echo
     log_info "Updated key:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+}
+
+# gpg-add-uid
+# Add an additional UID (name + email) to an existing key.
+# Useful for adding a GitHub noreply address, a work alias, or any alternate
+# email to a key without creating a new key.
+#
+# GitHub signature verification accepts any UID on the key, so adding your
+# <id>+username@users.noreply.github.com means both your real email and the
+# noreply address will verify correctly.
+#
+# Usage:
+#   gpg-add-uid <fingerprint>    # prompts for UID details
+#   gpg-add-uid                  # prompts for key selection first
+#
+# After adding a UID, re-export to keep your Bitwarden backup current:
+#   gpg-export-bitwarden <fingerprint>
+gpg-add-uid() {
+    local fp="${1:-}"
+
+    # ── Key selection ────────────────────────────────────────────────────────
+    if [[ -z "${fp}" ]]; then
+        echo
+        echo "═══════════════════════════════════════════════════════════"
+        echo "  Add UID to GPG Key"
+        echo "  Adds an email address / identity to an existing key."
+        echo "  Useful for: GitHub noreply, work aliases, alternate emails."
+        echo "═══════════════════════════════════════════════════════════"
+        echo
+        log_info "Available keys:"
+        echo
+
+        # Build numbered list from --with-colons output.
+        # Bash 3.2 compat (macOS): no associative arrays, index via parallel arrays.
+        local fps=() labels=()
+        local _cur_fp="" _cur_uid_seen=0
+
+        while IFS=: read -r type _ _ _ _ _ _ _ _ field10 _; do
+            case "${type}" in
+                sec)
+                    _cur_fp=""
+                    _cur_uid_seen=0
+                    ;;
+                fpr)
+                    # First fpr record after sec is the master key fingerprint
+                    [[ -z "${_cur_fp}" ]] && _cur_fp="${field10}"
+                    ;;
+                uid)
+                    # Capture only the first UID per key for the label
+                    if [[ "${_cur_uid_seen}" -eq 0 && -n "${field10}" && -n "${_cur_fp}" ]]; then
+                        _cur_uid_seen=1
+                        fps+=("${_cur_fp}")
+                        labels+=("${field10}")
+                        local _idx=${#fps[@]}
+                        printf "  %d.  %s\n      Fingerprint: %s\n\n" \
+                            "${_idx}" "${field10}" "${_cur_fp}"
+                    fi
+                    ;;
+            esac
+        done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+
+        if [[ ${#fps[@]} -eq 0 ]]; then
+            log_error "No secret keys found. Run gpg-create-key first."
+            return 1
+        fi
+
+        local choice
+        read -r -p "  Select key number [1]: " choice
+        choice="${choice:-1}"
+
+        if ! echo "${choice}" | grep -qE '^[0-9]+$' || \
+           [[ "${choice}" -lt 1 ]] || \
+           [[ "${choice}" -gt ${#fps[@]} ]]; then
+            log_error "Invalid selection: ${choice}"
+            return 1
+        fi
+
+        # Bash 3.2 compat: retrieve by walking the array with a counter
+        local _i=0
+        local _selected_label=""
+        for _f in "${fps[@]}"; do
+            _i=$((_i + 1))
+            if [[ "${_i}" -eq "${choice}" ]]; then
+                fp="${_f}"
+                break
+            fi
+        done
+        _i=0
+        for _l in "${labels[@]}"; do
+            _i=$((_i + 1))
+            if [[ "${_i}" -eq "${choice}" ]]; then
+                _selected_label="${_l}"
+                break
+            fi
+        done
+
+        echo
+        log_info "Selected: ${_selected_label}"
+    fi
+
+    _gpg_require_key "${fp}" || return 1
+
+    # ── Show existing UIDs ───────────────────────────────────────────────────
+    echo
+    log_info "Current UIDs on this key:"
+    local existing_uids=()
+    local _uid_field
+    while IFS=: read -r type _ _ _ _ _ _ _ _ _uid_field _; do
+        if [[ "${type}" == "uid" && -n "${_uid_field}" ]]; then
+            existing_uids+=("${_uid_field}")
+            printf "  • %s\n" "${_uid_field}"
+        fi
+    done < <(gpg --list-secret-keys --with-colons "${fp}" 2>/dev/null)
+
+    # ── Collect new UID details ──────────────────────────────────────────────
+    echo
+    echo "  Enter details for the new UID."
+    echo "  For a GitHub noreply address, leave name blank to reuse the"
+    echo "  existing name and enter: <id>+username@users.noreply.github.com"
+    echo
+
+    local new_name new_email new_comment
+    read -r -p "  Full name (blank to reuse existing name): " new_name
+
+    # Fall back to name component of first existing UID
+    if [[ -z "${new_name}" ]] && [[ ${#existing_uids[@]} -gt 0 ]]; then
+        # UID format: "Name (Comment) <email>" — strip everything from ( or < onwards
+        new_name="${existing_uids[0]%%(*}"
+        new_name="${new_name%%<*}"
+        # Trim trailing whitespace portably
+        new_name="$(echo "${new_name}" | sed 's/[[:space:]]*$//')"
+        log_info "Using existing name: ${new_name}"
+    fi
+    [[ -z "${new_name}" ]] && { log_error "Name is required"; return 1; }
+
+    read -r -p "  Email: " new_email
+    [[ -z "${new_email}" ]] && { log_error "Email is required"; return 1; }
+
+    # Warn if this email is already present on the key
+    local _u
+    for _u in "${existing_uids[@]}"; do
+        if echo "${_u}" | grep -qi "${new_email}"; then
+            log_warn "A UID matching '${new_email}' already exists: ${_u}"
+            local _confirm
+            read -r -p "  Add it anyway? [y/N]: " _confirm
+            [[ "${_confirm}" != "y" && "${_confirm}" != "Y" ]] && return 0
+            break
+        fi
+    done
+
+    read -r -p "  Comment (optional, e.g. 'github' or 'work'): " new_comment
+
+    # ── Build and confirm the new UID string ─────────────────────────────────
+    local new_uid="${new_name}"
+    [[ -n "${new_comment}" ]] && new_uid="${new_uid} (${new_comment})"
+    new_uid="${new_uid} <${new_email}>"
+
+    echo
+    log_info "New UID:  ${new_uid}"
+    log_info "On key:   ${fp}"
+    local _confirm
+    read -r -p "  Confirm? [Y/n]: " _confirm
+    [[ "${_confirm}" == "n" || "${_confirm}" == "N" ]] && return 0
+
+    # ── Add the UID ──────────────────────────────────────────────────────────
+    # --quick-add-uid requires GnuPG >= 2.1.13 — present on all current
+    # Fedora, Ubuntu 18.04+, Debian 10+, Arch, macOS (Homebrew gnupg).
+    gpg --batch --yes --quick-add-uid "${fp}" "${new_uid}"
+    local _rc=$?
+
+    if [[ ${_rc} -ne 0 ]]; then
+        log_error "Failed to add UID (gpg exit ${_rc})"
+        return 1
+    fi
+
+    log_info "UID added successfully."
+
+    # ── Optionally set as primary ────────────────────────────────────────────
+    echo
+    echo "  Your existing primary UID is unchanged."
+    echo "  For a GitHub noreply address, leaving your real email as primary"
+    echo "  is usually correct — GitHub verifies against any UID on the key."
+    echo
+    local _set_primary
+    read -r -p "  Set '${new_uid}' as the primary UID? [y/N]: " _set_primary
+
+    if [[ "${_set_primary}" == "y" || "${_set_primary}" == "Y" ]]; then
+        # --quick-set-primary-uid requires GnuPG >= 2.2.17
+        if gpg --batch --yes --quick-set-primary-uid "${fp}" "${new_uid}" 2>/dev/null; then
+            log_info "Primary UID updated."
+        else
+            log_warn "--quick-set-primary-uid not supported on this GPG version."
+            log_warn "Set it manually:"
+            log_warn "  gpg --edit-key ${fp}"
+            log_warn "  At the gpg> prompt: uid <N>  then: primary  then: save"
+        fi
+    fi
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    echo
+    log_info "Updated key:"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    echo
+    echo "  Re-export to keep your Bitwarden backup current:"
+    echo "    gpg-export-bitwarden ${fp}"
+    echo
 }
 
 # gpg-extend-expiry
