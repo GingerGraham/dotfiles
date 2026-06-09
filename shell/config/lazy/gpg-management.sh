@@ -480,7 +480,7 @@ gpg-remove-master() {
     # The '!' suffix targets only the primary key, leaving subkeys intact.
     # GnuPG 2.1+ retains a sec# stub so the public key and subkeys remain usable.
     log_info "Removing master secret key material..."
-    echo "${fp}!" | gpg --batch --yes --delete-secret-keys - 2>/dev/null
+    gpg --batch --yes --delete-secret-keys "${fp}!"
     local del_rc=$?
 
     if [[ ${del_rc} -ne 0 ]]; then
