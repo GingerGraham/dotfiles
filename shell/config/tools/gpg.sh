@@ -16,11 +16,6 @@
 
 command -v gpg &>/dev/null || return 0
 
-# ── Aliases ───────────────────────────────────────────────────────────────────
-
-alias gpg-ls="gpg-list"
-alias gpg-ls-secret="gpg-list-secret"
-
 # ── Listing functions ─────────────────────────────────────────────────────────
 
 # gpg-list
@@ -36,6 +31,11 @@ gpg-list-secret() {
     log_info "Secret keys:"
     gpg --list-secret-keys --keyid-format long --with-fingerprint "$@"
 }
+
+# ── Aliases ───────────────────────────────────────────────────────────────────
+
+alias gpg-ls="gpg-list"
+alias gpg-ls-secret="gpg-list-secret"
 
 # gpg-list-signing-keys
 # List signing-capable (sub)keys in a format suitable for use with git-add-project.
