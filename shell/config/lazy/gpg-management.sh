@@ -56,8 +56,15 @@ _gpg_require_bw() {
 }
 
 _gpg_bw_logged_in() {
+    if [[ -z "${BW_SESSION:-}" ]]; then
+        log_error "BW_SESSION is not set"
+        log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
+        return 1
+    fi
+
     local status
-    status="$(bw status 2>/dev/null | grep -oP '"status":"[^"]+"' | grep -oP '[^"]+$')"
+    status="$(bw status 2>/dev/null | grep -oP '(?<="status":")[^"]+')"
+
     if [[ "${status}" != "unlocked" ]]; then
         log_error "Bitwarden vault is not unlocked (status: ${status:-unknown})"
         log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
@@ -887,9 +894,9 @@ gpg-export-bitwarden() {
             | python3 -c "
 import json,sys
 items=json.load(sys.stdin)
-match=[i for i in items if i.get('name')=='${note_name}']
+match=[i for i in items if i.get('name')==sys.argv[1]]
 print(match[0]['id'] if match else '')
-" 2>/dev/null || true)"
+" "${note_name}" 2>/dev/null || true)"
 
         local note_json
         note_json="$(bw get template item 2>/dev/null \
@@ -897,11 +904,11 @@ print(match[0]['id'] if match else '')
 import json,sys
 t=json.load(sys.stdin)
 t['type']=2
-t['name']='${note_name}'
-t['notes']=sys.argv[1]
+t['name']=sys.argv[1]
+t['notes']=sys.argv[2]
 t['secureNote']={'type':0}
 print(json.dumps(t))
-" "${note_body}" 2>/dev/null)"
+" "${note_name}" "${note_body}" 2>/dev/null)"
 
         if [[ -z "${note_json}" ]]; then
             log_error "Failed to build Bitwarden item JSON"
@@ -998,7 +1005,7 @@ items=json.load(sys.stdin)
 gpg_items=[i for i in items if 'GPG' in i.get('name','')]
 for i,item in enumerate(gpg_items):
     print(f'  {i+1}. {item[\"name\"]}')
-" 2>/dev/null
+"
         echo
         read -r -p "  Note name (or partial match): " note_name
     fi
@@ -1009,10 +1016,10 @@ for i,item in enumerate(gpg_items):
         | python3 -c "
 import json,sys
 items=json.load(sys.stdin)
-match=[i for i in items if '${note_name}' in i.get('name','')]
+match=[i for i in items if sys.argv[1] in i.get('name','')]
 if match:
     print(match[0].get('notes',''))
-" 2>/dev/null)"
+" "${note_name}")"
 
     if [[ -z "${note_content}" ]]; then
         log_error "No matching note found or note is empty"
