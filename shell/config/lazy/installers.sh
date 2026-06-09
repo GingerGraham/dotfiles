@@ -450,6 +450,83 @@ install-bitwarden() {
     log_info "Bitwarden installation complete"
 }
 
+# ── Bitwarden CLI (bw) install ────────────────────────────────────────────────
+# This is the headless CLI tool, separate from the Bitwarden desktop app.
+# Used by gpg-export-bitwarden and gpg-import-bitwarden.
+#
+# After installing, authenticate with:
+#   bw login
+#   export BW_SESSION=$(bw unlock --raw)
+install-bw-cli() {
+    log_info "Installing or updating Bitwarden CLI (bw)..."
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            if command -v brew &>/dev/null; then
+                brew install bitwarden-cli
+            else
+                log_error "Homebrew required on macOS for Bitwarden CLI"
+                return 1
+            fi
+            ;;
+        Linux)
+            # npm is the officially supported cross-distro install method for bw CLI
+            if command -v npm &>/dev/null; then
+                log_info "Installing via npm..."
+                npm install -g @bitwarden/cli
+            else
+                # Fallback: download the pre-built binary from GitHub releases
+                log_info "npm not found — downloading pre-built binary from GitHub..."
+                local arch
+                arch="$(uname -m)"
+                local bw_arch
+                case "${arch}" in
+                    x86_64)  bw_arch="linux-x64"   ;;
+                    aarch64) bw_arch="linux-arm64"  ;;
+                    *) log_error "Unsupported architecture: ${arch}"; return 1 ;;
+                esac
+
+                local version
+                version="$(curl -s https://api.github.com/repos/bitwarden/clients/releases \
+                    | grep '"tag_name"' \
+                    | grep '"cli-' \
+                    | head -1 \
+                    | sed -E 's/.*"cli-v([0-9.]+)".*/\1/')"
+                [[ -z "${version}" ]] && { log_error "Could not determine bw CLI version"; return 1; }
+
+                local tmp_dir
+                tmp_dir="$(mktemp -d)"
+                local zip_url="https://github.com/bitwarden/clients/releases/download/cli-v${version}/bw-${bw_arch}-${version}.zip"
+
+                _download_file_robust "${zip_url}" "${tmp_dir}/bw.zip" || { rm -rf "${tmp_dir}"; return 1; }
+                unzip -q "${tmp_dir}/bw.zip" -d "${tmp_dir}"
+                install -m 755 "${tmp_dir}/bw" "${HOME}/.local/bin/bw"
+                rm -rf "${tmp_dir}"
+                log_info "bw CLI installed to ~/.local/bin/bw"
+            fi
+            ;;
+        *)
+            log_error "Unsupported OS for Bitwarden CLI install"
+            return 1
+            ;;
+    esac
+
+    if command -v bw &>/dev/null; then
+        log_info "Bitwarden CLI installed: $(bw --version)"
+        echo
+        echo "  To authenticate:"
+        echo "    bw login"
+        echo "    export BW_SESSION=\$(bw unlock --raw)"
+        echo
+        echo "  To use with GPG exports:"
+        echo "    gpg-export-bitwarden <fingerprint>"
+    else
+        log_warn "bw not found in PATH after install. You may need to restart your shell."
+        log_warn "Expected location: ~/.local/bin/bw"
+    fi
+}
+
 # ── Microsoft Edit install ────────────────────────────────────────────────────
 #
 # _edit_arch_stem <version_string>

@@ -178,8 +178,8 @@ _source_if_any_cmd containers.sh docker podman
 _source_if_cmd  aws        "${SHELL_CONFIG_DIR}/tools/aws.sh"
 _source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
 _source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
-
-_source_if_cmd     fzf         "${SHELL_CONFIG_DIR}/tools/fzf.sh"
+_source_if_cmd  gpg        "${SHELL_CONFIG_DIR}/tools/gpg.sh"
+_source_if_cmd  fzf        "${SHELL_CONFIG_DIR}/tools/fzf.sh"
 
 # zsh plugins — sourced only in zsh; check for at least one plugin before loading
 if [[ "${DOTFILES_SHELL}" == "zsh" ]] && {
