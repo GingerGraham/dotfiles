@@ -17,24 +17,25 @@ See the [docs/](docs/) directory for full documentation.
 
 ## Documentation
 
-| Document | Contents |
-|---|---|
-| [docs/installation.md](docs/installation.md) | Bootstrap, `install.sh` reference, all CLI options |
-| [docs/profiles.md](docs/profiles.md) | Workstation, server, and minimal profiles |
+| Document                                                   | Contents                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------- |
+| [docs/installation.md](docs/installation.md)               | Bootstrap, `install.sh` reference, all CLI options            |
+| [docs/profiles.md](docs/profiles.md)                       | Workstation, server, and minimal profiles                     |
 | [docs/optional-components.md](docs/optional-components.md) | nvim and ai-tools roles — what they do and how to enable them |
-| [docs/shell-config.md](docs/shell-config.md) | Shell loading architecture, tiers, local overrides |
-| [docs/sync.md](docs/sync.md) | Background sync, DEV\_MODE, branch switching |
+| [docs/shell-config.md](docs/shell-config.md)               | Shell loading architecture, tiers, local overrides            |
+| [docs/sync.md](docs/sync.md)                               | Background sync, DEV_MODE, branch switching                   |
+| [docs/gpg.md](docs/gpg.md)                                 | GPG key management, Bitwarden backup, git signing setup       |
 
 ## Supported platforms
 
-| Platform | Status |
-|---|---|
-| Fedora / RHEL / Rocky / Alma | ✅ Primary |
-| Ubuntu / Debian / Pop!\_OS | ✅ Supported |
-| openSUSE Tumbleweed / SLES | ✅ Supported |
+| Platform                     | Status       |
+| ---------------------------- | ------------ |
+| Fedora / RHEL / Rocky / Alma | ✅ Primary   |
+| Ubuntu / Debian / Pop!\_OS   | ✅ Supported |
+| openSUSE Tumbleweed / SLES   | ✅ Supported |
 | Arch / Manjaro / EndeavourOS | ✅ Supported |
-| macOS | ✅ Supported |
-| WSL2 (systemd enabled) | ✅ Supported |
+| macOS                        | ✅ Supported |
+| WSL2 (systemd enabled)       | ✅ Supported |
 
 ## Prerequisites
 
