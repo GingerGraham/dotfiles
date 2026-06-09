@@ -25,12 +25,20 @@ if [[ -d "${HOME}/.pyenv" ]] && command -v pyenv &>/dev/null; then
 fi
 
 # ── Node / nvm ────────────────────────────────────────────────────────────────
-if [[ -d "${HOME}/.nvm" ]]; then
-    export NVM_DIR="${HOME}/.nvm"
-    # shellcheck disable=SC1091
-    [[ -s "${NVM_DIR}/nvm.sh" ]] && source "${NVM_DIR}/nvm.sh"
-    # shellcheck disable=SC1091
-    [[ -s "${NVM_DIR}/bash_completion" ]] && source "${NVM_DIR}/bash_completion"
+export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+
+if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
+    _load_nvm() {
+        unset -f nvm node npm npx yarn pnpm
+        # shellcheck disable=SC1091
+        source "${NVM_DIR}/nvm.sh"
+        # shellcheck disable=SC1091
+        [[ -s "${NVM_DIR}/bash_completion" ]] && source "${NVM_DIR}/bash_completion"
+    }
+    nvm()  { _load_nvm; nvm  "$@"; }
+    node() { _load_nvm; node "$@"; }
+    npm()  { _load_nvm; npm  "$@"; }
+    npx()  { _load_nvm; npx  "$@"; }
 fi
 
 # ── tfenv ─────────────────────────────────────────────────────────────────────

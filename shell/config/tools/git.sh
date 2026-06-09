@@ -50,10 +50,18 @@ alias gitkeep='find . -type d -empty -exec touch {}/.gitkeep \;'
 alias git-remove-untracked="git-cleanup"
 alias gitcleanup="git-cleanup"
 
-# GitHub Copilot CLI shortcut
-if command -v gh &>/dev/null && gh extension list 2>/dev/null | grep -q "gh copilot"; then
-    alias copilot="gh copilot"
-    alias upgrade-copilot="gh extension upgrade gh-copilot"
+if command -v gh &>/dev/null; then
+    _gh_copilot_found=false
+    for _gh_ext_dir in \
+        "${HOME}/.local/share/gh/extensions/gh-copilot" \
+        "${HOME}/.config/gh/extensions/gh-copilot"; do
+        [[ -d "${_gh_ext_dir}" ]] && { _gh_copilot_found=true; break; }
+    done
+    if [[ "${_gh_copilot_found}" == "true" ]]; then
+        alias copilot="gh copilot"
+        alias upgrade-copilot="gh extension upgrade gh-copilot"
+    fi
+    unset _gh_copilot_found _gh_ext_dir
 fi
 
 # ── functions: git helpers ────────────────────────────────────────────────────
