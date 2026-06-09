@@ -308,3 +308,9 @@ register-tpm() {
     log_info "TPM2 enrollment complete. Enrolled ${enrolled_count} device(s)."
     luks_devices=()
 }
+
+# ── Completion cache management ───────────────────────────────────────────────
+refresh-completions() {
+    rm -rf "${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions/"
+    log_info "Completion cache cleared — will regenerate on next shell start or source your rc file."
+}

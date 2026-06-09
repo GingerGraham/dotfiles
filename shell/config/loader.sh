@@ -143,7 +143,7 @@ unset _core_file
 # zsh.sh and bash.sh contain constructs that are illegal in the other shell,
 # so they are sourced conditionally here rather than in the core/ glob loop.
 if [[ "${DOTFILES_SHELL}" == "zsh" ]]; then
-    # shellcheck disable=SC1091
+    # shellcheck disable=SC1091,SC1094
     [[ -f "${SHELL_CONFIG_DIR}/core/zsh.sh" ]] && source "${SHELL_CONFIG_DIR}/core/zsh.sh"
 elif [[ "${DOTFILES_SHELL}" == "bash" ]]; then
     # shellcheck disable=SC1091
@@ -170,16 +170,30 @@ _source_if_any_cmd() {
     done
 }
 
-_source_if_cmd  git        "${SHELL_CONFIG_DIR}/tools/git.sh"
-_source_if_cmd  kubectl    "${SHELL_CONFIG_DIR}/tools/kubernetes.sh"
-_source_if_any_cmd terraform.sh  terraform tofu
-_source_if_cmd  ansible    "${SHELL_CONFIG_DIR}/tools/ansible.sh"
-_source_if_any_cmd containers.sh docker podman
-_source_if_cmd  aws        "${SHELL_CONFIG_DIR}/tools/aws.sh"
-_source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
-_source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
+# Temporary diagnostic — remove after identifying the slow tool
+_t() { print -P "%D{%s%3.}" ; }   # millisecond timestamp in zsh
 
-_source_if_cmd     fzf         "${SHELL_CONFIG_DIR}/tools/fzf.sh"
+_t_start=$(_t)
+_source_if_cmd git      "${SHELL_CONFIG_DIR}/tools/git.sh";      print "git:       $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_cmd kubectl  "${SHELL_CONFIG_DIR}/tools/kubernetes.sh"; print "kubectl:   $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_any_cmd terraform.sh terraform tofu;                    print "terraform: $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_cmd ansible  "${SHELL_CONFIG_DIR}/tools/ansible.sh";   print "ansible:   $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_any_cmd containers.sh docker podman;                    print "containers:$(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_cmd aws      "${SHELL_CONFIG_DIR}/tools/aws.sh";       print "aws:       $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_cmd az       "${SHELL_CONFIG_DIR}/tools/azure.sh";     print "azure:     $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+_source_if_cmd go       "${SHELL_CONFIG_DIR}/tools/go.sh";        print "go:        $(( $(_t) - _t_start ))ms" >&2; _t_start=$(_t)
+unset -f _t; unset _t_start
+
+# _source_if_cmd  git        "${SHELL_CONFIG_DIR}/tools/git.sh"
+# _source_if_cmd  kubectl    "${SHELL_CONFIG_DIR}/tools/kubernetes.sh"
+# _source_if_any_cmd terraform.sh  terraform tofu
+# _source_if_cmd  ansible    "${SHELL_CONFIG_DIR}/tools/ansible.sh"
+# _source_if_any_cmd containers.sh docker podman
+# _source_if_cmd  aws        "${SHELL_CONFIG_DIR}/tools/aws.sh"
+# _source_if_cmd  az         "${SHELL_CONFIG_DIR}/tools/azure.sh"
+# _source_if_cmd  go         "${SHELL_CONFIG_DIR}/tools/go.sh"
+
+# _source_if_cmd     fzf         "${SHELL_CONFIG_DIR}/tools/fzf.sh"
 
 # zsh plugins — sourced only in zsh; check for at least one plugin before loading
 if [[ "${DOTFILES_SHELL}" == "zsh" ]] && {
@@ -218,10 +232,13 @@ _distro_file="${SHELL_CONFIG_DIR}/distro/${DOTFILES_DISTRO}.sh"
 unset _distro_file
 
 # ── Completions ───────────────────────────────────────────────────────────────
-# shellcheck disable=SC1091
-command -v gh      &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/gh.sh" ]]         && source "${SHELL_CONFIG_DIR}/completions/gh.sh"
-# shellcheck disable=SC1091
-command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kubernetes.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/kubernetes.sh"
+if [[ "${DOTFILES_OFFLINE:-false}" != "true" ]]; then
+    # shellcheck disable=SC1091
+    command -v gh      &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/gh.sh" ]]         && source "${SHELL_CONFIG_DIR}/completions/gh.sh"
+    # shellcheck disable=SC1091
+    command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kubernetes.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/kubernetes.sh"
+fi
+
 # shellcheck disable=SC1091
 { command -v terraform &>/dev/null || command -v tofu &>/dev/null; } && [[ -f "${SHELL_CONFIG_DIR}/completions/terraform.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/terraform.sh"
 
