@@ -405,6 +405,7 @@ gpg-add-uid() {
     # Re-apply ultimate ownertrust — GPG marks newly-added UIDs [unknown]
     # until ownertrust is re-asserted on the key.
     echo "${fp}:6:" | gpg --import-ownertrust 2>/dev/null \
+        && gpg --check-trustdb 2>/dev/null \
         || log_warn "Could not set ownertrust automatically; run: gpg-trust ${fp}"
 
     echo
@@ -1091,29 +1092,40 @@ gpg-trust() {
         fp="$(_gpg_prompt_key_id "Key fingerprint to set trust on")"
     fi
 
+    # Resolve to full 40-char fingerprint — --import-ownertrust silently
+    # ignores short key IDs (exits 0 but writes nothing)
+    local full_fp
+    full_fp="$(gpg --list-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^fpr/{print $10; exit}')"
+    if [[ -z "${full_fp}" ]]; then
+        log_error "Could not resolve fingerprint for: ${fp}"
+        return 1
+    fi
+
     local trust_val
     case "${level}" in
-        unknown)   trust_val=1 ;;
-        none)      trust_val=2 ;;
-        marginal)  trust_val=3 ;;
-        full)      trust_val=4 ;;
-        ultimate)  trust_val=5 ;;
-        [1-5])     trust_val="${level}" ;;
+        unknown)   trust_val=2 ;;
+        none)      trust_val=3 ;;
+        marginal)  trust_val=4 ;;
+        full)      trust_val=5 ;;
+        ultimate)  trust_val=6 ;;
+        [1-6])     trust_val="${level}" ;;
         *) log_error "Unknown trust level '${level}'. Use: unknown|none|marginal|full|ultimate"; return 1 ;;
     esac
 
-    log_info "Setting trust level ${level} (${trust_val}) on ${fp}..."
-    echo "${fp}:${trust_val}:" | gpg --import-ownertrust 2>/dev/null
+    log_info "Setting trust level ${level} (${trust_val}) on ${full_fp}..."
+    echo "${full_fp}:${trust_val}:" | gpg --import-ownertrust 2>/dev/null
     local rc=$?
     if [[ ${rc} -ne 0 ]]; then
         log_error "Failed to set ownertrust (exit ${rc})"
         return 1
     fi
+    gpg --check-trustdb 2>/dev/null
     log_info "Trust level set"
 
     echo
     log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${full_fp}"
 }
 
 # ── GitHub integration ────────────────────────────────────────────────────────
