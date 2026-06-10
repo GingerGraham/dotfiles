@@ -49,6 +49,20 @@ _read_prompt() {
     eval "${_rp_var}=\${_rp_value}"
 }
 
+# _read_prompt_silent <prompt_string> <variable_name>
+# Silent prompt + read (no echo) for bash and zsh.
+# The explicit printf '\n' after read is required because the suppressed
+# Enter keypress produces no newline on screen.
+_read_prompt_silent() {
+    local _rp_prompt="$1"
+    local _rp_var="$2"
+    local _rp_value
+    printf '%s' "${_rp_prompt}" >/dev/tty
+    IFS= read -rs _rp_value </dev/tty
+    printf '\n' >/dev/tty
+    eval "${_rp_var}=\${_rp_value}"
+}
+
 # _str_lower <string>
 # Portable lowercase — bash ${var,,} is not supported in zsh.
 _str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -869,15 +883,15 @@ gpg-export-subkeys() {
 
 # gpg-export-bitwarden
 # Export public key, secret key, and revocation certificate as Bitwarden
-# secure notes. Each is stored as a separate note for easy retrieval.
+# secure notes. Passphrase is stored as a separate Bitwarden Login item so it
+# benefits from breach monitoring and masked password history.
 #
 # Note naming convention:
 #   <type> — [<qualifier>] <uid> (<fingerprint>)
 #
 # The qualifier defaults to the short hostname (hostname -s) so backups from
 # different machines are distinct and never clobber each other on upsert.
-# Use --name to override the qualifier when the hostname is not meaningful
-# (e.g. a generated VM name, a shared build host).
+# Use --name to override the qualifier when the hostname is not meaningful.
 #
 # Requires: bw CLI, BW_SESSION set (run: export BW_SESSION=$(bw unlock --raw))
 #
@@ -914,8 +928,43 @@ gpg-export-bitwarden() {
         | awk -F: '/^uid/{print $10; exit}')"
     local uid_part="${uid:-${fp}}"
 
-    # Final note name prefix: "[qualifier] uid (fp)"
+    # Shared label used in all note names
     local note_label="[${qualifier}] ${uid_part} (${fp})"
+
+    # ── Passphrase capture ────────────────────────────────────────────────────
+    # Prompt before any GPG operations so the user can bail cleanly if they
+    # haven't copied the passphrase from Bitwarden yet. Empty input skips
+    # Login item creation with a reminder to add it manually.
+    echo
+    echo "  ┌─────────────────────────────────────────────────────────────────┐"
+    echo "  │  PASSPHRASE CAPTURE                                             │"
+    echo "  │                                                                 │"
+    echo "  │  The passphrase will be stored as a Bitwarden Login item with   │"
+    echo "  │  breach monitoring. Copy it from Bitwarden before continuing.   │"
+    echo "  │                                                                 │"
+    echo "  │  Press Enter with no input to skip (add manually later).        │"
+    echo "  └─────────────────────────────────────────────────────────────────┘"
+    echo
+    local passphrase=""
+    _read_prompt_silent "  Passphrase (Enter to skip): " passphrase
+
+    local store_passphrase=false
+    if [[ -n "${passphrase}" ]]; then
+        local passphrase_confirm=""
+        _read_prompt_silent "  Confirm passphrase: " passphrase_confirm
+        if [[ "${passphrase}" != "${passphrase_confirm}" ]]; then
+            log_error "Passphrases do not match — skipping passphrase storage"
+            log_warn  "Re-run or add the passphrase manually in Bitwarden"
+            passphrase=""
+        else
+            store_passphrase=true
+            log_info "Passphrase confirmed — will store as Login item after key export"
+        fi
+    else
+        log_warn "No passphrase entered — skipping Login item creation"
+        log_warn "Add manually in Bitwarden: GPG Key Passphrase — ${note_label}"
+    fi
+    echo
 
     log_info "Exporting keys to Bitwarden for: ${note_label}"
     echo
@@ -949,10 +998,8 @@ gpg-export-bitwarden() {
     fi
 
     # _bw_upsert_note <note_name> <body_file>
-    # Creates or updates a Bitwarden secure note. The body is read from a file
-    # to avoid argv size limits and shell escaping issues with armoured key
-    # material. bw encode is fed via stdin redirect, not a pipe from echo,
-    # to prevent corruption of multi-line content.
+    # Creates or updates a Bitwarden secure note. Body is read from a file to
+    # avoid argv size limits and shell escaping issues with armoured key material.
     _bw_upsert_note() {
         local note_name="${1}" note_body_file="${2}"
 
@@ -965,8 +1012,6 @@ match = [i for i in items if i.get('name') == sys.argv[1]]
 print(match[0]['id'] if match else '')
 " "${note_name}" 2>/dev/null || true)"
 
-        # Build item JSON via Python using file I/O for the note body —
-        # never pass armoured key material through shell argv or variables.
         local note_json_file="${tmp_dir}/item_$(date +%s%N).json"
         python3 - "${note_name}" "${note_body_file}" "${note_json_file}" <<'PYEOF'
 import json, sys
@@ -1010,6 +1055,66 @@ PYEOF
         fi
     }
 
+    # _bw_upsert_login <item_name> <username> <password>
+    # Creates or updates a Bitwarden Login item. Password field is masked in
+    # the vault UI and eligible for breach monitoring.
+    _bw_upsert_login() {
+        local item_name="${1}" username="${2}" password="${3}"
+
+        local existing_id
+        existing_id="$(bw list items --search "${item_name}" 2>/dev/null \
+            | python3 -c "
+import json, sys
+items = json.load(sys.stdin)
+match = [i for i in items if i.get('name') == sys.argv[1]]
+print(match[0]['id'] if match else '')
+" "${item_name}" 2>/dev/null || true)"
+
+        local login_json_file="${tmp_dir}/login_$(date +%s%N).json"
+        python3 - "${item_name}" "${username}" "${password}" "${login_json_file}" <<'PYEOF'
+import json, sys
+
+item_name  = sys.argv[1]
+username   = sys.argv[2]
+password   = sys.argv[3]
+out_path   = sys.argv[4]
+
+item = {
+    "organizationId": None,
+    "folderId":       None,
+    "type":           1,
+    "name":           item_name,
+    "notes":          None,
+    "favorite":       False,
+    "login": {
+        "username": username,
+        "password": password,
+        "uris":     []
+    },
+    "fields": []
+}
+
+with open(out_path, 'w') as f:
+    json.dump(item, f)
+PYEOF
+
+        if [[ ! -f "${login_json_file}" ]]; then
+            log_error "Failed to build Bitwarden Login item JSON for: ${item_name}"
+            return 1
+        fi
+
+        local encoded
+        encoded="$(bw encode < "${login_json_file}")"
+
+        if [[ -n "${existing_id}" ]]; then
+            log_info "Updating existing Bitwarden Login item: ${item_name}"
+            bw edit item "${existing_id}" "${encoded}" >/dev/null
+        else
+            log_info "Creating Bitwarden Login item: ${item_name}"
+            bw create item "${encoded}" >/dev/null
+        fi
+    }
+
     _bw_upsert_note "GPG Public Key — ${note_label}"    "${pub_file}"
     _bw_upsert_note "GPG Secret Key — ${note_label}"    "${sec_file}"
 
@@ -1023,6 +1128,16 @@ PYEOF
         log_warn "No revocation certificate to store — generate one with: gpg-revoke ${fp}"
     fi
 
+    if [[ "${store_passphrase}" == "true" ]]; then
+        _bw_upsert_login \
+            "GPG Key Passphrase — ${note_label}" \
+            "${fp}" \
+            "${passphrase}"
+        # Clear from memory immediately after use
+        passphrase=""
+        passphrase_confirm=""
+    fi
+
     rm -rf "${tmp_dir}"
 
     echo
@@ -1034,6 +1149,8 @@ PYEOF
         echo "    • GPG Subkeys Only — ${note_label}"
     [[ -f "${rev_file}" ]] && \
         echo "    • GPG Revocation Certificate — ${note_label}"
+    [[ "${store_passphrase}" == "true" ]] && \
+        echo "    • GPG Key Passphrase — ${note_label}  (Login item)"
     echo
     log_info "Sync to ensure notes are persisted: bw sync"
     echo
