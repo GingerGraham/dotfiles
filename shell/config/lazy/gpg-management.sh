@@ -43,8 +43,10 @@
 _read_prompt() {
     local _rp_prompt="$1"
     local _rp_var="$2"
+    local _rp_value
     printf '%s' "${_rp_prompt}" >/dev/tty
-    IFS= read -r "${_rp_var}" </dev/tty
+    IFS= read -r _rp_value </dev/tty
+    eval "${_rp_var}=\${_rp_value}"
 }
 
 # _str_lower <string>

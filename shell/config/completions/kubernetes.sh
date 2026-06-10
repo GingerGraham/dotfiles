@@ -15,7 +15,9 @@ if [[ -n "${_kc_version}" ]]; then
     if [[ ! -f "${_kc_cache}" ]]; then
         mkdir -p "${_kc_cache_dir}"
         # Remove stale versions for this shell before writing the new one
-        rm -f "${_kc_cache_dir}/kubectl.${DOTFILES_SHELL}".*.sh 2>/dev/null
+        for _stale in "${_kc_cache_dir}"/kubectl."${DOTFILES_SHELL}".*.sh; do
+            [[ -f "${_stale}" && "${_stale}" != "${_kc_cache}" ]] && rm -f "${_stale}"
+        done
         kubectl completion "${DOTFILES_SHELL}" 2>/dev/null > "${_kc_cache}" \
             || rm -f "${_kc_cache}"
     fi

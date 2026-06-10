@@ -9,7 +9,9 @@ if [[ -n "${_gh_version}" ]]; then
 
     if [[ ! -f "${_gh_cache}" ]]; then
         mkdir -p "${_gh_cache_dir}"
-        rm -f "${_gh_cache_dir}/gh.${DOTFILES_SHELL}".*.sh 2>/dev/null
+        for _stale in "${_gh_cache_dir}"/gh."${DOTFILES_SHELL}".*.sh; do
+            [[ -f "${_stale}" && "${_stale}" != "${_gh_cache}" ]] && rm -f "${_stale}"
+        done
         gh completion -s "${DOTFILES_SHELL}" 2>/dev/null > "${_gh_cache}" \
             || rm -f "${_gh_cache}"
     fi
