@@ -94,11 +94,11 @@ _gpg_bw_logged_in() {
         return 1
     fi
 
-    local status
-    status="$(bw status 2>/dev/null | grep -oP '(?<="status":")[^"]+')"
+    local bw_status
+    bw_status="$(bw status 2>/dev/null | grep -oP '(?<="status":")[^"]+')"
 
-    if [[ "${status}" != "unlocked" ]]; then
-        log_error "Bitwarden vault is not unlocked (status: ${status:-unknown})"
+    if [[ "${bw_status}" != "unlocked" ]]; then
+        log_error "Bitwarden vault is not unlocked (status: ${bw_status:-unknown})"
         log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
         return 1
     fi
