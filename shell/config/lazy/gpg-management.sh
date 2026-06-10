@@ -404,9 +404,12 @@ gpg-add-uid() {
 
     # Re-apply ultimate ownertrust — GPG marks newly-added UIDs [unknown]
     # until ownertrust is re-asserted on the key.
-    echo "${fp}:6:" | gpg --import-ownertrust 2>/dev/null \
-        && gpg --check-trustdb 2>/dev/null \
-        || log_warn "Could not set ownertrust automatically; run: gpg-trust ${fp}"
+    if echo "${fp}:6:" | gpg --import-ownertrust 2>/dev/null && \
+            gpg --check-trustdb 2>/dev/null; then
+        :
+    else
+        log_warn "Could not set ownertrust automatically; run: gpg-trust ${fp}"
+    fi
 
     echo
     echo "  Your existing primary UID is unchanged."
