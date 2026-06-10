@@ -1103,8 +1103,17 @@ gpg-trust() {
     esac
 
     log_info "Setting trust level ${level} (${trust_val}) on ${fp}..."
-    printf 'trust\n%s\ny\nquit\n' "${trust_val}" | gpg --command-fd 0 --batch --yes --edit-key "${fp}"
+    echo "${fp}:${trust_val}:" | gpg --import-ownertrust 2>/dev/null
+    local rc=$?
+    if [[ ${rc} -ne 0 ]]; then
+        log_error "Failed to set ownertrust (exit ${rc})"
+        return 1
+    fi
     log_info "Trust level set"
+
+    echo
+    log_info "Updated key:"
+    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
 }
 
 # ── GitHub integration ────────────────────────────────────────────────────────
