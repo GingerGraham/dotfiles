@@ -871,28 +871,53 @@ gpg-export-subkeys() {
 # Export public key, secret key, and revocation certificate as Bitwarden
 # secure notes. Each is stored as a separate note for easy retrieval.
 #
+# Note naming convention:
+#   <type> — [<qualifier>] <uid> (<fingerprint>)
+#
+# The qualifier defaults to the short hostname (hostname -s) so backups from
+# different machines are distinct and never clobber each other on upsert.
+# Use --name to override the qualifier when the hostname is not meaningful
+# (e.g. a generated VM name, a shared build host).
+#
 # Requires: bw CLI, BW_SESSION set (run: export BW_SESSION=$(bw unlock --raw))
 #
 # Usage:
 #   gpg-export-bitwarden <fingerprint>
-#   gpg-export-bitwarden <fingerprint> --master-only   # skip subkey export
+#   gpg-export-bitwarden <fingerprint> --name "work-laptop"
+#   gpg-export-bitwarden <fingerprint> --master-only
+#   gpg-export-bitwarden <fingerprint> --name "work-laptop" --master-only
 gpg-export-bitwarden() {
-    local fp="${1:-}" master_only="${2:-}"
+    local fp="${1:-}" custom_qualifier="" master_only=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "${1}" in
+            --name)        custom_qualifier="${2:-}"; shift 2 ;;
+            --master-only) master_only="--master-only";  shift ;;
+            *)             shift ;;
+        esac
+    done
 
     if [[ -z "${fp}" ]]; then
         fp="$(_gpg_prompt_key_id "Key fingerprint to back up")"
     fi
     _gpg_require_key "${fp}" || return 1
-    _gpg_require_bw   || return 1
-    _gpg_bw_logged_in || return 1
+    _gpg_require_bw          || return 1
+    _gpg_bw_logged_in        || return 1
 
-    # Gather key UIDs for naming the notes
+    # Qualifier: --name wins, otherwise short hostname
+    local qualifier="${custom_qualifier:-$(hostname -s)}"
+
+    # UID from key — always included regardless of qualifier
     local uid
     uid="$(gpg --list-keys --with-colons "${fp}" 2>/dev/null \
         | awk -F: '/^uid/{print $10; exit}')"
-    local label="${uid:-${fp}}"
+    local uid_part="${uid:-${fp}}"
 
-    log_info "Exporting keys to Bitwarden for: ${label}"
+    # Final note name prefix: "[qualifier] uid (fp)"
+    local note_label="[${qualifier}] ${uid_part} (${fp})"
+
+    log_info "Exporting keys to Bitwarden for: ${note_label}"
     echo
 
     local tmp_dir
@@ -905,7 +930,6 @@ gpg-export-bitwarden() {
     local rev_dir="${GNUPGHOME:-${HOME}/.gnupg}/revocations"
     local rev_file="${rev_dir}/${fp}-revocation.asc"
 
-    # Export all key material to temp files
     gpg --armor --export "${fp}" > "${pub_file}"
     gpg --armor --export-secret-keys "${fp}" > "${sec_file}"
     chmod 600 "${sec_file}"
@@ -924,37 +948,58 @@ gpg-export-bitwarden() {
         chmod 600 "${rev_file}" 2>/dev/null || true
     fi
 
-    # Helper: create or update a Bitwarden secure note
+    # _bw_upsert_note <note_name> <body_file>
+    # Creates or updates a Bitwarden secure note. The body is read from a file
+    # to avoid argv size limits and shell escaping issues with armoured key
+    # material. bw encode is fed via stdin redirect, not a pipe from echo,
+    # to prevent corruption of multi-line content.
     _bw_upsert_note() {
-        local note_name="${1}" note_body="${2}"
+        local note_name="${1}" note_body_file="${2}"
+
         local existing_id
         existing_id="$(bw list items --search "${note_name}" 2>/dev/null \
             | python3 -c "
-import json,sys
-items=json.load(sys.stdin)
-match=[i for i in items if i.get('name')==sys.argv[1]]
+import json, sys
+items = json.load(sys.stdin)
+match = [i for i in items if i.get('name') == sys.argv[1]]
 print(match[0]['id'] if match else '')
 " "${note_name}" 2>/dev/null || true)"
 
-        local note_json
-        note_json="$(bw get template item 2>/dev/null \
-            | python3 -c "
-import json,sys
-t=json.load(sys.stdin)
-t['type']=2
-t['name']=sys.argv[1]
-t['notes']=sys.argv[2]
-t['secureNote']={'type':0}
-print(json.dumps(t))
-" "${note_name}" "${note_body}" 2>/dev/null)"
+        # Build item JSON via Python using file I/O for the note body —
+        # never pass armoured key material through shell argv or variables.
+        local note_json_file="${tmp_dir}/item_$(date +%s%N).json"
+        python3 - "${note_name}" "${note_body_file}" "${note_json_file}" <<'PYEOF'
+import json, sys
 
-        if [[ -z "${note_json}" ]]; then
-            log_error "Failed to build Bitwarden item JSON"
+note_name  = sys.argv[1]
+body_path  = sys.argv[2]
+out_path   = sys.argv[3]
+
+with open(body_path, 'r') as f:
+    body = f.read()
+
+item = {
+    "organizationId": None,
+    "folderId":       None,
+    "type":           2,
+    "name":           note_name,
+    "notes":          body,
+    "favorite":       False,
+    "secureNote":     {"type": 0},
+    "fields":         []
+}
+
+with open(out_path, 'w') as f:
+    json.dump(item, f)
+PYEOF
+
+        if [[ ! -f "${note_json_file}" ]]; then
+            log_error "Failed to build Bitwarden item JSON for: ${note_name}"
             return 1
         fi
 
         local encoded
-        encoded="$(echo "${note_json}" | bw encode)"
+        encoded="$(bw encode < "${note_json_file}")"
 
         if [[ -n "${existing_id}" ]]; then
             log_info "Updating existing Bitwarden note: ${note_name}"
@@ -965,34 +1010,30 @@ print(json.dumps(t))
         fi
     }
 
-    # Store public key
-    _bw_upsert_note "GPG Public Key — ${label} (${fp})" "$(cat "${pub_file}")"
+    _bw_upsert_note "GPG Public Key — ${note_label}"    "${pub_file}"
+    _bw_upsert_note "GPG Secret Key — ${note_label}"    "${sec_file}"
 
-    # Store full secret key (master + subkeys)
-    _bw_upsert_note "GPG Secret Key — ${label} (${fp})" "$(cat "${sec_file}")"
-
-    # Store subkeys-only export if we have it
     if [[ -f "${sub_file}" ]]; then
-        _bw_upsert_note "GPG Subkeys Only — ${label} (${fp})" "$(cat "${sub_file}")"
+        _bw_upsert_note "GPG Subkeys Only — ${note_label}" "${sub_file}"
     fi
 
-    # Store revocation certificate
     if [[ -f "${rev_file}" ]]; then
-        _bw_upsert_note "GPG Revocation Certificate — ${label} (${fp})" "$(cat "${rev_file}")"
+        _bw_upsert_note "GPG Revocation Certificate — ${note_label}" "${rev_file}"
     else
         log_warn "No revocation certificate to store — generate one with: gpg-revoke ${fp}"
     fi
 
-    # Clean up
     rm -rf "${tmp_dir}"
 
     echo
     log_info "Bitwarden backup complete for ${fp}"
     echo "  Stored notes:"
-    echo "    • GPG Public Key — ${label} (${fp})"
-    echo "    • GPG Secret Key — ${label} (${fp})"
-    [[ -f "${sub_file}" ]] && echo "    • GPG Subkeys Only — ${label} (${fp})"
-    [[ -f "${rev_file}" ]] && echo "    • GPG Revocation Certificate — ${label} (${fp})"
+    echo "    • GPG Public Key — ${note_label}"
+    echo "    • GPG Secret Key — ${note_label}"
+    [[ "${master_only}" != "--master-only" ]] && \
+        echo "    • GPG Subkeys Only — ${note_label}"
+    [[ -f "${rev_file}" ]] && \
+        echo "    • GPG Revocation Certificate — ${note_label}"
     echo
     log_info "Sync to ensure notes are persisted: bw sync"
     echo
