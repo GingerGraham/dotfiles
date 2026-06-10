@@ -53,6 +53,17 @@ _read_prompt() {
 # Portable lowercase — bash ${var,,} is not supported in zsh.
 _str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# _array_get <array_name> <1-based-index>
+# Portable 1-based array access for bash and zsh.
+_array_get() {
+    local _ag_arr="$1" _ag_idx="$2"
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        eval "printf '%s' \"\${${_ag_arr}[${_ag_idx}]}\""
+    else
+        eval "printf '%s' \"\${${_ag_arr}[$((${_ag_idx} - 1))]}\""
+    fi
+}
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 _gpg_require_key() {
@@ -331,7 +342,7 @@ gpg-add-uid() {
             log_error "Invalid selection"
             return 1
         fi
-        fp="${fps[$((selection - 1))]}"
+        fp="$(_array_get fps "${selection}")"
     fi
 
     _gpg_require_key "${fp}" || return 1
