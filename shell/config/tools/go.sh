@@ -6,7 +6,7 @@
 get-go-version() {
     GO_VERSION="$(go version | awk '{print $3}' | tr -d 'go')"
     export GO_VERSION
-    log_info "Go version: ${GO_VERSION}"
+    log_debug "Go version: ${GO_VERSION}"
 }
 
 # Populate GO_VERSION on load (fast — go version is a compiled binary)

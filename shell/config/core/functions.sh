@@ -302,7 +302,7 @@ fi
 
 # ── Misc utilities ────────────────────────────────────────────────────────────
 get-python-versions() {
-    echo "[INFO] Python versions found:"
+    log_info "Python versions found:"
     for version in /usr/bin/python3*; do
         [[ "${version}" == *-config ]] && continue
         echo "$(basename "${version}"): $("${version}" --version 2>&1)"
