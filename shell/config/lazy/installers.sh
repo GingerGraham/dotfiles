@@ -1003,6 +1003,7 @@ install-nvm() {
     command -v git  &>/dev/null || log_warn "git not found — nvm self-update will be unavailable"
 
     export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+    mkdir -p "${NVM_DIR}" || { log_error "Failed to create ${NVM_DIR}"; return 1; }
 
     _nvm_handle_system_node
 
