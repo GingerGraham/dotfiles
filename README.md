@@ -23,6 +23,7 @@ See the [docs/](docs/) directory for full documentation.
 | [docs/profiles.md](docs/profiles.md)                       | Workstation, server, and minimal profiles                     |
 | [docs/optional-components.md](docs/optional-components.md) | nvim and ai-tools roles — what they do and how to enable them |
 | [docs/shell-config.md](docs/shell-config.md)               | Shell loading architecture, tiers, local overrides            |
+| [docs/tool-management.md](docs/tool-management.md)         | **NEW** — update-tools, installers, and the registry          |
 | [docs/sync.md](docs/sync.md)                               | Background sync, DEV_MODE, branch switching                   |
 | [docs/gpg.md](docs/gpg.md)                                 | GPG key management, Bitwarden backup, git signing setup       |
 
@@ -46,3 +47,22 @@ See the [docs/](docs/) directory for full documentation.
 - `ansible-core >= 2.14`
 
 Pass `--no-prereqs` to skip this check if they are already present.
+
+## After-setup: keeping tools updated
+
+Once dotfiles is installed, you can manage 20+ development tools with a single command:
+
+```bash
+# Update all installed tools
+update-tools
+
+# Update specific tools
+update-tools terraform aws kubectl
+
+# See what's installed
+update-tools --list
+```
+
+No manual downloads or version tracking required. Supported tools include Terraform, Helm, Kubernetes, AWS CLI, Azure CLI, Ansible, GitHub CLI, Node/nvm, and more.
+
+See [docs/tool-management.md](docs/tool-management.md) for the complete list, how to install individual tools, and how to add new tools to the registry.

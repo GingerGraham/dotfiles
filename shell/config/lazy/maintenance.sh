@@ -53,7 +53,7 @@ _update_detect() {
     case "${token}" in
         path:*)
             local p="${token#path:}"
-            [[ "${p}" == "~/"* ]] && p="${HOME}/${p#\~/}"
+            [[ "$p" =~ ^~/ ]] && p="${HOME}/${p#\~/}"
             [[ -e "${p}" ]]
             ;;
         *)

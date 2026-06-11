@@ -72,11 +72,11 @@ Platform and distro files add platform-specific aliases, PATH entries, and envir
 gpg-create-key
 ```
 
-| File                | Contents                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------- |
+| File                | Contents                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `installers.sh`     | `install-*` functions (gh, nvm, copilot-cli, claude-code, bw-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
-| `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                    |
-| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export, Bitwarden backup/restore          |
+| `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                   |
+| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export, Bitwarden backup/restore                                         |
 
 Use `get-my-installers` (alias: `installers`) to list all available lazy install commands.
 
@@ -147,6 +147,73 @@ After porting any content you want to keep into `env/90-local.sh`:
 rm -rf ~/.config/dotfiles/migration/
 ```
 
+---
+
+## Tool installation & management
+
+Shell config includes two lazy-loaded modules for tool discovery and updates:
+
+### Installers (`lazy/installers.sh`)
+
+Every development tool supported by dotfiles has an `install-<tool>` function. These are lazy-loaded — the first call sources the file; subsequent calls use the cached function.
+
+```bash
+# Install or update a tool directly
+install-terraform
+install-helm
+install-aws
+
+# See all available installers
+installers   # Alias for get-my-installers
+```
+
+Installers are safe to call repeatedly; they detect the current version and skip re-download if already up-to-date.
+
+### Maintenance (`lazy/maintenance.sh`)
+
+The `update-tools` command orchestrates all managed tool updates from a central registry:
+
+```bash
+# Update all installed tools
+update-tools
+
+# Update specific tools
+update-tools terraform aws kubectl
+
+# List managed tools and install status
+update-tools --list
+```
+
+The registry includes ~20 tools (Terraform, Helm, Kubernetes, AWS, Azure, Ansible, GitHub CLI, Node/nvm, etc.). Each tool has:
+
+- A **detection method** — checks if it's installed (via `command -v` or file path)
+- An **updater function** — runs the appropriate update mechanism
+- An **install command** — suggested when the tool is not found
+
+This decouples tool management from system package managers, allowing you to use version managers like tenv (for Terraform/OpenTofu) or nvm (for Node) alongside system-provided tools.
+
+**See [docs/tool-management.md](../tool-management.md) for the complete registry, how to add new tools, and troubleshooting.**
+
+## Lazy loading architecture
+
+Both `lazy/installers.sh` and `lazy/maintenance.sh` are lazy-loaded:
+
+1. **Stub registration** — at shell startup, `loader.sh` greps `lazy/*.sh` to find public function definitions
+2. **Stub creation** — each public function becomes a tiny stub that sources the file on first call
+3. **Real function** — the stub removes itself and calls the real function
+4. **Cached** — subsequent calls use the real function directly
+
+This keeps shell startup fast (no unnecessary sourcing) while providing all tools on demand.
+
+To inspect lazy stubs:
+
+```bash
+# See all lazy-loadable functions
+declare -f | grep "unset -f"
+```
+
+---
+
 ## Repo layout
 
 ```
@@ -178,9 +245,11 @@ shell/
     │   └── go.sh
     ├── platform/           # linux.sh, macos.sh, wsl.sh
     ├── distro/             # rhel.sh, debian.sh, suse.sh, arch.sh
-    ├── lazy/               # Sourced on first call only
-    │   ├── installers.sh
-    │   ├── maintenance.sh
-    │   └── gpg-management.sh   # Key creation, rotation, export, Bitwarden backup
+    ├── lazy/                   # Lazy-loaded on first call, not at startup
+    │   ├── installers.sh       # install-<tool> and set-<tool> commands
+    │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, etc.
+    │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
+    │   │                       # Coordinates install-* commands and automatic updates
+    │   └── gpg-management.sh   # GPG key creation, rotation, export, Bitwarden backup
     └── completions/        # Same tool guards as tools/
 ```
