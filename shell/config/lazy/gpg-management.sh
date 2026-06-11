@@ -122,89 +122,15 @@ _gpg_bw_logged_in() {
 # Lists master secret keys with fingerprint, UIDs, and expiry.
 # Writes display output to stderr; returns the fingerprint via stdout.
 _gpg_prompt_key_id() {
-    local prompt_label="${1:-Key}"
-
-    local -a fps=()
-    local -a labels=()
-    local cur_fp="" cur_type="" cur_expiry="" cur_uids=()
-    local i=1
-
-    # Parse --with-colons to collect master keys (sec records) only
-    while IFS=: read -r type _ _ _ _ _ expiry _ _ uid _ _; do
-        case "${type}" in
-            sec)
-                # Flush previous key if complete
-                if [[ -n "${cur_fp}" ]]; then
-                    local exp_str="no expiry"
-                    if [[ -n "${cur_expiry}" && "${cur_expiry}" != "0" ]]; then
-                        local exp_fmt
-                        exp_fmt="$(date -d "@${cur_expiry}" '+%Y-%m-%d' 2>/dev/null \
-                            || date -r "${cur_expiry}" '+%Y-%m-%d' 2>/dev/null \
-                            || echo "${cur_expiry}")"
-                        exp_str="expires: ${exp_fmt}"
-                    fi
-                    fps+=("${cur_fp}")
-                    local entry="${cur_uids[0]:-<no UID>}  [${exp_str}]"
-                    [[ ${#cur_uids[@]} -gt 1 ]] && entry+=" (+$((${#cur_uids[@]} - 1)) more)"
-                    labels+=("${entry}")
-                    printf "  %2d)  %s\n      Fingerprint: %s\n\n" \
-                        "${i}" "${labels[-1]}" "${cur_fp}" >&2
-                    (( i++ ))
-                fi
-                cur_fp=""
-                cur_expiry="${expiry}"
-                cur_uids=()
-                ;;
-            fpr)
-                # uid field (field 10) holds the fingerprint for fpr records
-                [[ -z "${cur_fp}" ]] && cur_fp="${uid}"
-                ;;
-            uid)
-                [[ -n "${uid}" ]] && cur_uids+=("${uid}")
-                ;;
-        esac
-    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
-
-    # Flush last key
-    if [[ -n "${cur_fp}" ]]; then
-        local exp_str="no expiry"
-        if [[ -n "${cur_expiry}" && "${cur_expiry}" != "0" ]]; then
-            local exp_fmt
-            exp_fmt="$(date -d "@${cur_expiry}" '+%Y-%m-%d' 2>/dev/null \
-                || date -r "${cur_expiry}" '+%Y-%m-%d' 2>/dev/null \
-                || echo "${cur_expiry}")"
-            exp_str="expires: ${exp_fmt}"
-        fi
-        fps+=("${cur_fp}")
-        local entry="${cur_uids[0]:-<no UID>}  [${exp_str}]"
-        [[ ${#cur_uids[@]} -gt 1 ]] && entry+=" (+$((${#cur_uids[@]} - 1)) more)"
-        labels+=("${entry}")
-        printf "  %2d)  %s\n      Fingerprint: %s\n\n" \
-            "${i}" "${labels[-1]}" "${cur_fp}" >&2
-    fi
-
-    if [[ ${#fps[@]} -eq 0 ]]; then
-        log_error "No secret keys found. Run gpg-create-key to create one." >&2
-        return 1
-    fi
-
-    # Single key — skip selection prompt
-    if [[ ${#fps[@]} -eq 1 ]]; then
-        log_info "Using only available key." >&2
-        printf '%s' "${fps[0]}"
-        return 0
-    fi
-
-    local selection
-    while true; do
-        _read_prompt "  ${prompt_label} (1-${#fps[@]}): " selection
-        if [[ "${selection}" =~ ^[0-9]+$ ]] \
-            && (( selection >= 1 && selection <= ${#fps[@]} )); then
-            printf '%s' "$(_array_get fps "${selection}")"
-            return 0
-        fi
-        log_warn "Invalid selection — enter a number between 1 and ${#fps[@]}" >&2
-    done
+    local prompt_label="${1:-Key ID or fingerprint}"
+    echo >&2
+    log_info "Available secret keys:" >&2
+    gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null \
+        | sed '/Key fingerprint/{s/[[:space:]]//g; s/Keyfingerprint=/ Key fingerprint = /}' >&2
+    echo >&2
+    local key_id
+    _read_prompt "  ${prompt_label}: " key_id
+    echo "${key_id}"
 }
 
 # Convert a key ID/fingerprint to the full 40-char fingerprint.
