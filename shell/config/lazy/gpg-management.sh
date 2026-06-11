@@ -35,48 +35,51 @@
 
 # ── Portability helpers ───────────────────────────────────────────────────────
 
-# _read_prompt <prompt_string> <variable_name>
-# Portable prompt + read for bash and zsh.
-# zsh's read builtin does not support -p for a prompt string (that flag means
-# "read from coprocess"). Use printf to /dev/tty so the prompt always reaches
-# the terminal regardless of stdin/stderr redirection.
-# _read_prompt() {
-#     local _rp_prompt="$1"
-#     local _rp_var="$2"
-#     local _rp_value
-#     printf '%s' "${_rp_prompt}" >/dev/tty
-#     IFS= read -r _rp_value </dev/tty
-#     eval "${_rp_var}=\${_rp_value}"
-# }
-
-# # _read_prompt_silent <prompt_string> <variable_name>
-# # Silent prompt + read (no echo) for bash and zsh.
-# # The explicit printf '\n' after read is required because the suppressed
-# # Enter keypress produces no newline on screen.
-# _read_prompt_silent() {
-#     local _rp_prompt="$1"
-#     local _rp_var="$2"
-#     local _rp_value
-#     printf '%s' "${_rp_prompt}" >/dev/tty
-#     IFS= read -rs _rp_value </dev/tty
-#     printf '\n' >/dev/tty
-#     eval "${_rp_var}=\${_rp_value}"
-# }
-
-# # _str_lower <string>
-# # Portable lowercase — bash ${var,,} is not supported in zsh.
-# _str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-
-# # _array_get <array_name> <1-based-index>
-# # Portable 1-based array access for bash and zsh.
-# _array_get() {
-#     local _ag_arr="$1" _ag_idx="$2"
-#     if [[ -n "${ZSH_VERSION}" ]]; then
-#         eval "printf '%s' \"\${${_ag_arr}[${_ag_idx}]}\""
-#     else
-#         eval "printf '%s' \"\${${_ag_arr}[$((${_ag_idx} - 1))]}\""
-#     fi
-# }
+# _gpg_passphrase_ready_check <context_label>
+# Gate prompt before any GPG operation that will invoke pinentry.
+# Gives the user a chance to open Bitwarden / generate a passphrase before
+# being dropped into a pinentry dialog they cannot easily escape.
+#
+# context_label controls the advisory text:
+#   "new"    — creating a new passphrase (gpg-create-key)
+#   "enter"  — entering an existing passphrase (import, add-subkey, etc.)
+#
+# Returns 1 if the user chooses to abort.
+_gpg_passphrase_ready_check() {
+    local context="${1:-enter}"
+    echo
+    echo "  ┌─────────────────────────────────────────────────────────────────┐"
+    if [[ "${context}" == "new" ]]; then
+        echo "  │  PASSPHRASE REQUIRED                                            │"
+        echo "  │                                                                 │"
+        echo "  │  GPG will prompt you to set a passphrase for the new key.       │"
+        echo "  │  You will not be able to cancel the pinentry dialog cleanly     │"
+        echo "  │  once it opens — have your passphrase ready now.                │"
+        echo "  │                                                                 │"
+        echo "  │  Recommended: generate a strong passphrase in Bitwarden first   │"
+        echo "  │  and copy it to your clipboard before continuing.               │"
+    else
+        echo "  │  PASSPHRASE REQUIRED                                            │"
+        echo "  │                                                                 │"
+        echo "  │  GPG will prompt for your key passphrase via pinentry.          │"
+        echo "  │  You will not be able to cancel the pinentry dialog cleanly     │"
+        echo "  │  once it opens — have your passphrase ready now.                │"
+        echo "  │                                                                 │"
+        echo "  │  If your passphrase is in Bitwarden, copy it to your clipboard  │"
+        echo "  │  before continuing.                                              │"
+    fi
+    echo "  └─────────────────────────────────────────────────────────────────┘"
+    echo
+    local _ready
+    _read_prompt "  Ready to continue? [Y/n]: " _ready
+    _ready="${_ready:-y}"
+    if [[ "$(_str_lower "${_ready}")" != "y" ]]; then
+        log_warn "Aborted — no changes made"
+        return 1
+    fi
+    echo
+    return 0
+}
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -206,10 +209,7 @@ gpg-create-key() {
     echo
     log_info "Creating master key [C] for: ${uid}"
     log_info "Master expiry: ${master_expiry} | Subkey expiry: ${subkey_expiry}"
-    echo
-    echo "  You will be prompted to set a passphrase. Use a strong, unique"
-    echo "  passphrase — this protects your master key."
-    echo
+    _gpg_passphrase_ready_check "new" || return 1
 
     local param_file
     param_file="$(mktemp /tmp/gpg-keygen-XXXXXX)"
@@ -610,6 +610,7 @@ gpg-add-subkey() {
         expiry="${expiry:-2y}"
     fi
 
+    _gpg_passphrase_ready_check "enter" || return 1
     log_info "Adding ${type} subkey (${algo}) to ${fp}, expiry: ${expiry}"
     gpg --batch --yes --quick-add-key "${fp}" "${algo}" "${type}" "${expiry}"
 
@@ -654,6 +655,7 @@ gpg-extend-expiry() {
         [[ -z "${expiry}" ]] && { log_error "Expiry is required"; return 1; }
     fi
 
+    _gpg_passphrase_ready_check "enter" || return 1
     log_info "Extending expiry for ${fp} and all subkeys to ${expiry}..."
     # quick-set-expire with '*' extends all subkeys; without it extends the primary
     gpg --batch --yes --quick-set-expire "${fp}" "${expiry}" '*'
@@ -718,6 +720,7 @@ gpg-rotate-subkey() {
         *) log_error "Unknown type '${type}'"; return 1 ;;
     esac
 
+    _gpg_passphrase_ready_check "enter" || return 1
     log_info "Setting subkey ${subkey_fp} to expire now..."
     gpg --batch --yes --quick-set-expire "${master_fp}" seconds=1 "${subkey_fp}"
 
@@ -1174,6 +1177,7 @@ gpg-import() {
     fi
     [[ ! -f "${file}" ]] && { log_error "File not found: ${file}"; return 1; }
 
+    _gpg_passphrase_ready_check "enter" || return 1
     log_info "Importing key from: ${file}"
     gpg --import "${file}"
 
@@ -1229,6 +1233,7 @@ if match:
     chmod 600 "${tmp_file}"
     echo "${note_content}" > "${tmp_file}"
 
+    _gpg_passphrase_ready_check "enter" || { rm -f "${tmp_file}"; return 1; }
     log_info "Importing key..."
     gpg --import "${tmp_file}"
     local rc=$?
