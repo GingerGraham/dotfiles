@@ -125,7 +125,8 @@ _gpg_prompt_key_id() {
     local prompt_label="${1:-Key ID or fingerprint}"
     echo >&2
     log_info "Available secret keys:" >&2
-    gpg --list-secret-keys --keyid-format long 2>/dev/null >&2
+    gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null \
+        | sed '/Key fingerprint/{s/[[:space:]]//g; s/Keyfingerprint=/ Key fingerprint = /}' >&2
     echo >&2
     local key_id
     _read_prompt "  ${prompt_label}: " key_id
