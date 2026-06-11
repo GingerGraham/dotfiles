@@ -14,10 +14,21 @@ if [[ -n "${_kc_version}" ]]; then
 
     if [[ ! -f "${_kc_cache}" ]]; then
         mkdir -p "${_kc_cache_dir}"
-        # Remove stale versions for this shell before writing the new one
+        # nullglob: unmatched glob expands to nothing instead of erroring (zsh nomatch)
+        if [[ -n "${ZSH_VERSION}" ]]; then
+            setopt nullglob
+        else
+            shopt -s nullglob
+        fi
         for _stale in "${_kc_cache_dir}"/kubectl."${DOTFILES_SHELL}".*.sh; do
-            [[ -f "${_stale}" && "${_stale}" != "${_kc_cache}" ]] && rm -f "${_stale}"
+            [[ "${_stale}" != "${_kc_cache}" ]] && rm -f "${_stale}"
         done
+        if [[ -n "${ZSH_VERSION}" ]]; then
+            unsetopt nullglob
+        else
+            shopt -u nullglob
+        fi
+        unset _stale
         kubectl completion "${DOTFILES_SHELL}" 2>/dev/null > "${_kc_cache}" \
             || rm -f "${_kc_cache}"
     fi
