@@ -1,6 +1,51 @@
 #!/usr/bin/env bash
 # Core functions — general-purpose utilities available in every shell.
 
+# ── Shared interactive helpers ────────────────────────────────────────────────
+# Used by lazy/ files (installers, gpg-management). Defined here so they are
+# available regardless of which lazy file is sourced first.
+
+# _read_prompt <prompt_string> <variable_name>
+# Portable prompt+read for bash and zsh. zsh's `read -p` means "read from
+# coprocess", so we drive prompt and input through /dev/tty directly.
+_read_prompt() {
+    local _rp_prompt="$1"
+    local _rp_var="$2"
+    local _rp_value
+    printf '%s' "${_rp_prompt}" >/dev/tty
+    IFS= read -r _rp_value </dev/tty
+    eval "${_rp_var}=\${_rp_value}"
+}
+
+# _read_prompt_silent <prompt_string> <variable_name>
+# Silent prompt + read (no echo) for bash and zsh.
+# The explicit printf '\n' after read is required because the suppressed
+# Enter keypress produces no newline on screen.
+_read_prompt_silent() {
+    local _rp_prompt="$1"
+    local _rp_var="$2"
+    local _rp_value
+    printf '%s' "${_rp_prompt}" >/dev/tty
+    IFS= read -rs _rp_value </dev/tty
+    printf '\n' >/dev/tty
+    eval "${_rp_var}=\${_rp_value}"
+}
+
+# _str_lower <string>
+# Portable lowercase — bash ${var,,} is not supported in zsh.
+_str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# _array_get <array_name> <1-based-index>
+# Portable 1-based array access for bash and zsh.
+_array_get() {
+    local _ag_arr="$1" _ag_idx="$2"
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        eval "printf '%s' \"\${${_ag_arr}[${_ag_idx}]}\""
+    else
+        eval "printf '%s' \"\${${_ag_arr}[$((${_ag_idx} - 1))]}\""
+    fi
+}
+
 # ── cheat.sh lookup ───────────────────────────────────────────────────────────
 cheat() {
     curl "https://cheat.sh/$1"

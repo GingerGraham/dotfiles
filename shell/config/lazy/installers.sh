@@ -34,6 +34,93 @@ _download_file_robust() {
     return 1
 }
 
+# ── Shared npm helpers ────────────────────────────────────────────────────────
+
+# _ensure_npm — ensure npm is usable, preferring nvm. Returns 0 if npm resolves.
+# Priority: live npm → nvm stub → unsourced nvm (install LTS) → package manager.
+_ensure_npm() {
+    # Case 1: npm already resolves (nvm active, or system npm)
+    if command -v npm &>/dev/null; then
+        return 0
+    fi
+
+    # Case 2: nvm stub registered (function exists) but not yet activated
+    if declare -f npm &>/dev/null || declare -f nvm &>/dev/null; then
+        log_info "Activating nvm to access npm..."
+        nvm --version &>/dev/null || true
+        command -v npm &>/dev/null && return 0
+    fi
+
+    # Case 3: nvm installed but stubs not registered (e.g. non-interactive shell)
+    local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
+    if [[ -s "${nvm_dir}/nvm.sh" ]]; then
+        log_info "Sourcing nvm..."
+        # shellcheck disable=SC1091
+        source "${nvm_dir}/nvm.sh"
+        command -v npm &>/dev/null && return 0
+        log_info "nvm active but no node version installed — installing LTS..."
+        nvm install --lts
+        nvm use --lts
+        command -v npm &>/dev/null && return 0
+    fi
+
+    # Case 4: no nvm — install Node via the package manager
+    log_info "nvm not found — attempting to install Node.js via package manager..."
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
+    local elevation_cmd
+    elevation_cmd="$(get-elevation-command)" || return 1
+    case "${PACKAGE_MANAGER}" in
+        dnf)    ${elevation_cmd} dnf install -y nodejs npm ;;
+        yum)    ${elevation_cmd} yum install -y nodejs npm ;;
+        apt)    ${elevation_cmd} apt-get install -y nodejs npm ;;
+        zypper) ${elevation_cmd} zypper install -y nodejs npm ;;
+        pacman) ${elevation_cmd} pacman -S --noconfirm nodejs npm ;;
+        brew)   brew install node ;;
+        *) log_error "Cannot install Node.js: no supported package manager"; return 1 ;;
+    esac
+    command -v npm &>/dev/null && return 0
+    return 1
+}
+
+# _npm_global_install <package>
+# Installs/updates a global npm package. If npm's prefix is system-owned
+# (/usr, /opt) the install is redirected to ~/.local so no root is required.
+_npm_global_install() {
+    local pkg="$1"
+    [[ -z "${pkg}" ]] && { log_error "_npm_global_install: package name required"; return 1; }
+
+    local npm_prefix install_prefix=""
+    npm_prefix="$(npm config get prefix 2>/dev/null)"
+    case "${npm_prefix}" in
+        /usr/*|/opt/*|/usr|/opt)
+            install_prefix="${HOME}/.local"
+            log_info "System npm prefix (${npm_prefix}) — installing to ${install_prefix}"
+            ;;
+        *)
+            log_info "npm prefix is user-writable (${npm_prefix})"
+            ;;
+    esac
+
+    mkdir -p "${HOME}/.local/bin"
+    if [[ -n "${install_prefix}" ]]; then
+        npm install -g --prefix "${install_prefix}" "${pkg}" || return 1
+        if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
+            log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+        fi
+    else
+        npm install -g "${pkg}" || return 1
+    fi
+}
+
+# _node_version_at_least <major>
+# True if the active node's major version is >= <major>.
+_node_version_at_least() {
+    local want="$1" have
+    command -v node &>/dev/null || return 1
+    have="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
+    [[ -n "${have}" && "${have}" =~ ^[0-9]+$ && "${have}" -ge "${want}" ]]
+}
+
 # ── Oh-My-Posh install ────────────────────────────────────────────────────────
 
 _omp-install-linux() {
@@ -458,51 +545,6 @@ install-bitwarden() {
 #   bw login
 #   export BW_SESSION=$(bw unlock --raw)
 # ── Internal helper: ensure npm is available, preferring nvm ─────────────────
-_bw_ensure_npm() {
-    # Case 1: npm already resolves as a real command (nvm active, or system npm)
-    if command -v npm &>/dev/null; then
-        return 0
-    fi
-
-    # Case 2: nvm stub registered (function exists) but not yet activated
-    if declare -f npm &>/dev/null || declare -f nvm &>/dev/null; then
-        log_info "Activating nvm to access npm..."
-        # Force-load nvm by calling the stub, which replaces itself
-        nvm --version &>/dev/null || true
-        command -v npm &>/dev/null && return 0
-    fi
-
-    # Case 3: nvm installed but stubs not registered (e.g. called outside interactive shell)
-    local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
-    if [[ -s "${nvm_dir}/nvm.sh" ]]; then
-        log_info "Sourcing nvm..."
-        # shellcheck disable=SC1091
-        source "${nvm_dir}/nvm.sh"
-        command -v npm &>/dev/null && return 0
-        log_info "nvm active but no node version installed — installing LTS..."
-        nvm install --lts
-        nvm use --lts
-        command -v npm &>/dev/null && return 0
-    fi
-
-    # Case 4: no nvm — offer package manager install of node
-    log_info "nvm not found — attempting to install Node.js via package manager..."
-    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
-    local elevation_cmd
-    elevation_cmd="$(get-elevation-command)" || return 1
-    case "${PACKAGE_MANAGER}" in
-        dnf)    ${elevation_cmd} dnf install -y nodejs npm ;;
-        yum)    ${elevation_cmd} yum install -y nodejs npm ;;
-        apt)    ${elevation_cmd} apt-get install -y nodejs npm ;;
-        zypper) ${elevation_cmd} zypper install -y nodejs npm ;;
-        pacman) ${elevation_cmd} pacman -S --noconfirm nodejs npm ;;
-        brew)   brew install node ;;
-        *) log_error "Cannot install Node.js: no supported package manager"; return 1 ;;
-    esac
-    command -v npm &>/dev/null && return 0
-
-    return 1
-}
 
 install-bw-cli() {
     log_info "Installing or updating Bitwarden CLI (bw)..."
@@ -517,50 +559,26 @@ install-bw-cli() {
             fi
             ;;
         Linux)
-            if _bw_ensure_npm; then
-                # Determine if npm's prefix is system-owned; if so, redirect to ~/.local
-                local npm_prefix install_prefix=""
-                npm_prefix="$(npm config get prefix 2>/dev/null)"
-                case "${npm_prefix}" in
-                    /usr/*|/opt/*|/usr|/opt)
-                        install_prefix="${HOME}/.local"
-                        log_info "System npm prefix (${npm_prefix}) — installing to ${install_prefix}"
-                        ;;
-                    *)
-                        log_info "npm prefix is user-writable (${npm_prefix})"
-                        ;;
-                esac
-
-                mkdir -p "${HOME}/.local/bin"
-                if [[ -n "${install_prefix}" ]]; then
-                    npm install -g --prefix "${install_prefix}" @bitwarden/cli
-                    if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
-                        log_warn "${HOME}/.local/bin is not on PATH — add it to env/90-local.sh"
-                    fi
-                else
-                    npm install -g @bitwarden/cli
-                fi
+            if _ensure_npm; then
+                _npm_global_install "@bitwarden/cli" || { log_error "Bitwarden CLI npm install failed"; return 1; }
             else
-                # npm unavailable and could not be installed — fall back to pre-built binary
+                # npm unavailable and could not be installed — pre-built binary
                 log_info "npm unavailable — downloading pre-built binary from GitHub..."
                 local arch bw_arch
                 arch="$(uname -m)"
                 case "${arch}" in
                     x86_64)  bw_arch="linux-x64"   ;;
-                    aarch64) bw_arch="linux-arm64"  ;;
+                    aarch64) bw_arch="linux-arm64" ;;
                     *) log_error "Unsupported architecture: ${arch}"; return 1 ;;
                 esac
 
                 local version
                 version="$(curl -s https://api.github.com/repos/bitwarden/clients/releases \
-                    | grep '"tag_name"' \
-                    | grep '"cli-' \
-                    | head -1 \
+                    | grep '"tag_name"' | grep '"cli-' | head -1 \
                     | sed -E 's/.*"cli-v([0-9.]+)".*/\1/')"
                 [[ -z "${version}" ]] && { log_error "Could not determine bw CLI version"; return 1; }
 
-                local tmp_dir
-                tmp_dir="$(mktemp -d)"
+                local tmp_dir; tmp_dir="$(mktemp -d)"
                 local zip_url="https://github.com/bitwarden/clients/releases/download/cli-v${version}/bw-${bw_arch}-${version}.zip"
                 _download_file_robust "${zip_url}" "${tmp_dir}/bw.zip" || { rm -rf "${tmp_dir}"; return 1; }
                 unzip -q "${tmp_dir}/bw.zip" -d "${tmp_dir}"
@@ -589,6 +607,354 @@ install-bw-cli() {
         log_warn "bw not found in PATH after install. You may need to restart your shell."
         log_warn "Expected location: ${HOME}/.local/bin/bw"
     fi
+}
+
+# ── GitHub CLI install ────────────────────────────────────────────────────────
+
+# DNF5 (Fedora 41+) and DNF4 use different config-manager syntax.
+_gh_dnf_is_v5() {
+    command -v dnf5 &>/dev/null && return 0
+    dnf --version 2>/dev/null | head -1 | grep -qiE 'dnf5|^5\.'
+}
+
+_gh-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    [[ "${elevation_cmd}" == "run0" ]] && log_warn "run0 detected — multiple prompts expected"
+    local repo_url="https://cli.github.com/packages/rpm/gh-cli.repo"
+
+    if command -v dnf &>/dev/null; then
+        if _gh_dnf_is_v5; then
+            log_info "Configuring GitHub CLI repo (dnf5)..."
+            ${elevation_cmd} dnf install -y dnf5-plugins
+            ${elevation_cmd} dnf config-manager addrepo --from-repofile="${repo_url}" || true
+        else
+            log_info "Configuring GitHub CLI repo (dnf4)..."
+            ${elevation_cmd} dnf install -y 'dnf-command(config-manager)'
+            ${elevation_cmd} dnf config-manager --add-repo "${repo_url}"
+        fi
+        ${elevation_cmd} dnf install -y gh
+    elif command -v yum &>/dev/null; then
+        log_info "Configuring GitHub CLI repo (yum)..."
+        command -v yum-config-manager &>/dev/null || ${elevation_cmd} yum install -y yum-utils
+        ${elevation_cmd} yum-config-manager --add-repo "${repo_url}"
+        ${elevation_cmd} yum install -y gh
+    else
+        log_error "Neither dnf nor yum found"; return 1
+    fi
+}
+
+_gh-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if ! command -v wget &>/dev/null; then
+        log_info "Installing wget (required to fetch the keyring)..."
+        ${elevation_cmd} apt-get update && ${elevation_cmd} apt-get install -y wget
+    fi
+    local keyring="/etc/apt/keyrings/githubcli-archive-keyring.gpg"
+    ${elevation_cmd} mkdir -p -m 755 /etc/apt/keyrings
+    local tmp; tmp="$(mktemp)"
+    if ! wget -nv -O "${tmp}" https://cli.github.com/packages/githubcli-archive-keyring.gpg; then
+        log_error "Failed to download GitHub CLI keyring"; rm -f "${tmp}"; return 1
+    fi
+    ${elevation_cmd} install -m 644 "${tmp}" "${keyring}"
+    rm -f "${tmp}"
+    ${elevation_cmd} mkdir -p -m 755 /etc/apt/sources.list.d
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://cli.github.com/packages stable main" \
+        | ${elevation_cmd} tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y gh
+}
+
+_gh-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    local repo_url="https://cli.github.com/packages/rpm/gh-cli.repo"
+    if zypper lr 2>/dev/null | grep -qi 'gh-cli'; then
+        log_info "GitHub CLI zypper repo already present"
+    else
+        ${elevation_cmd} zypper addrepo "${repo_url}"
+    fi
+    ${elevation_cmd} zypper --gpg-auto-import-keys ref
+    ${elevation_cmd} zypper install -y gh
+}
+
+_gh-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm github-cli
+}
+
+_gh-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v gh &>/dev/null; then brew upgrade gh; else brew install gh; fi
+}
+
+# Distro-independent fallback: latest release tarball → ~/.local/bin/gh
+_gh-install-tarball() {
+    log_info "Falling back to a distro-independent binary install from GitHub releases..."
+    command -v tar &>/dev/null || { log_error "tar is required for the fallback install"; return 1; }
+
+    local api_response ver ver_num
+    api_response="$(curl -s https://api.github.com/repos/cli/cli/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -1)"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest gh version (GitHub API rate limit?)"; return 1; }
+    ver_num="${ver#v}"
+
+    local machine os arch ext
+    machine="$(uname -m)"; os="$(uname -s)"
+    case "${machine}" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
+    esac
+    case "${os}" in
+        Linux)  os="linux";  ext="tar.gz" ;;
+        Darwin) os="macOS";  ext="zip"    ;;
+        *) log_error "Unsupported OS: ${os}"; return 1 ;;
+    esac
+
+    local asset="gh_${ver_num}_${os}_${arch}.${ext}"
+    local url="https://github.com/cli/cli/releases/download/${ver}/${asset}"
+    local tmp_dir; tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+
+    if [[ "${ext}" == "zip" ]]; then
+        command -v unzip &>/dev/null || { log_error "unzip is required"; rm -rf "${tmp_dir}"; return 1; }
+        unzip -q "${tmp_dir}/${asset}" -d "${tmp_dir}"
+    else
+        tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+    fi
+
+    local bin; bin="$(find "${tmp_dir}" -type f -path '*/bin/gh' | head -1)"
+    [[ -z "${bin}" ]] && bin="$(find "${tmp_dir}" -type f -name gh -perm -u+x | head -1)"
+    if [[ -z "${bin}" ]]; then
+        log_error "gh binary not found in archive"; rm -rf "${tmp_dir}"; return 1
+    fi
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${bin}" "${HOME}/.local/bin/gh"
+    rm -rf "${tmp_dir}"
+    log_info "gh installed to ~/.local/bin/gh"
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+install-gh() {
+    log_info "Installing or updating GitHub CLI (gh)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _gh-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _gh-install-rhel   && ok=0 ;;
+                debian) _gh-install-debian && ok=0 ;;
+                suse)   _gh-install-suse   && ok=0 ;;
+                arch)   _gh-install-arch   && ok=0 ;;
+                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using distro-independent install" ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { _gh-install-tarball || return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for gh install"; return 1
+            ;;
+    esac
+
+    if command -v gh &>/dev/null; then
+        log_info "GitHub CLI installed: $(gh --version 2>/dev/null | head -1)"
+        echo
+        echo "  Authenticate with:"
+        echo "    gh auth login"
+    else
+        log_warn "gh not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
+# ── nvm (Node Version Manager) install ────────────────────────────────────────
+
+_nvm_latest_version() {
+    curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest 2>/dev/null \
+        | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
+        | head -1
+}
+
+# Detect a manually-installed system Node and, interactively, offer to remove it
+# so nvm becomes the sole manager. No-op for nvm-managed or non-interactive cases.
+_nvm_handle_system_node() {
+    local node_path npm_path
+    node_path="$(command -v node 2>/dev/null)"
+    npm_path="$(command -v npm 2>/dev/null)"
+
+    # Only act on a real on-disk binary (skip nvm stub *functions* and nvm paths).
+    [[ "${node_path}" == */* && -x "${node_path}" ]] || return 0
+    case "${node_path}" in
+        *"/.nvm/"*) return 0 ;;
+    esac
+
+    log_warn "A manually-installed Node.js was found:"
+    log_warn "  node: ${node_path}"
+    [[ -n "${npm_path}" ]] && log_warn "  npm:  ${npm_path}"
+    log_warn "nvm works best as the sole Node.js manager; a system Node on PATH can shadow"
+    log_warn "nvm's versions in non-login contexts."
+
+    if [[ ! -e /dev/tty ]]; then
+        log_info "Non-interactive shell — leaving the system Node in place."
+        return 0
+    fi
+
+    local reply
+    _read_prompt "Remove the system Node.js/npm via the package manager and use nvm instead? [y/N]: " reply
+    case "$(_str_lower "${reply}")" in
+        y|yes) ;;
+        *) log_info "Keeping the system Node.js. nvm will install alongside it."; return 0 ;;
+    esac
+
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 0; }
+    local elevation_cmd
+    elevation_cmd="$(get-elevation-command)" || { log_warn "No elevation available — cannot remove system Node."; return 0; }
+    log_warn "Removing system nodejs/npm — this may also remove packages that depend on them."
+    case "${PACKAGE_MANAGER}" in
+        dnf)    ${elevation_cmd} dnf remove -y nodejs npm ;;
+        yum)    ${elevation_cmd} yum remove -y nodejs npm ;;
+        apt)    ${elevation_cmd} apt-get remove -y nodejs npm ;;
+        zypper) ${elevation_cmd} zypper remove -y nodejs npm ;;
+        pacman) ${elevation_cmd} pacman -Rs --noconfirm nodejs npm ;;
+        brew)   brew uninstall node 2>/dev/null || true ;;
+        *) log_warn "Unknown package manager — remove Node.js manually if desired." ;;
+    esac
+}
+
+install-nvm() {
+    log_info "Installing or updating nvm (Node Version Manager)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+    command -v git  &>/dev/null || log_warn "git not found — nvm self-update will be unavailable"
+
+    export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+
+    _nvm_handle_system_node
+
+    # Version is embedded in the install URL and changes over time — detect it,
+    # falling back to a pinned version if the API is unreachable / rate-limited.
+    local nvm_ver
+    nvm_ver="$(_nvm_latest_version)"
+    if [[ -z "${nvm_ver}" ]]; then
+        nvm_ver="v0.40.5"
+        log_warn "Could not query the latest nvm version (GitHub API rate limit?) — using ${nvm_ver}"
+    fi
+    log_info "Target nvm version: ${nvm_ver}"
+
+    local install_url="https://raw.githubusercontent.com/nvm-sh/nvm/${nvm_ver}/install.sh"
+    if ! curl -o- "${install_url}" | bash; then
+        log_error "nvm install script failed"
+        return 1
+    fi
+
+    # Load nvm now (replacing the lazy stubs from env/20-development.sh).
+    if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
+        unset -f nvm node npm npx yarn pnpm 2>/dev/null || true
+        # shellcheck disable=SC1091
+        source "${NVM_DIR}/nvm.sh"
+    else
+        log_error "nvm.sh not found at ${NVM_DIR} after install"
+        return 1
+    fi
+
+    # Install current LTS if nothing is in use; set a default for new shells.
+    local current
+    current="$(nvm current 2>/dev/null)"
+    if [[ -z "${current}" || "${current}" == "none" || "${current}" == "system" ]]; then
+        log_info "No nvm-managed Node in use — installing latest LTS..."
+        nvm install --lts || { log_error "nvm install --lts failed"; return 1; }
+        nvm use --lts
+        nvm alias default 'lts/*'
+    else
+        log_info "nvm already managing Node ${current} — keeping it as the active version"
+        nvm alias default &>/dev/null || nvm alias default "${current}"
+    fi
+
+    log_info "nvm ready — node $(node --version 2>/dev/null), npm $(npm --version 2>/dev/null)"
+    echo
+    echo "  nvm is loaded in this shell and lazy-loads in new shells. Common commands:"
+    echo "    nvm install --lts      # install the latest LTS"
+    echo "    nvm install 20         # install a specific major"
+    echo "    nvm use 20             # switch versions"
+    echo "    nvm alias default 20   # set the default for new shells"
+}
+
+# ── GitHub Copilot CLI install ────────────────────────────────────────────────
+# npm package @github/copilot — requires Node.js 22+.
+install-copilot-cli() {
+    log_info "Installing or updating GitHub Copilot CLI (@github/copilot)..."
+    _ensure_npm || { log_error "npm is required for the Copilot CLI. Install Node first with: install-nvm"; return 1; }
+
+    if ! _node_version_at_least 22; then
+        log_warn "Copilot CLI requires Node.js 22+. Detected: $(node --version 2>/dev/null || echo none)."
+        log_warn "Get a current Node with: install-nvm   (then re-run install-copilot-cli)"
+        return 1
+    fi
+
+    _npm_global_install "@github/copilot" || { log_error "Copilot CLI install failed"; return 1; }
+
+    if command -v copilot &>/dev/null; then
+        log_info "Copilot CLI installed: $(copilot --version 2>/dev/null | head -1)"
+        echo
+        echo "  Launch and authenticate with your GitHub account:"
+        echo "    copilot"
+        echo "  Requires an active GitHub Copilot subscription."
+    else
+        log_warn "copilot not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
+# ── Claude Code install ───────────────────────────────────────────────────────
+# Native installer preferred (no Node dependency, self-updating); npm fallback.
+_claude_post_install() {
+    if command -v claude &>/dev/null; then
+        log_info "Claude Code installed: $(claude --version 2>/dev/null | head -1)"
+    else
+        log_info "Claude Code installed to ~/.local/bin/claude"
+        log_warn "Restart your shell or add ~/.local/bin to PATH if 'claude' is not found."
+    fi
+    echo
+    echo "  Launch and authenticate (opens a browser on first run):"
+    echo "    claude"
+    echo "  Requires a Claude Pro/Max plan or an Anthropic Console (API) account."
+}
+
+install-claude-code() {
+    log_info "Installing or updating Claude Code..."
+
+    case "${DOTFILES_OS}" in
+        Linux|Mac)
+            if command -v curl &>/dev/null; then
+                log_info "Using the native installer (no Node.js required, self-updating)..."
+                if curl -fsSL https://claude.ai/install.sh | bash; then
+                    if command -v claude &>/dev/null || [[ -x "${HOME}/.local/bin/claude" ]]; then
+                        _claude_post_install
+                        return 0
+                    fi
+                    log_warn "Native installer ran but 'claude' is not on PATH yet — trying npm..."
+                else
+                    log_warn "Native installer failed — falling back to npm..."
+                fi
+            fi
+            ;;
+        *)
+            log_warn "Unrecognised OS — attempting npm install..."
+            ;;
+    esac
+
+    _ensure_npm || { log_error "Native install failed and npm is unavailable. Install Node with: install-nvm"; return 1; }
+    if ! _node_version_at_least 18; then
+        log_warn "Claude Code (npm) requires Node.js 18+. Detected: $(node --version 2>/dev/null || echo none)."
+        log_warn "Get a current Node with: install-nvm   (then re-run install-claude-code)"
+        return 1
+    fi
+    _npm_global_install "@anthropic-ai/claude-code" || { log_error "Claude Code npm install failed"; return 1; }
+    _claude_post_install
 }
 
 # ── Microsoft Edit install ────────────────────────────────────────────────────

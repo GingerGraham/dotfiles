@@ -74,7 +74,7 @@ gpg-create-key
 
 | File                | Contents                                                                                     |
 | ------------------- | -------------------------------------------------------------------------------------------- |
-| `installers.sh`     | `install-*` functions for tools not available via package manager (oh-my-posh, bw CLI, etc.) |
+| `installers.sh`     | `install-*` functions (gh, nvm, copilot-cli, claude-code, bw-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
 | `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                    |
 | `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export, Bitwarden backup/restore          |
 

@@ -40,43 +40,43 @@
 # zsh's read builtin does not support -p for a prompt string (that flag means
 # "read from coprocess"). Use printf to /dev/tty so the prompt always reaches
 # the terminal regardless of stdin/stderr redirection.
-_read_prompt() {
-    local _rp_prompt="$1"
-    local _rp_var="$2"
-    local _rp_value
-    printf '%s' "${_rp_prompt}" >/dev/tty
-    IFS= read -r _rp_value </dev/tty
-    eval "${_rp_var}=\${_rp_value}"
-}
+# _read_prompt() {
+#     local _rp_prompt="$1"
+#     local _rp_var="$2"
+#     local _rp_value
+#     printf '%s' "${_rp_prompt}" >/dev/tty
+#     IFS= read -r _rp_value </dev/tty
+#     eval "${_rp_var}=\${_rp_value}"
+# }
 
-# _read_prompt_silent <prompt_string> <variable_name>
-# Silent prompt + read (no echo) for bash and zsh.
-# The explicit printf '\n' after read is required because the suppressed
-# Enter keypress produces no newline on screen.
-_read_prompt_silent() {
-    local _rp_prompt="$1"
-    local _rp_var="$2"
-    local _rp_value
-    printf '%s' "${_rp_prompt}" >/dev/tty
-    IFS= read -rs _rp_value </dev/tty
-    printf '\n' >/dev/tty
-    eval "${_rp_var}=\${_rp_value}"
-}
+# # _read_prompt_silent <prompt_string> <variable_name>
+# # Silent prompt + read (no echo) for bash and zsh.
+# # The explicit printf '\n' after read is required because the suppressed
+# # Enter keypress produces no newline on screen.
+# _read_prompt_silent() {
+#     local _rp_prompt="$1"
+#     local _rp_var="$2"
+#     local _rp_value
+#     printf '%s' "${_rp_prompt}" >/dev/tty
+#     IFS= read -rs _rp_value </dev/tty
+#     printf '\n' >/dev/tty
+#     eval "${_rp_var}=\${_rp_value}"
+# }
 
-# _str_lower <string>
-# Portable lowercase — bash ${var,,} is not supported in zsh.
-_str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# # _str_lower <string>
+# # Portable lowercase — bash ${var,,} is not supported in zsh.
+# _str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
-# _array_get <array_name> <1-based-index>
-# Portable 1-based array access for bash and zsh.
-_array_get() {
-    local _ag_arr="$1" _ag_idx="$2"
-    if [[ -n "${ZSH_VERSION}" ]]; then
-        eval "printf '%s' \"\${${_ag_arr}[${_ag_idx}]}\""
-    else
-        eval "printf '%s' \"\${${_ag_arr}[$((${_ag_idx} - 1))]}\""
-    fi
-}
+# # _array_get <array_name> <1-based-index>
+# # Portable 1-based array access for bash and zsh.
+# _array_get() {
+#     local _ag_arr="$1" _ag_idx="$2"
+#     if [[ -n "${ZSH_VERSION}" ]]; then
+#         eval "printf '%s' \"\${${_ag_arr}[${_ag_idx}]}\""
+#     else
+#         eval "printf '%s' \"\${${_ag_arr}[$((${_ag_idx} - 1))]}\""
+#     fi
+# }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 

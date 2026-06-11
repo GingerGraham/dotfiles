@@ -131,9 +131,9 @@ unset _env_file
 
 # ── Tier 1: core/ — always sourced ───────────────────────────────────────────
 for _core_file in \
-    "${SHELL_CONFIG_DIR}/core/aliases.sh" \
     "${SHELL_CONFIG_DIR}/core/functions.sh" \
-    "${SHELL_CONFIG_DIR}/core/ssh.sh"; do
+    "${SHELL_CONFIG_DIR}/core/ssh.sh" \
+    "${SHELL_CONFIG_DIR}/core/aliases.sh"; do
     # shellcheck disable=SC1090
     [[ -f "${_core_file}" ]] && source "${_core_file}"
 done
