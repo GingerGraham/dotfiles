@@ -200,13 +200,18 @@ get-gpg-functions() {
     local _tools_file="${_config_dir}/tools/gpg.sh"
     local _lazy_file="${_config_dir}/lazy/gpg-management.sh"
 
+    local _extract_fns
+    _extract_fns() {
+        grep -Eo '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "$1" 2>/dev/null \
+            | sed 's/[[:space:]]*()//' \
+            | grep -v '^_' \
+            | sort
+    }
+
     echo
     echo "[INFO] GPG functions — tools/gpg.sh (Tier 2, always loaded when gpg present):"
     if [[ -f "${_tools_file}" ]]; then
-        grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
-            | sed 's/[[:space:]]*()//' \
-            | grep -v '^_' \
-            | sort | column
+        _extract_fns "${_tools_file}" | column
     else
         echo "  (file not found: ${_tools_file})"
     fi
@@ -214,14 +219,13 @@ get-gpg-functions() {
     echo
     echo "[INFO] GPG functions — lazy/gpg-management.sh (Tier 3, lazy-loaded on first call):"
     if [[ -f "${_lazy_file}" ]]; then
-        grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_lazy_file}" \
-            | sed 's/[[:space:]]*()//' \
-            | grep -v '^_' \
-            | sort | column
+        _extract_fns "${_lazy_file}" | column
     else
         echo "  (file not found: ${_lazy_file})"
     fi
     echo
+
+    unset -f _extract_fns
 }
 
 # ── Introspection: list git functions ─────────────────────────────────────────
@@ -239,18 +243,18 @@ get-git-functions() {
     fi
 
     local _all_fns
-    _all_fns="$(grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
+    _all_fns="$(grep -Eo '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
         | sed 's/[[:space:]]*()//' \
         | grep -v '^_' \
         | sort)"
 
     echo
     echo "[INFO] Git project management functions (tools/git.sh):"
-    echo "${_all_fns}" | grep '^git-' | grep -E 'project|sync|base' | column
+    echo "${_all_fns}" | grep -E '^git-(add|update|remove|list|sync|projects)-' | column
 
     echo
     echo "[INFO] Git helper functions (tools/git.sh):"
-    echo "${_all_fns}" | grep -v -E '^git-(add|update|remove|list|sync|projects)-' | column
+    echo "${_all_fns}" | grep -vE '^git-(add|update|remove|list|sync|projects)-' | column
     echo
 }
 
