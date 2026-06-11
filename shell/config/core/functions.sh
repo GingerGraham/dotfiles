@@ -192,6 +192,68 @@ get-my-installers() {
     echo
 }
 
+# ── Introspection: list GPG functions ─────────────────────────────────────────
+# Shows functions from tools/gpg.sh (always loaded when gpg present) and
+# lazy/gpg-management.sh (loaded on first call). Grouped by tier.
+get-gpg-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _tools_file="${_config_dir}/tools/gpg.sh"
+    local _lazy_file="${_config_dir}/lazy/gpg-management.sh"
+
+    echo
+    echo "[INFO] GPG functions — tools/gpg.sh (Tier 2, always loaded when gpg present):"
+    if [[ -f "${_tools_file}" ]]; then
+        grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
+            | sed 's/[[:space:]]*()//' \
+            | grep -v '^_' \
+            | sort | column
+    else
+        echo "  (file not found: ${_tools_file})"
+    fi
+
+    echo
+    echo "[INFO] GPG functions — lazy/gpg-management.sh (Tier 3, lazy-loaded on first call):"
+    if [[ -f "${_lazy_file}" ]]; then
+        grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_lazy_file}" \
+            | sed 's/[[:space:]]*()//' \
+            | grep -v '^_' \
+            | sort | column
+    else
+        echo "  (file not found: ${_lazy_file})"
+    fi
+    echo
+}
+
+# ── Introspection: list git functions ─────────────────────────────────────────
+# Shows functions from tools/git.sh, grouped into project management and
+# general helpers. Private helpers (prefixed _) are excluded.
+get-git-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _tools_file="${_config_dir}/tools/git.sh"
+
+    if [[ ! -f "${_tools_file}" ]]; then
+        echo
+        echo "  (file not found: ${_tools_file})"
+        echo
+        return 1
+    fi
+
+    local _all_fns
+    _all_fns="$(grep -E '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
+        | sed 's/[[:space:]]*()//' \
+        | grep -v '^_' \
+        | sort)"
+
+    echo
+    echo "[INFO] Git project management functions (tools/git.sh):"
+    echo "${_all_fns}" | grep '^git-' | grep -E 'project|sync|base' | column
+
+    echo
+    echo "[INFO] Git helper functions (tools/git.sh):"
+    echo "${_all_fns}" | grep -v -E '^git-(add|update|remove|list|sync|projects)-' | column
+    echo
+}
+
 # ── Shell Sourcing ────────────────────────────────────────
 # Private helper — not intended to be called directly.
 # Usage: _dotfiles_source_rc <rc_file> <logger_name> [--debug|--info|--notice|
