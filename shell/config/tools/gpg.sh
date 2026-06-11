@@ -22,14 +22,14 @@ command -v gpg &>/dev/null || return 0
 # List all keys (public keyring) with fingerprints and expiry.
 gpg-list() {
     log_info "Public keys:"
-    gpg --list-keys --keyid-format long --with-fingerprint "$@"
+    gpg --list-keys --keyid-format long "$@"
 }
 
 # gpg-list-secret
 # List all secret keys with fingerprints.
 gpg-list-secret() {
     log_info "Secret keys:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "$@"
+    gpg --list-secret-keys --keyid-format long "$@"
 }
 
 # ── Aliases ───────────────────────────────────────────────────────────────────
@@ -162,9 +162,9 @@ gpg-show() {
     echo
     log_info "Key details for: ${1}"
     echo "── Public key ───────────────────────────────────────────────────"
-    gpg --list-keys --keyid-format long --with-fingerprint --with-subkey-fingerprints "${1}"
+    gpg --list-keys --keyid-format long --with-subkey-fingerprints "${1}"
     echo "── Secret key ───────────────────────────────────────────────────"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint --with-subkey-fingerprints "${1}" 2>/dev/null \
+    gpg --list-secret-keys --keyid-format long --with-subkey-fingerprints "${1}" 2>/dev/null \
         || log_warn "No secret key found for ${1}"
     echo
 }

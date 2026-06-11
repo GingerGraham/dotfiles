@@ -123,7 +123,7 @@ _gpg_prompt_key_id() {
     local prompt_label="${1:-Key ID or fingerprint}"
     echo >&2
     log_info "Available secret keys:" >&2
-    gpg --list-secret-keys --keyid-format long --with-fingerprint 2>/dev/null \
+    gpg --list-secret-keys --keyid-format long 2>/dev/null \
         | grep -E '(^sec|^uid)' | sed 's/^/  /' >&2
     echo >&2
     local key_id
@@ -261,7 +261,7 @@ EOF
 
     echo
     log_info "Key creation complete. Summary:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
 
     echo "═══════════════════════════════════════════════════════════════════"
     echo "  Key created: ${fp}"
@@ -441,7 +441,7 @@ gpg-add-uid() {
 
     echo
     log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
 
     echo
     echo "  Re-export to keep your Bitwarden backup current:"
@@ -491,7 +491,7 @@ gpg-remove-master() {
 
     echo
     log_info "Key to remove master secret from:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
 
     echo
     echo "  ┌─────────────────────────────────────────────────────────────┐"
@@ -543,7 +543,7 @@ gpg-remove-master() {
 
     echo
     log_info "Master secret key removed. Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
     echo
     log_info "The 'sec#' marker confirms the master secret is no longer stored locally."
     echo
@@ -613,7 +613,7 @@ gpg-add-subkey() {
 
     echo
     log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
     echo
     echo "  Re-export to keep your Bitwarden backup current:"
     echo "    gpg-export-bitwarden ${fp}"
@@ -659,7 +659,7 @@ gpg-extend-expiry() {
 
     echo
     log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${fp}"
+    gpg --list-secret-keys --keyid-format long "${fp}"
     echo
     echo "  Re-export to keep your Bitwarden backup current:"
     echo "    gpg-export-bitwarden ${fp}"
@@ -724,7 +724,7 @@ gpg-rotate-subkey() {
 
     echo
     log_info "Rotation complete. Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${master_fp}"
+    gpg --list-secret-keys --keyid-format long "${master_fp}"
     echo
     echo "  Re-export to keep your Bitwarden backup current:"
     echo "    gpg-export-bitwarden ${master_fp}"
@@ -1286,7 +1286,7 @@ gpg-trust() {
 
     echo
     log_info "Updated key:"
-    gpg --list-secret-keys --keyid-format long --with-fingerprint "${full_fp}"
+    gpg --list-secret-keys --keyid-format long "${full_fp}"
 }
 
 # ── GitHub integration ────────────────────────────────────────────────────────
