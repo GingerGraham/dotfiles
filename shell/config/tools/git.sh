@@ -171,13 +171,15 @@ gwt-cd() {
 _git_require_yq() {
     if ! command -v yq &>/dev/null; then
         log_error "yq is required for git project management."
-        log_error "Fedora:  sudo dnf install yq"
-        log_error "Snap:    sudo snap install yq"
-        log_error "See:     https://github.com/mikefarah/yq#install"
+        log_error "Install: https://github.com/mikefarah/yq#install"
         return 1
     fi
-    if ! yq --version 2>&1 | grep -qE 'mikefarah|version v4|yq \(https'; then
-        log_warn "yq found but may not be mikefarah/yq v4 — expressions may fail."
+    if ! yq --version 2>&1 | grep -qE 'mikefarah|version v4|yq \(https://github.com/mikefarah'; then
+        log_error "Wrong yq detected — mikefarah/yq v4 is required."
+        log_error "Found: $(yq --version 2>&1)"
+        log_error "Install: https://github.com/mikefarah/yq#install"
+        log_error "On Ubuntu, python3-yq may be shadowing the correct binary."
+        return 1
     fi
 }
 
