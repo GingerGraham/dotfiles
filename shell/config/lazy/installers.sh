@@ -1011,6 +1011,282 @@ install-bw-cli() {
     fi
 }
 
+# ── 1Password desktop app install ────────────────────────────────────────────
+# Official vendor repos per distro — package manager handles updates.
+# GPG key: 3FEF9748469ADBE15DA7CA80AC2D62742012EA22
+
+_1password-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    # Add GPG key
+    ${elevation_cmd} mkdir -p /usr/share/keyrings
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        | ${elevation_cmd} gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+
+    # Add apt repo
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
+        | ${elevation_cmd} tee /etc/apt/sources.list.d/1password.list > /dev/null
+
+    # Add debsig-verify policy
+    ${elevation_cmd} mkdir -p /etc/debsig/policies/AC2D62742012EA22/
+    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol \
+        | ${elevation_cmd} tee /etc/debsig/policies/AC2D62742012EA22/1password.pol > /dev/null
+    ${elevation_cmd} mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        | ${elevation_cmd} gpg --dearmor \
+            --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y 1password
+}
+
+_1password-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+
+    # Import GPG key
+    ${elevation_cmd} rpm --import https://downloads.1password.com/linux/keys/1password.asc
+
+    # Add yum/dnf repo
+    ${elevation_cmd} sh -c 'echo -e "[1password]\nname=1Password Stable Channel\nbaseurl=https://downloads.1password.com/linux/rpm/stable/\$basearch\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=\"https://downloads.1password.com/linux/keys/1password.asc\"" > /etc/yum.repos.d/1password.repo'
+
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf install -y 1password
+    else
+        ${elevation_cmd} yum install -y 1password
+    fi
+}
+
+_1password-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+
+    ${elevation_cmd} rpm --import https://downloads.1password.com/linux/keys/1password.asc
+    if ! zypper lr 2>/dev/null | grep -qi '1password'; then
+        ${elevation_cmd} zypper addrepo https://downloads.1password.com/linux/rpm/stable/x86_64 1password
+    else
+        log_info "1Password zypper repo already present"
+    fi
+    ${elevation_cmd} zypper --gpg-auto-import-keys refresh
+    ${elevation_cmd} zypper install -y 1password
+}
+
+_1password-install-arch() {
+    # AUR package maintained by community
+    if command -v yay &>/dev/null; then
+        # Import signing key first
+        gpg --receive-keys 3FEF9748469ADBE15DA7CA80AC2D62742012EA22 2>/dev/null || true
+        yay -S --noconfirm 1password
+    else
+        log_info "yay not found — cloning 1password AUR package manually..."
+        gpg --receive-keys 3FEF9748469ADBE15DA7CA80AC2D62742012EA22 2>/dev/null || true
+        local tmp_dir; tmp_dir="$(mktemp -d)"
+        git clone https://aur.archlinux.org/1password.git "${tmp_dir}/1password" \
+            || { log_error "Failed to clone AUR package"; rm -rf "${tmp_dir}"; return 1; }
+        ( cd "${tmp_dir}/1password" && makepkg -si --noconfirm )
+        rm -rf "${tmp_dir}"
+    fi
+}
+
+_1password-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v 1password &>/dev/null; then
+        brew upgrade --cask 1password
+    else
+        brew install --cask 1password
+    fi
+}
+
+install-1password() {
+    log_info "Installing or updating 1Password desktop app..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _1password-install-mac
+            ;;
+        Linux)
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _1password-install-rhel   ;;
+                debian) _1password-install-debian ;;
+                suse)   _1password-install-suse   ;;
+                arch)   _1password-install-arch   ;;
+                *)
+                    # Flatpak fallback for unknown distros
+                    if command -v flatpak &>/dev/null; then
+                        log_info "Unknown distro — installing via Flatpak..."
+                        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+                        flatpak install -y flathub com.onepassword.OnePassword
+                        log_warn "Flatpak install: SSH agent and system auth integration are not available."
+                    else
+                        log_error "Unknown distro and flatpak not available — cannot install 1Password"
+                        return 1
+                    fi
+                    ;;
+            esac
+            ;;
+        *)
+            log_error "Unsupported OS for 1Password install"; return 1
+            ;;
+    esac
+
+    if command -v 1password &>/dev/null; then
+        log_info "1Password installed: $(1password --version 2>/dev/null | head -1)"
+    else
+        log_info "1Password installation complete. Launch from your application menu."
+    fi
+    echo
+    echo "  To enable CLI integration, open 1Password → Settings → Developer"
+    echo "  and enable 'Integrate with 1Password CLI'."
+}
+
+# ── 1Password CLI (op) install ────────────────────────────────────────────────
+# Official vendor repos per distro, matching the desktop app repo setup.
+# The 'op' binary needs the onepassword-cli group + setgid for biometric unlock
+# via the 1Password desktop app integration.
+#
+# After installing, enable the desktop app integration:
+#   1Password → Settings → Developer → Integrate with 1Password CLI
+# Then authenticate:
+#   op signin
+#   op vault list
+
+_op-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    ${elevation_cmd} mkdir -p /usr/share/keyrings
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        | ${elevation_cmd} gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
+        | ${elevation_cmd} tee /etc/apt/sources.list.d/1password.list > /dev/null
+
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y 1password-cli
+}
+
+_op-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+
+    # Repo may already exist from install-1password; rpm --import is idempotent
+    ${elevation_cmd} rpm --import https://downloads.1password.com/linux/keys/1password.asc
+
+    if [[ ! -f /etc/yum.repos.d/1password.repo ]]; then
+        ${elevation_cmd} sh -c 'echo -e "[1password]\nname=1Password Stable Channel\nbaseurl=https://downloads.1password.com/linux/rpm/stable/\$basearch\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=\"https://downloads.1password.com/linux/keys/1password.asc\"" > /etc/yum.repos.d/1password.repo'
+    fi
+
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf install -y 1password-cli
+    else
+        ${elevation_cmd} yum install -y 1password-cli
+    fi
+}
+
+_op-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+
+    ${elevation_cmd} rpm --import https://downloads.1password.com/linux/keys/1password.asc
+    if ! zypper lr 2>/dev/null | grep -qi '1password'; then
+        ${elevation_cmd} zypper addrepo https://downloads.1password.com/linux/rpm/stable/x86_64 1password
+    fi
+    ${elevation_cmd} zypper --gpg-auto-import-keys refresh
+    ${elevation_cmd} zypper install -y 1password-cli
+}
+
+_op-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v op &>/dev/null; then
+        brew upgrade --cask 1password-cli
+    else
+        brew install --cask 1password-cli
+    fi
+}
+
+# Root-free binary fallback — installs to ~/.local/bin.
+# Note: without the onepassword-cli group + setgid the desktop app biometric
+# integration won't work, but the CLI itself is fully functional.
+_op-install-binary() {
+    log_info "Installing op binary to ~/.local/bin (no root required)..."
+    command -v unzip &>/dev/null || { log_error "unzip is required"; return 1; }
+
+    local arch op_arch
+    arch="$(uname -m)"
+    case "${arch}" in
+        x86_64)        op_arch="amd64" ;;
+        aarch64|arm64) op_arch="arm64" ;;
+        i386|i686)     op_arch="386"   ;;
+        armv7l)        op_arch="arm"   ;;
+        *) log_error "Unsupported architecture: ${arch}"; return 1 ;;
+    esac
+
+    local version
+    version="$(curl -s https://app-updates.agilebits.com/product_history/CLI2 \
+        | grep -oP '(?<=<li class="[^"]*"><span class="version">)[^<]+' \
+        | head -1)"
+    # Fallback: use the stable direct-download URL which always points at latest
+    local zip_url="https://cache.agilebits.com/dist/1P/op2/pkg/v${version}/op_linux_${op_arch}_v${version}.zip"
+    if [[ -z "${version}" ]]; then
+        log_warn "Could not determine op version — using latest stable download URL"
+        zip_url="https://downloads.1password.com/linux/tar/stable/x86_64/1password-latest.tar.gz"
+        log_error "Binary fallback requires version detection — install via package manager instead"
+        return 1
+    fi
+
+    local tmp_dir; tmp_dir="$(mktemp -d)"
+    _download_file_robust "${zip_url}" "${tmp_dir}/op.zip" || { rm -rf "${tmp_dir}"; return 1; }
+    unzip -q "${tmp_dir}/op.zip" -d "${tmp_dir}"
+
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${tmp_dir}/op" "${HOME}/.local/bin/op"
+    rm -rf "${tmp_dir}"
+
+    log_info "op installed to ~/.local/bin/op"
+    log_warn "Installed without onepassword-cli group — biometric unlock via desktop app will not work."
+    log_warn "For full integration, re-install via package manager: install-op-cli"
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+install-op-cli() {
+    log_info "Installing or updating 1Password CLI (op)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _op-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _op-install-rhel   && ok=0 ;;
+                debian) _op-install-debian && ok=0 ;;
+                suse)   _op-install-suse   && ok=0 ;;
+                *)
+                    log_warn "No vendor repo for distro '${DOTFILES_DISTRO}' — using binary install"
+                    _op-install-binary && ok=0
+                    ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { log_error "1Password CLI install failed"; return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for op CLI install"; return 1
+            ;;
+    esac
+
+    if command -v op &>/dev/null; then
+        log_info "1Password CLI installed: $(op --version 2>/dev/null | head -1)"
+        echo
+        echo "  Enable desktop app integration first:"
+        echo "    1Password → Settings → Developer → Integrate with 1Password CLI"
+        echo
+        echo "  Then authenticate:"
+        echo "    op signin"
+        echo "    op vault list"
+    else
+        log_warn "op not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
 # ── GitHub CLI install ────────────────────────────────────────────────────────
 
 # DNF5 (Fedora 41+) and DNF4 use different config-manager syntax.
@@ -1171,6 +1447,108 @@ install-gh() {
         echo "    gh auth login"
     else
         log_warn "gh not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
+# ── GitLab CLI install ────────────────────────────────────────────────────────
+# Fedora/RHEL: in official dnf repos as 'glab'.
+# Arch: in extra/glab via pacman.
+# Debian/openSUSE: no official vendor repo — binary tarball fallback.
+# macOS: Homebrew.
+
+_glab-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf install -y glab
+    elif command -v yum &>/dev/null; then
+        ${elevation_cmd} yum install -y glab
+    else
+        log_error "Neither dnf nor yum found"; return 1
+    fi
+}
+
+_glab-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm glab
+}
+
+_glab-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v glab &>/dev/null; then brew upgrade glab; else brew install glab; fi
+}
+
+# Distro-independent fallback: latest release tarball → ~/.local/bin/glab
+_glab-install-tarball() {
+    log_info "Falling back to distro-independent binary from GitLab releases..."
+    command -v tar &>/dev/null || { log_error "tar is required for the fallback install"; return 1; }
+
+    local api_response ver ver_num machine arch os ext asset url tmp_dir bin
+    api_response="$(curl -s https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases \
+        | grep '"tag_name"' | head -1 \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    ver="${api_response}"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version (GitLab API unavailable?)"; return 1; }
+    ver_num="${ver#v}"
+
+    machine="$(uname -m)"
+    case "${machine}" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
+    esac
+
+    # GitLab release assets use the pattern: glab_<ver>_Linux_<arch>.tar.gz
+    asset="glab_${ver_num}_Linux_${arch}.tar.gz"
+    url="https://gitlab.com/gitlab-org/cli/-/releases/${ver}/downloads/${asset}"
+    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+    tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+
+    bin="$(find "${tmp_dir}" -type f -name glab -perm -u+x | head -1)"
+    if [[ -z "${bin}" ]]; then
+        log_error "glab binary not found in archive"; rm -rf "${tmp_dir}"; return 1
+    fi
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${bin}" "${HOME}/.local/bin/glab"
+    rm -rf "${tmp_dir}"
+    log_info "glab installed to ~/.local/bin/glab"
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+install-glab() {
+    log_info "Installing or updating GitLab CLI (glab)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _glab-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _glab-install-rhel   && ok=0 ;;
+                arch)   _glab-install-arch   && ok=0 ;;
+                debian) log_warn "No official apt repo for glab — using tarball install" ;;
+                suse)   log_warn "No official zypper repo for glab — using tarball install" ;;
+                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using tarball install" ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { _glab-install-tarball || return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for glab install"; return 1
+            ;;
+    esac
+
+    if command -v glab &>/dev/null; then
+        log_info "GitLab CLI installed: $(glab --version 2>/dev/null | head -1)"
+        echo
+        echo "  Authenticate with:"
+        echo "    glab auth login"
+    else
+        log_warn "glab not found in PATH after install. Restart your shell or check ~/.local/bin."
     fi
 }
 

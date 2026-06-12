@@ -23,27 +23,30 @@
 # names below. Adjust any that differ on your machines.
 _managed_tools_registry() {
     cat <<'EOF'
-tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
-terraform|terraform|_update_terraform|install-tenv|Terraform
-tofu|tofu|_update_tofu|install-tenv|OpenTofu
-cosign|cosign|install-cosign|install-cosign|cosign
+1password|1password|install-1password|install-1password|1Password Desktop
+ansible|ansible|install-ansible|install-ansible|Ansible
 aws|aws|_update_aws|aws-update|AWS CLI
 az|az|_update_az|az-update|Azure CLI
-kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
-helm|helm|install-helm|install-helm|Helm
-tflint|tflint|install-tflint|install-tflint|TFLint
-trivy|trivy|install-trivy|install-trivy|Trivy
-ansible|ansible|install-ansible|install-ansible|Ansible
-gh|gh|install-gh|install-gh|GitHub CLI
-nvm|nvm|install-nvm|install-nvm|nvm (Node)
-oh-my-posh|oh-my-posh|_update_omp|install-oh-my-posh|oh-my-posh
-oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
-edit|edit|install-edit|install-edit|Microsoft Edit
+bitwarden|bitwarden|install-bitwarden|install-bitwarden|Bitwarden Desktop
+bw|bw|install-bw-cli|install-bw-cli|Bitwarden CLI
 claude|claude|install-claude-code|install-claude-code|Claude Code
 copilot|copilot|install-copilot-cli|install-copilot-cli|GitHub Copilot CLI
-bw|bw|install-bw-cli|install-bw-cli|Bitwarden CLI
-bitwarden|bitwarden|install-bitwarden|install-bitwarden|Bitwarden Desktop
-noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
+cosign|cosign|install-cosign|install-cosign|cosign
+edit|edit|install-edit|install-edit|Microsoft Edit
+gh|gh|install-gh|install-gh|GitHub CLI
+glab|glab|install-glab|install-glab|GitLab CLI
+helm|helm|install-helm|install-helm|Helm
+kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
+oh-my-posh|oh-my-posh|_update_omp|install-oh-my-posh|oh-my-posh
+oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
+op|op|install-op-cli|install-op-cli|1Password CLI
+noteshub|noteshub|install-noteshub|install-noteshub|NotesHubgh|gh|install-gh|install-gh|GitHub CLI
+nvm|nvm|install-nvm|install-nvm|nvm (Node)
+tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
+terraform|terraform|_update_terraform|install-tenv|Terraform
+tflint|tflint|install-tflint|install-tflint|TFLint
+tofu|tofu|_update_tofu|install-tenv|OpenTofu
+trivy|trivy|install-trivy|install-trivy|Trivy
 EOF
 }
 

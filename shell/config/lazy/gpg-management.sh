@@ -96,6 +96,8 @@ _gpg_require_key() {
     fi
 }
 
+# ── Bitwarden CLI preflight helpers ────────────────────────────────────────────
+
 _gpg_require_bw() {
     if ! command -v bw &>/dev/null; then
         log_error "Bitwarden CLI (bw) is not installed"
@@ -117,6 +119,31 @@ _gpg_bw_logged_in() {
     if [[ "${bw_status}" != "unlocked" ]]; then
         log_error "Bitwarden vault is not unlocked (status: ${bw_status:-unknown})"
         log_error "Run: export BW_SESSION=\$(bw unlock --raw)"
+        return 1
+    fi
+}
+
+# ── 1Password CLI preflight helpers ──────────────────────────────────────────
+
+_gpg_require_op() {
+    if ! command -v op &>/dev/null; then
+        log_error "1Password CLI (op) is not installed"
+        log_error "Install it with: install-op-cli"
+        return 1
+    fi
+}
+
+_gpg_op_logged_in() {
+    # op whoami exits 0 when the desktop app integration is active and
+    # authenticated, non-zero otherwise. We accept both service-account
+    # tokens (OP_SERVICE_ACCOUNT_TOKEN set) and app integration.
+    if [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
+        return 0
+    fi
+    if ! op whoami &>/dev/null 2>&1; then
+        log_error "1Password CLI is not authenticated"
+        log_error "Enable: 1Password → Settings → Developer → Integrate with 1Password CLI"
+        log_error "Then run any op command to trigger authentication"
         return 1
     fi
 }
@@ -1163,6 +1190,193 @@ PYEOF
     echo "    gpg-remove-master ${fp}"
 }
 
+# gpg-export-1password
+# Export public key, secret key, and revocation certificate as 1Password
+# Secure Note items. Passphrase stored as a Login item.
+#
+# Note naming convention is identical to gpg-export-bitwarden:
+#   <type> — [<qualifier>] <uid> (<fingerprint>)
+#
+# Requires: op CLI, authenticated via desktop app integration or service account
+#
+# Usage:
+#   gpg-export-1password <fingerprint>
+#   gpg-export-1password <fingerprint> --name "work-laptop"
+#   gpg-export-1password <fingerprint> --vault "Secrets"
+#   gpg-export-1password <fingerprint> --master-only
+gpg-export-1password() {
+    local fp="${1:-}" custom_qualifier="" master_only="" vault_flag=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "${1}" in
+            --name)        custom_qualifier="${2:-}"; shift 2 ;;
+            --vault)       vault_flag="${2:-}";       shift 2 ;;
+            --master-only) master_only="--master-only";  shift ;;
+            *)             shift ;;
+        esac
+    done
+
+    if [[ -z "${fp}" ]]; then
+        fp="$(_gpg_prompt_key_id "Key fingerprint to back up")"
+    fi
+    _gpg_require_key "${fp}" || return 1
+    _gpg_require_op          || return 1
+    _gpg_op_logged_in        || return 1
+
+    local qualifier="${custom_qualifier:-$(hostname -s)}"
+    local uid
+    uid="$(gpg --list-keys --with-colons "${fp}" 2>/dev/null \
+        | awk -F: '/^uid/{print $10; exit}')"
+    local uid_part="${uid:-${fp}}"
+    local note_label="[${qualifier}] ${uid_part} (${fp})"
+
+    # Optional vault argument for op commands
+    local vault_arg=()
+    [[ -n "${vault_flag}" ]] && vault_arg=("--vault" "${vault_flag}")
+
+    # ── Passphrase capture ────────────────────────────────────────────────────
+    echo
+    echo "  ┌─────────────────────────────────────────────────────────────────┐"
+    echo "  │  PASSPHRASE CAPTURE                                             │"
+    echo "  │                                                                 │"
+    echo "  │  The passphrase will be stored as a 1Password Login item.       │"
+    echo "  │  Copy it from 1Password before continuing.                      │"
+    echo "  │                                                                 │"
+    echo "  │  Press Enter with no input to skip (add manually later).        │"
+    echo "  └─────────────────────────────────────────────────────────────────┘"
+    echo
+    local passphrase=""
+    _read_prompt_silent "  Passphrase (Enter to skip): " passphrase
+
+    local store_passphrase=false
+    if [[ -n "${passphrase}" ]]; then
+        local passphrase_confirm=""
+        _read_prompt_silent "  Confirm passphrase: " passphrase_confirm
+        if [[ "${passphrase}" != "${passphrase_confirm}" ]]; then
+            log_error "Passphrases do not match — skipping passphrase storage"
+            log_warn  "Re-run or add the passphrase manually in 1Password"
+            passphrase=""
+        else
+            store_passphrase=true
+        fi
+    else
+        log_warn "No passphrase entered — skipping Login item creation"
+    fi
+    echo
+
+    log_info "Exporting keys to 1Password for: ${note_label}"
+    echo
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d /tmp/gpg-op-XXXXXX)"
+    chmod 700 "${tmp_dir}"
+
+    local pub_file="${tmp_dir}/public.asc"
+    local sec_file="${tmp_dir}/secret.asc"
+    local sub_file="${tmp_dir}/subkeys.asc"
+    local rev_dir="${GNUPGHOME:-${HOME}/.gnupg}/revocations"
+    local rev_file="${rev_dir}/${fp}-revocation.asc"
+
+    gpg --armor --export "${fp}" > "${pub_file}"
+    gpg --armor --export-secret-keys "${fp}" > "${sec_file}"
+    chmod 600 "${sec_file}"
+
+    if [[ "${master_only}" != "--master-only" ]]; then
+        gpg --armor --export-secret-subkeys "${fp}" > "${sub_file}"
+        chmod 600 "${sub_file}"
+    fi
+
+    if [[ ! -f "${rev_file}" ]]; then
+        log_warn "No revocation certificate found — generating one now..."
+        mkdir -p "${rev_dir}"
+        chmod 700 "${rev_dir}"
+        gpg --output "${rev_file}" --gen-revoke "${fp}" || true
+        chmod 600 "${rev_file}" 2>/dev/null || true
+    fi
+
+    # _op_upsert_note <title> <body_file>
+    # Creates or updates a 1Password Secure Note. Reads body from file to
+    # avoid argv size/escaping issues with armoured key material.
+    _op_upsert_note() {
+        local item_title="${1}" body_file="${2}"
+        local body
+        body="$(cat "${body_file}")"
+
+        if op item get "${item_title}" "${vault_arg[@]}" &>/dev/null 2>&1; then
+            log_info "Updating existing 1Password note: ${item_title}"
+            op item edit "${item_title}" "${vault_arg[@]}" \
+                "notesPlain[text]=${body}" >/dev/null
+        else
+            log_info "Creating 1Password note: ${item_title}"
+            op item create "${vault_arg[@]}" \
+                --category "Secure Note" \
+                --title "${item_title}" \
+                "notesPlain[text]=${body}" >/dev/null
+        fi
+    }
+
+    # _op_upsert_login <title> <username> <password>
+    # Creates or updates a 1Password Login item for the passphrase.
+    _op_upsert_login() {
+        local item_title="${1}" username="${2}" password="${3}"
+
+        if op item get "${item_title}" "${vault_arg[@]}" &>/dev/null 2>&1; then
+            log_info "Updating existing 1Password Login item: ${item_title}"
+            op item edit "${item_title}" "${vault_arg[@]}" \
+                "password=${password}" >/dev/null
+        else
+            log_info "Creating 1Password Login item: ${item_title}"
+            op item create "${vault_arg[@]}" \
+                --category Login \
+                --title "${item_title}" \
+                "username=${username}" \
+                "password=${password}" >/dev/null
+        fi
+    }
+
+    _op_upsert_note "GPG Public Key — ${note_label}"    "${pub_file}"
+    _op_upsert_note "GPG Secret Key — ${note_label}"    "${sec_file}"
+
+    if [[ -f "${sub_file}" ]]; then
+        _op_upsert_note "GPG Subkeys Only — ${note_label}" "${sub_file}"
+    fi
+
+    if [[ -f "${rev_file}" ]]; then
+        _op_upsert_note "GPG Revocation Certificate — ${note_label}" "${rev_file}"
+    else
+        log_warn "No revocation certificate to store — generate one with: gpg-revoke ${fp}"
+    fi
+
+    if [[ "${store_passphrase}" == "true" ]]; then
+        _op_upsert_login \
+            "GPG Key Passphrase — ${note_label}" \
+            "${fp}" \
+            "${passphrase}"
+        passphrase=""
+        passphrase_confirm=""
+    fi
+
+    rm -rf "${tmp_dir}"
+
+    echo
+    log_info "1Password backup complete for ${fp}"
+    echo "  Stored items:"
+    echo "    • GPG Public Key — ${note_label}"
+    echo "    • GPG Secret Key — ${note_label}"
+    [[ "${master_only}" != "--master-only" ]] && \
+        echo "    • GPG Subkeys Only — ${note_label}"
+    [[ -f "${rev_file}" ]] && \
+        echo "    • GPG Revocation Certificate — ${note_label}"
+    [[ "${store_passphrase}" == "true" ]] && \
+        echo "    • GPG Key Passphrase — ${note_label}  (Login item)"
+    [[ -n "${vault_flag}" ]] && \
+        echo "  Vault: ${vault_flag}"
+    echo
+    echo "  When ready to take the master key offline:"
+    echo "    gpg-remove-master ${fp}"
+}
+
 # ── Import functions ──────────────────────────────────────────────────────────
 
 # gpg-import
@@ -1232,6 +1446,75 @@ if match:
     tmp_file="$(mktemp /tmp/gpg-import-XXXXXX.asc)"
     chmod 600 "${tmp_file}"
     echo "${note_content}" > "${tmp_file}"
+
+    _gpg_passphrase_ready_check "enter" || { rm -f "${tmp_file}"; return 1; }
+    log_info "Importing key..."
+    gpg --import "${tmp_file}"
+    local rc=$?
+    rm -f "${tmp_file}"
+
+    [[ ${rc} -eq 0 ]] && log_info "Import complete" || log_error "Import failed"
+    return ${rc}
+}
+
+# gpg-import-1password
+# Pull a secret key from a 1Password Secure Note and import it into the keyring.
+#
+# Usage:
+#   gpg-import-1password                       # interactive search
+#   gpg-import-1password "GPG Secret Key — …"  # by exact or partial title
+#   gpg-import-1password "GPG Secret Key — …" --vault "Secrets"
+gpg-import-1password() {
+    local note_name="${1:-}" vault_flag=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "${1}" in
+            --vault) vault_flag="${2:-}"; shift 2 ;;
+            *)       shift ;;
+        esac
+    done
+
+    _gpg_require_op   || return 1
+    _gpg_op_logged_in || return 1
+
+    local vault_arg=()
+    [[ -n "${vault_flag}" ]] && vault_arg=("--vault" "${vault_flag}")
+
+    if [[ -z "${note_name}" ]]; then
+        echo
+        log_info "Searching 1Password for GPG key notes..."
+        op item list "${vault_arg[@]}" --categories "Secure Note" --format json 2>/dev/null \
+            | python3 -c "
+import json, sys
+items = json.load(sys.stdin)
+gpg_items = [i for i in items if 'GPG' in i.get('title', '')]
+for i, item in enumerate(gpg_items):
+    print(f'  {i+1}. {item[\"title\"]}')
+" 2>/dev/null || \
+            op item list "${vault_arg[@]}" --categories "Secure Note" 2>/dev/null \
+                | grep -i "GPG" || true
+        echo
+        _read_prompt "  Note title (or partial match): " note_name
+    fi
+
+    [[ -z "${note_name}" ]] && { log_error "No title provided"; return 1; }
+
+    log_info "Fetching note: ${note_name}"
+    local note_content
+    note_content="$(op item get "${note_name}" "${vault_arg[@]}" \
+        --fields notesPlain 2>/dev/null)"
+
+    if [[ -z "${note_content}" ]]; then
+        log_error "No matching note found or note is empty"
+        log_error "Run: op item list --categories 'Secure Note' | grep GPG"
+        return 1
+    fi
+
+    local tmp_file
+    tmp_file="$(mktemp /tmp/gpg-import-XXXXXX.asc)"
+    chmod 600 "${tmp_file}"
+    printf '%s' "${note_content}" > "${tmp_file}"
 
     _gpg_passphrase_ready_check "enter" || { rm -f "${tmp_file}"; return 1; }
     log_info "Importing key..."
@@ -1451,6 +1734,137 @@ gpg-push-github() {
         # Exit 1 from gh gpg-key add usually means duplicate key
         log_warn "gh gpg-key add exited ${gh_exit} — key may already be registered"
         log_warn "Check: https://github.com/settings/keys"
+    fi
+
+    rm -f "${tmp_file}"
+}
+
+# ── GitLab integration ────────────────────────────────────────────────────────
+
+# gpg-push-gitlab
+# Push a GPG public key to the authenticated GitLab account.
+#
+# Usage:
+#   gpg-push-gitlab              # interactive key selection
+#   gpg-push-gitlab <key-id>     # skip selection prompt
+gpg-push-gitlab() {
+    local selected_keyid="${1:-}"
+
+    if ! command -v glab &>/dev/null; then
+        log_error "GitLab CLI (glab) is not installed"
+        log_error "Install it with: install-glab"
+        log_error "Then authenticate: glab auth login"
+        return 1
+    fi
+
+    local glab_user
+    if ! glab_user="$(glab api user --field login 2>/dev/null)"; then
+        log_error "GitLab CLI is not authenticated"
+        log_error "Run: glab auth login"
+        return 1
+    fi
+
+    # ── Key selection (same logic as gpg-push-github) ─────────────────────────
+    local -a key_ids=()
+    local -a key_labels=()
+    local cur_keyid="" cur_uids=() in_sec=false
+
+    while IFS=: read -r type _ _ _ _ _ _ _ _ uid _ _; do
+        case "${type}" in
+            sec)
+                if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
+                    key_ids+=("${cur_keyid}")
+                    key_labels+=("${cur_uids[0]}")
+                fi
+                cur_keyid="${uid}"; cur_uids=(); in_sec=true ;;
+            ssb) in_sec=false ;;
+            fpr) [[ "${in_sec}" == "true" && -z "${cur_keyid}" ]] && cur_keyid="${uid}" ;;
+            uid) cur_uids+=("${uid}") ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+    # Flush last key
+    if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
+        key_ids+=("${cur_keyid}")
+        key_labels+=("${cur_uids[0]}")
+    fi
+
+    # Filter to signing-capable keys only (same as gpg-push-github)
+    local -a sign_ids=() sign_labels=()
+    local k
+    for k in "${!key_ids[@]}"; do
+        if gpg --list-keys --with-colons "${key_ids[${k}]}" 2>/dev/null \
+                | awk -F: '/^(pub|sub)/{cap=$12} /^fpr/{if(cap~/s/){found=1}} END{exit !found}'; then
+            sign_ids+=("${key_ids[${k}]}")
+            sign_labels+=("${key_labels[${k}]}")
+        fi
+    done
+
+    if [[ ${#sign_ids[@]} -eq 0 ]]; then
+        log_error "No signing-capable keys found in local keyring"
+        return 1
+    fi
+
+    if [[ -n "${selected_keyid}" ]]; then
+        local found=0
+        for k in "${sign_ids[@]}"; do
+            [[ "${k}" == "${selected_keyid}" ]] && { found=1; break; }
+        done
+        [[ ${found} -eq 0 ]] && {
+            log_error "Key ID '${selected_keyid}' not found among local signing keys"
+            return 1
+        }
+    else
+        echo
+        echo "═══════════════════════════════════════════════════════════════════"
+        echo "  Push GPG Signing Key to GitLab"
+        echo "  GitLab account: ${glab_user}"
+        echo "═══════════════════════════════════════════════════════════════════"
+        echo
+        echo "  Available signing keys:"
+        echo
+        local i
+        for i in "${!sign_ids[@]}"; do
+            printf "  %2d)  Key ID: %s\n" "$((i + 1))" "${sign_ids[${i}]}"
+            printf "       UID:    %s\n" "${sign_labels[${i}]}"
+            echo
+        done
+        local choice
+        while true; do
+            _read_prompt "  Select key (1-${#sign_ids[@]}, or q to quit): " choice
+            [[ "${choice}" == "q" || "${choice}" == "Q" ]] && {
+                log_info "Aborted"; return 0
+            }
+            if [[ "${choice}" =~ ^[0-9]+$ ]] \
+                && (( choice >= 1 && choice <= ${#sign_ids[@]} )); then
+                selected_keyid="${sign_ids[$((choice - 1))]}"
+                break
+            fi
+            log_warn "Invalid selection — enter a number between 1 and ${#sign_ids[@]}"
+        done
+    fi
+
+    log_info "Selected key: ${selected_keyid}"
+
+    local tmp_file
+    tmp_file="$(mktemp /tmp/gpg-gitlab-XXXXXX.asc)"
+    chmod 600 "${tmp_file}"
+
+    if ! gpg --armor --export "${selected_keyid}" > "${tmp_file}" 2>/dev/null \
+            || [[ ! -s "${tmp_file}" ]]; then
+        log_error "Failed to export public key for ${selected_keyid}"
+        rm -f "${tmp_file}"
+        return 1
+    fi
+
+    # glab gpg-key add takes a file path directly (no --title flag)
+    log_info "Uploading GPG key to GitLab..."
+    if glab gpg-key add "${tmp_file}" 2>/dev/null; then
+        log_info "GPG key uploaded successfully"
+        log_info "View at: https://gitlab.com/-/profile/gpg_keys"
+    else
+        local glab_exit=$?
+        log_warn "glab gpg-key add exited ${glab_exit} — key may already be registered"
+        log_warn "Check: https://gitlab.com/-/profile/gpg_keys"
     fi
 
     rm -f "${tmp_file}"

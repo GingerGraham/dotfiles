@@ -148,6 +148,27 @@ gpg-github-keys() {
     gh gpg-key list
 }
 
+# gpg-gitlab-keys
+# List GPG keys currently registered on the authenticated GitLab account.
+# Requires: glab CLI, authenticated via 'glab auth login'.
+gpg-gitlab-keys() {
+    if ! command -v glab &>/dev/null; then
+        log_error "GitLab CLI (glab) is not installed"
+        log_error "Install it with: install-glab"
+        return 1
+    fi
+
+    if ! glab auth status &>/dev/null 2>&1; then
+        log_error "GitLab CLI is not authenticated"
+        log_error "Run: glab auth login"
+        return 1
+    fi
+
+    log_info "GPG keys registered on GitLab:"
+    echo
+    glab gpg-key list
+}
+
 # gpg-show
 # Show full details for a key identified by fingerprint, key ID, or email.
 #

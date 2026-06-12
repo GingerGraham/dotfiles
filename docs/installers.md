@@ -17,16 +17,19 @@ root is required.
 
 | Command               | Installs               | Method                                                                       |
 | --------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `install-gh`          | GitHub CLI (`gh`)      | Official package repo per distro, with a binary tarball fallback             |
-| `install-nvm`         | Node Version Manager   | Official `install.sh` (version auto-detected), then installs the current LTS |
-| `install-copilot-cli` | GitHub Copilot CLI     | npm global `@github/copilot`                                                 |
-| `install-claude-code` | Claude Code (`claude`) | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
+| `install-1password`     | 1Password Desktop      | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback |
+| `install-bitwarden`   | Bitwarden desktop app  | Vendor package per distro / Flatpak / Homebrew cask                          |
 | `install-bw-cli`      | Bitwarden CLI (`bw`)   | npm global `@bitwarden/cli`, with a binary fallback                          |
+| `install-claude-code` | Claude Code (`claude`) | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
+| `install-copilot-cli` | GitHub Copilot CLI     | npm global `@github/copilot`                                                 |
+| `install-edit`        | Microsoft Edit         | GitHub release tarball → `~/.local/bin`                                      |
+| `install-gh`          | GitHub CLI (`gh`)      | Official package repo per distro, with a binary tarball fallback             |
+| `install-glab`        | GitLab CLI (`glab`)    | Native dnf/pacman repo on Fedora/Arch; release tarball fallback                |
 | `install-oh-my-posh`  | oh-my-posh prompt      | Upstream install script / Homebrew                                           |
 | `install-oh-my-zsh`   | oh-my-zsh framework    | Upstream install script                                                      |
-| `install-edit`        | Microsoft Edit         | GitHub release tarball → `~/.local/bin`                                      |
+| `install-op-cli`     | 1Password CLI (`op`)   | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
+| `install-nvm`         | Node Version Manager   | Official `install.sh` (version auto-detected), then installs the current LTS |
 | `install-trivy`       | Trivy scanner          | Vendor repo per distro / Homebrew                                            |
-| `install-bitwarden`   | Bitwarden desktop app  | Vendor package per distro / Flatpak / Homebrew cask                          |
 
 ## GitHub CLI — `install-gh`
 
@@ -50,6 +53,38 @@ distro-independent binary: the latest release tarball from `cli/cli` is download
 and the `gh` binary is placed in `~/.local/bin`.
 
 Authenticate after install with `gh auth login`.
+
+## GitLab CLI — `install-glab`
+
+- **rhel** (Fedora, RHEL, Rocky, Alma): `glab` is in the official Fedora/RHEL repos — `dnf install glab`. No extra repo setup needed.
+- **arch** (Arch, Manjaro): `extra/glab` via pacman.
+- **debian** / **suse**: no official vendor apt/zypper repo exists — falls back to the latest release tarball from the GitLab releases API (`~/.local/bin`).
+- **macOS**: Homebrew (`brew install glab`) — the officially supported Linux/macOS method per upstream docs.
+
+Authenticate after install with `glab auth login`.
+
+## 1Password Desktop — `install-1password`
+
+Sets up the official 1Password apt/dnf/zypper repository and installs from there, so updates arrive via the package manager. Uses the same GPG key (`3FEF9748469ADBE15DA7CA80AC2D62742012EA22`) across all distros.
+
+- **rhel**: imports the key, writes `/etc/yum.repos.d/1password.repo`, installs `1password`.
+- **debian**: adds the keyring to `/usr/share/keyrings/`, adds the signed apt source, adds the debsig-verify policy, installs `1password`.
+- **suse**: imports the key, adds the RPM repo, installs `1password`.
+- **arch**: imports the signing key and builds from the official AUR package (via yay if available, otherwise manual `makepkg`).
+- **macOS**: Homebrew cask.
+- **unknown distro**: Flatpak from Flathub (`com.onepassword.OnePassword`) with a warning that SSH agent and system auth integration are unavailable.
+
+After install, open 1Password → Settings → Developer → **Integrate with 1Password CLI** to enable biometric unlock for `op`.
+
+## 1Password CLI — `install-op-cli`
+
+Installs the `op` command (1Password CLI v2) via vendor repos — the same repos as `install-1password`, so if you've already run that the repo is already in place.
+
+- **rhel** / **debian** / **suse**: repo install of the `1password-cli` package; sets the `onepassword-cli` group and setgid bit automatically, which is needed for biometric unlock via the desktop app.
+- **arch**: no vendor package — binary fallback to `~/.local/bin` with a warning that biometric unlock won't work without the group/setgid setup.
+- **macOS**: `brew install --cask 1password-cli`.
+
+Authenticate after install: open 1Password → Settings → Developer → enable integration, then run `op signin`.
 
 ## Node Version Manager — `install-nvm`
 

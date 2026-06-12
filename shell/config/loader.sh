@@ -222,6 +222,8 @@ if [[ "${DOTFILES_OFFLINE:-false}" != "true" ]]; then
     # shellcheck disable=SC1091
     command -v gh      &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/gh.sh" ]]         && source "${SHELL_CONFIG_DIR}/completions/gh.sh"
     # shellcheck disable=SC1091
+    command -v glab    &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/glab.sh" ]]       && source "${SHELL_CONFIG_DIR}/completions/glab.sh"
+    # shellcheck disable=SC1091
     command -v kubectl &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/kubernetes.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/kubernetes.sh"
 fi
 

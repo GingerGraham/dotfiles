@@ -5,7 +5,7 @@ GPG support spans two shell files:
 - `shell/config/tools/gpg.sh` — Tier 2, loaded whenever `gpg` is in `$PATH`. Fast inspection and listing functions always available.
 - `shell/config/lazy/gpg-management.sh` — Tier 3, lazy-loaded on first call. Interactive key lifecycle operations: creation, export, import, rotation, Bitwarden backup.
 
-The Bitwarden CLI installer (`install-bw-cli`) lives in `lazy/installers.sh` alongside the other install functions.
+The Bitwarden CLI installer (`install-bw-cli`) lives in `lazy/installers.sh` alongside the other install functions. Alternatively 1Password is also supported with the `install-op-cli` function and 1Password is supported as an export target.
 
 ## Key structure
 
