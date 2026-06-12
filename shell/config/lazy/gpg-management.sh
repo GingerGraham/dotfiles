@@ -1732,12 +1732,16 @@ gpg-push-gitlab() {
         return 1
     fi
 
-    local glab_user
-    if ! glab_user="$(glab api user --field login 2>/dev/null)"; then
+    local glab_status glab_user
+    if ! glab_status="$(glab auth status 2>&1)"; then
         log_error "GitLab CLI is not authenticated"
         log_error "Run: glab auth login"
         return 1
     fi
+
+    # Parse the username out of "✓ Logged in to gitlab.com as <user> (...)"
+    glab_user="$(printf '%s\n' "${glab_status}" | grep -oE 'as [^ ]+' | head -1 | cut -d' ' -f2)"
+    [[ -z "${glab_user}" ]] && glab_user="(unknown)"
 
     # ── Collect available signing keys ────────────────────────────────────────
     local signing_keys
