@@ -1612,8 +1612,7 @@ gpg-push-github() {
     fi
     log_info "Authenticated to GitHub as: ${gh_user}"
 
-    # ── Collect available signing keys into an array ──────────────────────────
-    # Parallel arrays: key IDs and their display labels
+    # ── Collect available signing keys into arrays ────────────────────────────
     local key_ids=()
     local key_labels=()
     local uids=()
@@ -1639,10 +1638,11 @@ gpg-push-github() {
                     exp_str="expires: ${exp_formatted}"
                 fi
 
-                # Build a label from all UIDs on this key
-                local label="${uids[0]}"
-                [[ ${#uids[@]} -gt 1 ]] && label+=" (+$((${#uids[@]} - 1)) more)"
-                label+="  [${exp_str}]"
+                # _array_get handles bash(0-based) vs zsh(1-based) transparently
+                local first_uid
+                first_uid="$(_array_get uids 1)"
+                local label="${first_uid}  [${exp_str}]"
+                [[ ${#uids[@]} -gt 1 ]] && label="${first_uid} (+$((${#uids[@]} - 1)) more)  [${exp_str}]"
 
                 key_ids+=("${keyid}")
                 key_labels+=("${label}")
@@ -1658,7 +1658,6 @@ gpg-push-github() {
 
     # ── Key selection ─────────────────────────────────────────────────────────
     if [[ -n "${selected_keyid}" ]]; then
-        # Validate the supplied key ID is in our list
         local found=0
         local k
         for k in "${key_ids[@]}"; do
@@ -1678,11 +1677,15 @@ gpg-push-github() {
         echo
         echo "  Available signing keys:"
         echo
-        local i
-        for i in "${!key_ids[@]}"; do
-            printf "  %2d)  Key ID: %s\n" "$((i + 1))" "${key_ids[${i}]}"
-            printf "       UID:    %s\n" "${key_labels[${i}]}"
+        # Use a counter rather than ${!array[@]} — bash-only index expansion
+        local i=1
+        local kid klabel
+        for kid in "${key_ids[@]}"; do
+            klabel="$(_array_get key_labels "${i}")"
+            printf "  %2d)  Key ID: %s\n" "${i}" "${kid}"
+            printf "       UID:    %s\n" "${klabel}"
             echo
+            i=$(( i + 1 ))
         done
 
         local choice
@@ -1694,7 +1697,7 @@ gpg-push-github() {
             }
             if [[ "${choice}" =~ ^[0-9]+$ ]] \
                 && (( choice >= 1 && choice <= ${#key_ids[@]} )); then
-                selected_keyid="${key_ids[$((choice - 1))]}"
+                selected_keyid="$(_array_get key_ids "${choice}")"
                 break
             fi
             log_warn "Invalid selection — enter a number between 1 and ${#key_ids[@]}"
@@ -1726,17 +1729,25 @@ gpg-push-github() {
 
     # ── Upload via gh CLI ─────────────────────────────────────────────────────
     log_info "Uploading GPG key to GitHub..."
-    if gh gpg-key add "${tmp_file}" --title "${key_title}" 2>/dev/null; then
+    local gh_output gh_exit
+    gh_output="$(gh gpg-key add "${tmp_file}" --title "${key_title}" 2>&1)"
+    gh_exit=$?
+
+    rm -f "${tmp_file}"
+
+    if [[ ${gh_exit} -eq 0 ]]; then
         log_info "GPG key uploaded successfully"
         log_info "View at: https://github.com/settings/keys"
     else
-        local gh_exit=$?
-        # Exit 1 from gh gpg-key add usually means duplicate key
-        log_warn "gh gpg-key add exited ${gh_exit} — key may already be registered"
-        log_warn "Check: https://github.com/settings/keys"
+        log_warn "gh gpg-key add exited ${gh_exit}"
+        if echo "${gh_output}" | grep -qi "already exists\|duplicate\|already registered"; then
+            log_warn "Key appears to already be registered on this GitHub account"
+        else
+            log_error "Upload failed: ${gh_output}"
+        fi
+        log_info "Check: https://github.com/settings/keys"
+        return 1
     fi
-
-    rm -f "${tmp_file}"
 }
 
 # ── GitLab integration ────────────────────────────────────────────────────────
@@ -1774,7 +1785,7 @@ gpg-push-gitlab() {
             sec)
                 if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
                     key_ids+=("${cur_keyid}")
-                    key_labels+=("${cur_uids[0]}")
+                    key_labels+=("$(_array_get cur_uids 1)")
                 fi
                 cur_keyid="${uid}"; cur_uids=(); in_sec=true ;;
             ssb) in_sec=false ;;
@@ -1785,18 +1796,21 @@ gpg-push-gitlab() {
     # Flush last key
     if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
         key_ids+=("${cur_keyid}")
-        key_labels+=("${cur_uids[0]}")
+        key_labels+=("$(_array_get cur_uids 1)")
     fi
 
     # Filter to signing-capable keys only (same as gpg-push-github)
     local -a sign_ids=() sign_labels=()
-    local k
-    for k in "${!key_ids[@]}"; do
-        if gpg --list-keys --with-colons "${key_ids[${k}]}" 2>/dev/null \
+    local i=1
+    local key_id key_label
+    for key_id in "${key_ids[@]}"; do
+        key_label="$(_array_get key_labels "${i}")"
+        if gpg --list-keys --with-colons "${key_id}" 2>/dev/null \
                 | awk -F: '/^(pub|sub)/{cap=$12} /^fpr/{if(cap~/s/){found=1}} END{exit !found}'; then
-            sign_ids+=("${key_ids[${k}]}")
-            sign_labels+=("${key_labels[${k}]}")
+            sign_ids+=("${key_id}")
+            sign_labels+=("${key_label}")
         fi
+        i=$(( i + 1 ))
     done
 
     if [[ ${#sign_ids[@]} -eq 0 ]]; then
@@ -1806,6 +1820,7 @@ gpg-push-gitlab() {
 
     if [[ -n "${selected_keyid}" ]]; then
         local found=0
+        local k
         for k in "${sign_ids[@]}"; do
             [[ "${k}" == "${selected_keyid}" ]] && { found=1; break; }
         done
@@ -1822,11 +1837,14 @@ gpg-push-gitlab() {
         echo
         echo "  Available signing keys:"
         echo
-        local i
-        for i in "${!sign_ids[@]}"; do
-            printf "  %2d)  Key ID: %s\n" "$((i + 1))" "${sign_ids[${i}]}"
-            printf "       UID:    %s\n" "${sign_labels[${i}]}"
+        local idx=1
+        local sid slabel
+        for sid in "${sign_ids[@]}"; do
+            slabel="$(_array_get sign_labels "${idx}")"
+            printf "  %2d)  Key ID: %s\n" "${idx}" "${sid}"
+            printf "       UID:    %s\n" "${slabel}"
             echo
+            idx=$(( idx + 1 ))
         done
         local choice
         while true; do
@@ -1836,7 +1854,7 @@ gpg-push-gitlab() {
             }
             if [[ "${choice}" =~ ^[0-9]+$ ]] \
                 && (( choice >= 1 && choice <= ${#sign_ids[@]} )); then
-                selected_keyid="${sign_ids[$((choice - 1))]}"
+                selected_keyid="$(_array_get sign_ids "${choice}")"
                 break
             fi
             log_warn "Invalid selection — enter a number between 1 and ${#sign_ids[@]}"
