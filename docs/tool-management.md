@@ -1,6 +1,32 @@
-# Tool Management — update-tools & Installation
+# Tool management
 
 The dotfiles shell config automates discovery, installation, and updates for 20+ development tools across all platforms. Tools are orchestrated through a registry-based system that lives in the lazy-loaded `maintenance.sh` module.
+
+## Table of Contents
+
+- [Quick reference](#quick-reference)
+- [Managed tools](#managed-tools)
+- [How update-tools works](#how-update-tools-works)
+  - [Detection](#detection)
+  - [Orchestration](#orchestration)
+- [How installers work](#how-installers-work)
+  - [Built-in installers](#built-in-installers)
+- [Updater functions](#updater-functions)
+  - [Writing a custom updater](#writing-a-custom-updater)
+- [The installer ↔ updater contract](#the-installer--updater-contract)
+- [Usage patterns](#usage-patterns)
+  - [Update everything](#update-everything)
+  - [Update a subset](#update-a-subset)
+  - [See what's installed](#see-whats-installed)
+  - [Install a single tool](#install-a-single-tool)
+  - [Check what installers are available](#check-what-installers-are-available)
+- [Troubleshooting](#troubleshooting)
+  - [Tool shows as "not installed" but it is](#tool-shows-as-not-installed-but-it-is)
+  - [Updater failed](#updater-failed)
+  - ["Unknown tool" error](#unknown-tool-error)
+  - [Installer hung or asks for interactive input](#installer-hung-or-asks-for-interactive-input)
+- [Advanced: how lazy installers load](#advanced-how-lazy-installers-load)
+- [See also](#see-also)
 
 ## Quick reference
 
@@ -16,7 +42,7 @@ update-tools --list        # Show all managed tools and install status
 The registry currently includes:
 
 | Tool | Detection | Install | Use case |
-|------|-----------|---------|----------|
+| --- | --- | --- | --- |
 | **tenv** | `command -v` | `install-tenv` | Manages terraform/tofu versions |
 | **terraform** | `command -v` | via tenv or `install-tenv` | Infrastructure as code |
 | **tofu** | `command -v` | via tenv or `install-tenv` | OpenTofu variant |
@@ -29,6 +55,7 @@ The registry currently includes:
 | **trivy** | `command -v` | `install-trivy` | Container vulnerability scanner |
 | **ansible** | `command -v` | `install-ansible` | Configuration management |
 | **gh** | `command -v` | `install-gh` | GitHub CLI |
+| **glab** | `command -v` | `install-glab` | GitLab CLI |
 | **nvm** | `command -v` | `install-nvm` | Node version manager |
 | **oh-my-posh** | `command -v` | `install-oh-my-posh` | Prompt engine |
 | **oh-my-zsh** | `path:~/.oh-my-zsh` | `install-oh-my-zsh` | Zsh framework |
@@ -37,6 +64,8 @@ The registry currently includes:
 | **copilot** | `command -v` | `install-copilot-cli` | GitHub Copilot CLI |
 | **bw** | `command -v` | `install-bw-cli` | Bitwarden CLI |
 | **bitwarden** | `command -v` | `install-bitwarden` | Bitwarden Desktop |
+| **op** | `command -v` | `install-op-cli` | 1Password CLI |
+| **1password** | `command -v` | `install-1password` | 1Password Desktop |
 | **noteshub** | `command -v` | `install-noteshub` | NotesHub |
 
 ## How update-tools works
@@ -46,10 +75,13 @@ The registry currently includes:
 Each tool has a **detection token**:
 
 - **`command -v`** — tool is in `$PATH`
+
   ```bash
-  kubectl | aws | helm | gh | nvm | ...
+  kubectl | aws | helm | gh | glab | nvm | ...
   ```
+
 - **`path:<file>`** — tool is at a specific filesystem location (not PATH)
+
   ```bash
   path:~/.oh-my-zsh    # oh-my-zsh is always in ~/.oh-my-zsh
   ```
@@ -69,7 +101,7 @@ When you run `update-tools`:
 
 Example output:
 
-```
+```text
 == update-tools: refreshing managed tools ==
 [INFO]  -- Terraform --
 [INFO]  tenv: installing latest tf ...
@@ -96,6 +128,7 @@ install-ansible       # Installs or updates Ansible
 ```
 
 Calling an installer directly:
+
 - **First time** — downloads and installs the tool
 - **Subsequent runs** — updates to the latest version
 - **Runs standalone** — no connection to `update-tools` required
@@ -109,6 +142,8 @@ All `install-*` commands are discoverable:
 ```bash
 installers             # Lists all available install-* commands (same as get-my-installers)
 ```
+
+See [installers.md](installers.md) for a per-tool reference, including the GitLab CLI, Bitwarden, and 1Password installers.
 
 ## Updater functions
 
@@ -132,8 +167,8 @@ If you add a new tool to the registry, define an updater in `lazy/maintenance.sh
 
 ```bash
 _update_mytool() {
-    _update_ensure_fn mytool-update tools/mytool.sh || { 
-        log_warn "mytool-update not available"; 
+    _update_ensure_fn mytool-update tools/mytool.sh || {
+        log_warn "mytool-update not available";
         return 1
     }
     mytool-update
@@ -149,6 +184,7 @@ The `_update_ensure_fn` helper sources the tool file only if the function isn't 
 When you add an `install-<tool>` function:
 
 1. **Add a row to the registry** in `_managed_tools_registry()`:
+
    ```bash
    mytool|command -v mytool|_update_mytool|install-mytool|My Tool
    ```
@@ -156,13 +192,15 @@ When you add an `install-<tool>` function:
    OR
 
 2. **Add to the allowlist** in `tests/check-updater-coverage.sh` with a one-line justification:
+
    ```bash
    install-mytool-pinned        # Pinned version variant; manual updates only
    ```
 
 **Enforcement:** `bash tests/check-updater-coverage.sh` runs on every PR and verifies:
+
+- Every installer function is referenced by the registry or the allowlist
 - Every updater/installer named in the registry actually exists as a defined function
-- Every installer has a corresponding updater (or explicit allowlist entry with justification)
 - No typos or renamed functions slip through
 
 Failing the test blocks the PR.
@@ -192,7 +230,8 @@ update-tools --list
 ```
 
 Shows a table:
-```
+
+```text
 TOOL          INSTALLED  DESCRIPTION
 tenv          yes        tenv (Terraform/OpenTofu)
 terraform     yes        Terraform
@@ -274,5 +313,7 @@ This makes shell startup fast — all ~25 installer functions are lazy-loaded on
 
 - [shell-config.md](shell-config.md) — Shell architecture and lazy loading
 - [installation.md](installation.md) — Initial bootstrap and first-run setup
+- [installers.md](installers.md) — Per-tool installer reference
+- [gpg.md](gpg.md) — GPG key management, password manager backup, and signing key publishing
 - `lazy/maintenance.sh` — Complete updater/registry implementation
 - `lazy/installers.sh` — All installer function implementations

@@ -1,8 +1,27 @@
 # Shell configuration
 
-## Overview
-
 Shell config lives at `~/.config/shell/` — an XDG-compliant directory that is a symlink back into the dotfiles repo. Editing any file there takes effect in the next shell session with no Ansible re-run required.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Loading order](#loading-order)
+- [Three loading tiers](#three-loading-tiers)
+  - [Tier 1 — Eager, always](#tier-1--eager-always)
+  - [Tier 2 — Conditional eager](#tier-2--conditional-eager)
+  - [Tier 3 — Lazy](#tier-3--lazy)
+- [Prompt engine selection](#prompt-engine-selection)
+- [Exported variables](#exported-variables)
+- [Machine-local overrides](#machine-local-overrides)
+- [Shell introspection](#shell-introspection)
+- [Migration from an existing shell config](#migration-from-an-existing-shell-config)
+- [Tool installation & management](#tool-installation--management)
+  - [Installers (lazy/installers.sh)](#installers-lazyinstallerssh)
+  - [Maintenance (lazy/maintenance.sh)](#maintenance-lazymaintenancesh)
+- [Lazy loading architecture](#lazy-loading-architecture)
+- [Repo layout](#repo-layout)
+
+## Overview
 
 Both `~/.bashrc` and `~/.zshrc` are thin stubs that do one thing: source `~/.config/shell/loader.sh`. All logic lives there.
 
@@ -33,32 +52,32 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 
 `env/` and `core/` load unconditionally on every shell start. Files here must be fast — no subprocesses, no network calls.
 
-| File                    | Purpose                                                   |
-| ----------------------- | --------------------------------------------------------- |
-| `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history          |
-| `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                 |
-| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks    |
-| `env/90-local.sh`       | Machine-local overrides — created once, never overwritten |
-| `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)         |
-| `core/functions.sh`     | Shell introspection (`get-my-functions`, `dedupe-path`)   |
-| `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                       |
+| File | Purpose |
+| --- | --- |
+| `env/00-core.sh` | XDG paths, base PATH extensions, locale, history |
+| `env/10-editors.sh` | `EDITOR`, `VISUAL`, pager |
+| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks |
+| `env/90-local.sh` | Machine-local overrides — created once, never overwritten |
+| `core/aliases.sh` | Navigation aliases (`ls`, `cd`, common shortcuts) |
+| `core/functions.sh` | Shell introspection (`get-my-functions`, `dedupe-path`) |
+| `core/ssh.sh` | SSH agent helpers, `list-ssh-hosts` |
 
 ### Tier 2 — Conditional eager
 
 `tools/`, `platform/`, and `distro/` files load only when the relevant condition is true. Each `tools/` file guards itself at the top with `command -v <tool> &>/dev/null || return 0`.
 
-| File            | Guard                            | Contents                                                    |
-| --------------- | -------------------------------- | ----------------------------------------------------------- |
-| `git.sh`        | `command -v git`                 | Git aliases, worktree helpers, project management functions |
-| `kubernetes.sh` | `command -v kubectl`             | `k` alias, context/namespace helpers                        |
-| `terraform.sh`  | `command -v terraform` or `tofu` | Workspace aliases, install helper                           |
-| `ansible.sh`    | `command -v ansible`             | Playbook aliases, vault helpers                             |
-| `containers.sh` | `docker` or `podman`             | Container aliases, image management                         |
-| `aws.sh`        | `command -v aws`                 | Profile switching, region helpers                           |
-| `azure.sh`      | `command -v az`                  | Subscription switching, login helpers                       |
-| `security.sh`   | `clamscan` or `sonar-scanner`    | AV scan aliases, scanner shortcut                           |
-| `gpg.sh`        | `command -v gpg`                 | Key listing, signing key lookup for git, agent helpers      |
-| `go.sh`         | `command -v go`                  | GOPATH helpers, module aliases                              |
+| File | Guard | Contents |
+| --- | --- | --- |
+| `git.sh` | `command -v git` | Git aliases, worktree helpers, project management functions |
+| `kubernetes.sh` | `command -v kubectl` | `k` alias, context/namespace helpers |
+| `terraform.sh` | `command -v terraform` or `tofu` | Workspace aliases, install helper |
+| `ansible.sh` | `command -v ansible` | Playbook aliases, vault helpers |
+| `containers.sh` | `docker` or `podman` | Container aliases, image management |
+| `aws.sh` | `command -v aws` | Profile switching, region helpers |
+| `azure.sh` | `command -v az` | Subscription switching, login helpers |
+| `security.sh` | `clamscan` or `sonar-scanner` | AV scan aliases, scanner shortcut |
+| `gpg.sh` | `command -v gpg` | Key listing, signing key lookup for git, agent helpers |
+| `go.sh` | `command -v go` | GOPATH helpers, module aliases |
 
 Platform and distro files add platform-specific aliases, PATH entries, and environment setup. `platform/wsl.sh` is sourced **in addition to** `platform/linux.sh` on WSL systems (not instead of it).
 
@@ -72,11 +91,11 @@ Platform and distro files add platform-specific aliases, PATH entries, and envir
 gpg-create-key
 ```
 
-| File                | Contents                                                                                                                    |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `installers.sh`     | `install-*` functions (gh, nvm, copilot-cli, claude-code, bw-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
-| `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                   |
-| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export, Bitwarden backup/restore                                         |
+| File | Contents |
+| --- | --- |
+| `installers.sh` | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
+| `maintenance.sh` | `update-tools` — orchestrated update of all managed tools |
+| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab) |
 
 Use `get-my-installers` (alias: `installers`) to list all available lazy install commands.
 
@@ -91,15 +110,15 @@ Use `get-my-installers` (alias: `installers`) to list all available lazy install
 
 ## Exported variables
 
-| Variable                  | Values                                          | Set by            |
-| ------------------------- | ----------------------------------------------- | ----------------- |
-| `DOTFILES_OS`             | `Linux` / `Mac`                                 | `loader.sh`       |
-| `DOTFILES_WSL`            | `true` / `false`                                | `loader.sh`       |
-| `DOTFILES_DISTRO`         | `rhel` / `debian` / `suse` / `arch` / `unknown` | `loader.sh`       |
-| `DOTFILES_SHELL`          | `bash` / `zsh` / `sh`                           | `loader.sh`       |
-| `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`)             | `env/90-local.sh` |
-| `SHELL_CONFIG_DIR`        | `~/.config/shell`                               | `loader.sh`       |
-| `DOTFILES_REPO_DIR`       | path to repo                                    | `env/00-core.sh`  |
+| Variable | Values | Set by |
+| --- | --- | --- |
+| `DOTFILES_OS` | `Linux` / `Mac` | `loader.sh` |
+| `DOTFILES_WSL` | `true` / `false` | `loader.sh` |
+| `DOTFILES_DISTRO` | `rhel` / `debian` / `suse` / `arch` / `unknown` | `loader.sh` |
+| `DOTFILES_SHELL` | `bash` / `zsh` / `sh` | `loader.sh` |
+| `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`) | `env/90-local.sh` |
+| `SHELL_CONFIG_DIR` | `~/.config/shell` | `loader.sh` |
+| `DOTFILES_REPO_DIR` | path to repo | `env/00-core.sh` |
 
 ## Machine-local overrides
 
@@ -129,13 +148,13 @@ get-my-installers   # Lists lazy install-* commands (alias: installers)
 
 If `~/.bashrc`, `~/.zshrc`, or `~/.zshenv` exists as a real file (not already a symlink) when `install.sh` runs, the shell role backs it up:
 
-```
+```text
 ~/.config/dotfiles/migration/<filename>.pre-dotfiles.bak
 ```
 
 A warning is printed on every shell start until the backup directory is cleared:
 
-```
+```text
 [WARN]  Migration pending: review backup files and merge any needed content
         into env/90-local.sh, then remove ~/.config/dotfiles/migration/ to
         clear this warning.
@@ -147,13 +166,11 @@ After porting any content you want to keep into `env/90-local.sh`:
 rm -rf ~/.config/dotfiles/migration/
 ```
 
----
-
 ## Tool installation & management
 
 Shell config includes two lazy-loaded modules for tool discovery and updates:
 
-### Installers (`lazy/installers.sh`)
+### Installers (lazy/installers.sh)
 
 Every development tool supported by dotfiles has an `install-<tool>` function. These are lazy-loaded — the first call sources the file; subsequent calls use the cached function.
 
@@ -169,7 +186,7 @@ installers   # Alias for get-my-installers
 
 Installers are safe to call repeatedly; they detect the current version and skip re-download if already up-to-date.
 
-### Maintenance (`lazy/maintenance.sh`)
+### Maintenance (lazy/maintenance.sh)
 
 The `update-tools` command orchestrates all managed tool updates from a central registry:
 
@@ -184,7 +201,7 @@ update-tools terraform aws kubectl
 update-tools --list
 ```
 
-The registry includes ~20 tools (Terraform, Helm, Kubernetes, AWS, Azure, Ansible, GitHub CLI, Node/nvm, etc.). Each tool has:
+The registry includes ~20 tools (Terraform, Helm, Kubernetes, AWS, Azure, Ansible, GitHub CLI, GitLab CLI, Bitwarden, 1Password, Node/nvm, etc.). Each tool has:
 
 - A **detection method** — checks if it's installed (via `command -v` or file path)
 - An **updater function** — runs the appropriate update mechanism
@@ -192,7 +209,7 @@ The registry includes ~20 tools (Terraform, Helm, Kubernetes, AWS, Azure, Ansibl
 
 This decouples tool management from system package managers, allowing you to use version managers like tenv (for Terraform/OpenTofu) or nvm (for Node) alongside system-provided tools.
 
-**See [docs/tool-management.md](../tool-management.md) for the complete registry, how to add new tools, and troubleshooting.**
+See [tool-management.md](tool-management.md) for the complete registry, how to add new tools, and troubleshooting.
 
 ## Lazy loading architecture
 
@@ -212,11 +229,9 @@ To inspect lazy stubs:
 declare -f | grep "unset -f"
 ```
 
----
-
 ## Repo layout
 
-```
+```text
 shell/
 ├── bashrc                  # Thin stub → sources loader.sh
 ├── zshrc                   # Thin stub → sources loader.sh
@@ -250,6 +265,6 @@ shell/
     │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, etc.
     │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
     │   │                       # Coordinates install-* commands and automatic updates
-    │   └── gpg-management.sh   # GPG key creation, rotation, export, Bitwarden backup
+    │   └── gpg-management.sh   # GPG key creation, rotation, export/import, signing key publishing
     └── completions/        # Same tool guards as tools/
 ```

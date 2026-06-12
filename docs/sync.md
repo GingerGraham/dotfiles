@@ -2,6 +2,18 @@
 
 The sync role installs a background timer that keeps the dotfiles repo up to date automatically. It runs as your user — never root — and respects a `DEV_MODE` flag so active development work is not disrupted.
 
+## Table of Contents
+
+- [How it works](#how-it-works)
+- [Sync config](#sync-config)
+- [dotfiles-branch](#dotfiles-branch)
+  - [Typical development workflow](#typical-development-workflow)
+  - [Status output](#status-output)
+- [Checking timer status directly](#checking-timer-status-directly)
+- [Manual sync](#manual-sync)
+- [Disabling sync](#disabling-sync)
+- [Logs](#logs)
+
 ## How it works
 
 On Linux and WSL2 a systemd user timer fires once at login and then daily. On macOS a launchd agent handles the same cadence. Each run:
@@ -31,7 +43,7 @@ Edit this file directly to change behaviour. Ansible updates only `REPO_URL` whe
 
 The `dotfiles-branch` command (deployed to `~/.local/bin/dotfiles-branch` by the sync role, sourced from `scripts/switch-branch.sh`) is the recommended way to manage branch switching and dev mode.
 
-```
+```text
 dotfiles-branch — manage dotfiles sync branch and dev mode
 
 Usage:
@@ -64,7 +76,7 @@ dotfiles-branch --dev
 
 ### Status output
 
-```
+```text
   Dotfiles sync status
   ────────────────────────────────────
   Repo:             /home/user/Projects/Personal/GitHub/dotfiles
@@ -77,7 +89,7 @@ dotfiles-branch --dev
 
 If the working copy branch does not match the configured `GIT_BRANCH`, the status output appends:
 
-```
+```text
   *** working copy does not match configured branch ***
 ```
 
@@ -121,7 +133,7 @@ launchctl unload ~/Library/LaunchAgents/com.dotfiles.sync.plist
 ## Logs
 
 | Path | Contents |
-|---|---|
+| --- | --- |
 | `~/.local/share/dotfiles/logs/sync.log` | Main dotfiles sync log |
 | `~/.local/state/nvim-config-sync/logs/sync.log` | nvim-config sync log (if nvim role enabled) |
 | `~/.local/share/ai-config-sync/logs/sync.log` | ai-config sync log (if ai-tools role enabled) |

@@ -81,51 +81,6 @@ _gpg_passphrase_ready_check() {
     return 0
 }
 
-# _gpg_collect_signing_keys
-# Print one line per signing-capable ([S]) subkey in the local secret
-# keyring, as "<long-key-id><TAB><label>". Label is the first UID on the
-# key, with a "(+N more)" suffix if there are additional UIDs, plus an
-# expiry annotation.
-#
-# Used by gpg-push-github and gpg-push-gitlab so both present and validate
-# against exactly the same set of keys — the long key ID of the signing
-# subkey itself, matching the output of gpg-list-signing-keys.
-_gpg_collect_signing_keys() {
-    local type keyid expiry uid caps
-    local -a uids=()
-
-    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
-        case "${type}" in
-            sec|pub)
-                uids=()
-                ;;
-            uid)
-                [[ -n "${uid}" ]] && uids+=("${uid}")
-                ;;
-            ssb|sub)
-                [[ "${caps}" != *s* ]] && continue
-                [[ ${#uids[@]} -eq 0 ]] && continue
-
-                local exp_str="no expiry"
-                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
-                    local exp_formatted
-                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
-                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
-                        || echo "${expiry}")"
-                    exp_str="expires: ${exp_formatted}"
-                fi
-
-                local first_uid label
-                first_uid="$(_array_get uids 1)"
-                label="${first_uid}  [${exp_str}]"
-                [[ ${#uids[@]} -gt 1 ]] && label="${first_uid} (+$((${#uids[@]} - 1)) more)  [${exp_str}]"
-
-                printf '%s\t%s\n' "${keyid}" "${label}"
-                ;;
-        esac
-    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
-}
-
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 _gpg_require_key() {

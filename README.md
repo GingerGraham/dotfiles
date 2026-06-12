@@ -5,6 +5,19 @@ Manages shell configuration, git identity, SSH key structure, Neovim config, and
 
 > **Forking this repo?** The bootstrap URL below points to `GingerGraham/dotfiles`. Update it to your own fork's raw URL before sharing or using your fork's one-liner.
 
+## Table of Contents
+
+- [dotfiles](#dotfiles)
+  - [Table of Contents](#table-of-contents)
+  - [Quick start](#quick-start)
+  - [Documentation](#documentation)
+  - [Supported platforms](#supported-platforms)
+  - [Supported integrations](#supported-integrations)
+    - [Git providers](#git-providers)
+    - [Password managers](#password-managers)
+  - [Prerequisites](#prerequisites)
+  - [Keeping tools updated](#keeping-tools-updated)
+
 ## Quick start
 
 ```bash
@@ -17,26 +30,49 @@ See the [docs/](docs/) directory for full documentation.
 
 ## Documentation
 
-| Document                                                   | Contents                                                      |
-| ---------------------------------------------------------- | ------------------------------------------------------------- |
-| [docs/installation.md](docs/installation.md)               | Bootstrap, `install.sh` reference, all CLI options            |
-| [docs/profiles.md](docs/profiles.md)                       | Workstation, server, and minimal profiles                     |
+| Document | Contents |
+| --- | --- |
+| [docs/installation.md](docs/installation.md) | Bootstrap, `install.sh` reference, all CLI options |
+| [docs/profiles.md](docs/profiles.md) | Workstation, server, and minimal profiles |
 | [docs/optional-components.md](docs/optional-components.md) | nvim and ai-tools roles — what they do and how to enable them |
-| [docs/shell-config.md](docs/shell-config.md)               | Shell loading architecture, tiers, local overrides            |
-| [docs/tool-management.md](docs/tool-management.md)         | **NEW** — update-tools, installers, and the registry          |
-| [docs/sync.md](docs/sync.md)                               | Background sync, DEV_MODE, branch switching                   |
-| [docs/gpg.md](docs/gpg.md)                                 | GPG key management, Bitwarden backup, git signing setup       |
+| [docs/shell-config.md](docs/shell-config.md) | Shell loading architecture, tiers, local overrides |
+| [docs/tool-management.md](docs/tool-management.md) | `update-tools`, installers, and the managed tools registry |
+| [docs/installers.md](docs/installers.md) | Per-tool installer reference (`install-*` functions) |
+| [docs/sync.md](docs/sync.md) | Background sync, DEV_MODE, branch switching |
+| [docs/gpg.md](docs/gpg.md) | GPG key management, password manager backup, git provider signing setup |
 
 ## Supported platforms
 
-| Platform                     | Status       |
-| ---------------------------- | ------------ |
-| Fedora / RHEL / Rocky / Alma | ✅ Primary   |
-| Ubuntu / Debian / Pop!\_OS   | ✅ Supported |
-| openSUSE Tumbleweed / SLES   | ✅ Supported |
+| Platform | Status |
+| --- | --- |
+| Fedora / RHEL / Rocky / Alma | ✅ Primary |
+| Ubuntu / Debian / Pop!\_OS | ✅ Supported |
+| openSUSE Tumbleweed / SLES | ✅ Supported |
 | Arch / Manjaro / EndeavourOS | ✅ Supported |
-| macOS                        | ✅ Supported |
-| WSL2 (systemd enabled)       | ✅ Supported |
+| macOS | ✅ Supported |
+| WSL2 (systemd enabled) | ✅ Supported |
+
+## Supported integrations
+
+### Git providers
+
+Git identity is managed per `context`/`provider` pair (see [docs/installation.md](docs/installation.md) and the [git role](ansible/roles/git/README.md)). Any provider can be configured this way — `provider` is a free-text label used to build the directory path, profile name, and `includeIf` block. The following are tested and have first-class support elsewhere in the system (CLI installers, GPG key publishing, known-host pre-trust):
+
+| Provider | CLI installer | GPG signing key publishing |
+| --- | --- | --- |
+| GitHub | `install-gh` | `gpg-push-github` |
+| GitLab | `install-glab` | `gpg-push-gitlab` |
+
+Bitbucket, Azure DevOps, and other providers work as `context`/`provider` pairs but do not currently have a dedicated CLI installer or GPG publishing helper.
+
+### Password managers
+
+GPG key backup, restore, and rotation (see [docs/gpg.md](docs/gpg.md)) support two password managers. Use whichever matches your vault, or both:
+
+| Password manager | Desktop installer | CLI installer | GPG functions |
+| --- | --- | --- | --- |
+| Bitwarden | `install-bitwarden` | `install-bw-cli` | `gpg-*-bitwarden` |
+| 1Password | `install-1password` | `install-op-cli` | `gpg-*-1password` |
 
 ## Prerequisites
 
@@ -48,7 +84,7 @@ See the [docs/](docs/) directory for full documentation.
 
 Pass `--no-prereqs` to skip this check if they are already present.
 
-## After-setup: keeping tools updated
+## Keeping tools updated
 
 Once dotfiles is installed, you can manage 20+ development tools with a single command:
 
@@ -63,6 +99,6 @@ update-tools terraform aws kubectl
 update-tools --list
 ```
 
-No manual downloads or version tracking required. Supported tools include Terraform, Helm, Kubernetes, AWS CLI, Azure CLI, Ansible, GitHub CLI, Node/nvm, and more.
+No manual downloads or version tracking required. Supported tools include Terraform, Helm, Kubernetes, AWS CLI, Azure CLI, Ansible, GitHub CLI, GitLab CLI, Bitwarden, 1Password, Node/nvm, and more.
 
 See [docs/tool-management.md](docs/tool-management.md) for the complete list, how to install individual tools, and how to add new tools to the registry.

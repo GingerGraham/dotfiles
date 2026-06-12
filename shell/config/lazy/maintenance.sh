@@ -40,7 +40,8 @@ kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
 oh-my-posh|oh-my-posh|_update_omp|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
 op|op|install-op-cli|install-op-cli|1Password CLI
-noteshub|noteshub|install-noteshub|install-noteshub|NotesHubgh|gh|install-gh|install-gh|GitHub CLI
+opendeck|opendeck|install-opendeck|install-opendeck|Opendeck
+noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
 tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
 terraform|terraform|_update_terraform|install-tenv|Terraform

@@ -2,10 +2,20 @@
 
 A profile controls which Ansible roles run on a machine. It is set in `ansible/host_vars/localhost.yml` and governs what gets deployed.
 
+## Table of Contents
+
+- [Available profiles](#available-profiles)
+- [Choosing a profile](#choosing-a-profile)
+- [Setting the profile](#setting-the-profile)
+  - [At install time](#at-install-time)
+  - [Changing the profile later](#changing-the-profile-later)
+- [Fine-grained overrides](#fine-grained-overrides)
+- [Extra roles](#extra-roles)
+
 ## Available profiles
 
 | Profile | Roles activated |
-|---|---|
+| --- | --- |
 | `workstation` | common, shell, git, ssh, tmux, vim, nvim\*, ai-tools\*, sync |
 | `server` | common, shell, git, ssh, tmux, vim, sync |
 | `minimal` | common, shell, git, ssh |

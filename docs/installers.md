@@ -13,23 +13,41 @@ the upstream supports it. User-scope binaries are placed in `~/.local/bin`; when
 package manager's npm prefix is system-owned the install is redirected there so no
 root is required.
 
+## Table of Contents
+
+- [Available installers](#available-installers)
+- [GitHub CLI — install-gh](#github-cli--install-gh)
+- [GitLab CLI — install-glab](#gitlab-cli--install-glab)
+- [1Password Desktop — install-1password](#1password-desktop--install-1password)
+- [1Password CLI — install-op-cli](#1password-cli--install-op-cli)
+- [Node Version Manager — install-nvm](#node-version-manager--install-nvm)
+- [GitHub Copilot CLI — install-copilot-cli](#github-copilot-cli--install-copilot-cli)
+- [Claude Code — install-claude-code](#claude-code--install-claude-code)
+- [Node prerequisite (shared)](#node-prerequisite-shared)
+
 ## Available installers
 
-| Command               | Installs               | Method                                                                       |
-| --------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `install-1password`     | 1Password Desktop      | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback |
-| `install-bitwarden`   | Bitwarden desktop app  | Vendor package per distro / Flatpak / Homebrew cask                          |
-| `install-bw-cli`      | Bitwarden CLI (`bw`)   | npm global `@bitwarden/cli`, with a binary fallback                          |
-| `install-claude-code` | Claude Code (`claude`) | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
-| `install-copilot-cli` | GitHub Copilot CLI     | npm global `@github/copilot`                                                 |
-| `install-edit`        | Microsoft Edit         | GitHub release tarball → `~/.local/bin`                                      |
-| `install-gh`          | GitHub CLI (`gh`)      | Official package repo per distro, with a binary tarball fallback             |
-| `install-glab`        | GitLab CLI (`glab`)    | Native dnf/pacman repo on Fedora/Arch; release tarball fallback                |
-| `install-oh-my-posh`  | oh-my-posh prompt      | Upstream install script / Homebrew                                           |
-| `install-oh-my-zsh`   | oh-my-zsh framework    | Upstream install script                                                      |
-| `install-op-cli`     | 1Password CLI (`op`)   | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
-| `install-nvm`         | Node Version Manager   | Official `install.sh` (version auto-detected), then installs the current LTS |
-| `install-trivy`       | Trivy scanner          | Vendor repo per distro / Homebrew                                            |
+| Command | Installs | Method |
+| --- | --- | --- |
+| `install-1password` | 1Password Desktop | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback |
+| `install-bitwarden` | Bitwarden desktop app | Vendor package per distro / Flatpak / Homebrew cask |
+| `install-bw-cli` | Bitwarden CLI (`bw`) | npm global `@bitwarden/cli`, with a binary fallback |
+| `install-claude-code` | Claude Code (`claude`) | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback |
+| `install-copilot-cli` | GitHub Copilot CLI | npm global `@github/copilot` |
+| `install-edit` | Microsoft Edit | GitHub release tarball → `~/.local/bin` |
+| `install-gh` | GitHub CLI (`gh`) | Official package repo per distro, with a binary tarball fallback |
+| `install-glab` | GitLab CLI (`glab`) | Native dnf/pacman repo on Fedora/Arch; release tarball fallback |
+| `install-oh-my-posh` | oh-my-posh prompt | Upstream install script / Homebrew |
+| `install-oh-my-zsh` | oh-my-zsh framework | Upstream install script |
+| `install-op-cli` | 1Password CLI (`op`) | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
+| `install-noteshub` | NotesHub | GitHub release `.deb`/`.rpm` via package manager |
+| `install-nvm` | Node Version Manager | Official `install.sh` (version auto-detected), then installs the current LTS |
+| `install-trivy` | Trivy scanner | Vendor repo per distro / Homebrew |
+
+GPG key backup/restore and signing-key publishing build on the password manager
+and git provider CLIs above — see [gpg.md](gpg.md) for the `gpg-*-bitwarden`,
+`gpg-*-1password`, `gpg-push-github`, and `gpg-push-gitlab` functions. Update
+orchestration for all of the above is covered in [tool-management.md](tool-management.md).
 
 ## GitHub CLI — `install-gh`
 
@@ -38,8 +56,8 @@ Uses GitHub's official package repository for the detected distro family:
 - **rhel** (Fedora, RHEL, Rocky, Alma): adds `gh-cli.repo`. DNF5 (Fedora 41+) and
   DNF4 use different `config-manager` syntax; the function detects which is present
   (`dnf5-plugins` + `config-manager addrepo` on DNF5, `dnf-command(config-manager)`
-  - `config-manager --add-repo` on DNF4) and uses `yum-config-manager` on yum-only
-    hosts.
+  + `config-manager --add-repo` on DNF4) and uses `yum-config-manager` on yum-only
+  hosts.
 - **debian** (Ubuntu, Debian, Mint): installs the keyring to
   `/etc/apt/keyrings/githubcli-archive-keyring.gpg` and adds the signed
   `github-cli.list` source.
@@ -108,7 +126,7 @@ when active. In a non-interactive shell the system Node is left untouched.
 
 Installs the npm package `@github/copilot` (the `@github/copilot-cli` and
 `@githubnext/*` names are deprecated). Requires **Node.js 22+**; if npm is missing
-it is provisioned via nvm or the package manager (see _Node prerequisite_ below),
+it is provisioned via nvm or the package manager (see [Node prerequisite](#node-prerequisite-shared) below),
 and the function refuses with guidance if the active Node is older than 22.
 
 Launch `copilot` to authenticate with your GitHub account. Requires an active

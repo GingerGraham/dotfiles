@@ -148,6 +148,213 @@ gpg-github-keys() {
     gh gpg-key list
 }
 
+# ── Signing-key resolution for git-add-project / git-update-project ──────────
+#
+# _gpg_collect_signing_keys
+# Print one line per signing-capable ([S]) subkey in the local secret
+# keyring, as "<long-key-id><TAB><label>". Label is the first UID on the
+# key, with a "(+N more)" suffix if there are additional UIDs, plus an
+# expiry annotation.
+#
+# Used by gpg-push-github and gpg-push-gitlab so both present and validate
+# against exactly the same set of keys — the long key ID of the signing
+# subkey itself, matching the output of gpg-list-signing-keys.
+#
+# (Relocated here from lazy/gpg-management.sh — tools/gpg.sh is eager-loaded
+# whenever gpg is present, so this is reachable from git.sh as well.)
+_gpg_collect_signing_keys() {
+    local type keyid expiry uid caps
+    local -a uids=()
+
+    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
+        case "${type}" in
+            sec|pub)
+                uids=()
+                ;;
+            uid)
+                [[ -n "${uid}" ]] && uids+=("${uid}")
+                ;;
+            ssb|sub)
+                [[ "${caps}" != *s* ]] && continue
+                [[ ${#uids[@]} -eq 0 ]] && continue
+
+                local exp_str="no expiry"
+                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
+                    local exp_formatted
+                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || echo "${expiry}")"
+                    exp_str="expires: ${exp_formatted}"
+                fi
+
+                local first_uid label
+                first_uid="$(_array_get uids 1)"
+                label="${first_uid}  [${exp_str}]"
+                [[ ${#uids[@]} -gt 1 ]] && label="${first_uid} (+$((${#uids[@]} - 1)) more)  [${exp_str}]"
+
+                printf '%s\t%s\n' "${keyid}" "${label}"
+                ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+}
+
+# _gpg_master_for_key <key-id>
+# Given a key ID/fingerprint (master OR subkey, long-keyid or full fpr,
+# case-insensitive, optional "0x" prefix already stripped by caller),
+# print the long key ID of the master [sec] key it belongs to.
+# Prints nothing and returns non-zero if not found locally.
+_gpg_master_for_key() {
+    local target="$1"
+    gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: -v target="${target}" '
+        $1=="sec" {
+            cur_master=$5
+            if (tolower(cur_master)==target) { print cur_master; exit }
+        }
+        $1=="ssb" {
+            cur_sub=$5
+            if (tolower(cur_sub)==target) { print cur_master; exit }
+        }
+        $1=="fpr" {
+            fp=tolower($10)
+            short=substr(fp, length(fp)-15)
+            if (fp==target || short==target) { print cur_master; exit }
+        }
+    '
+}
+
+# _gpg_signing_subkeys_for_master <master-long-keyid>
+# Print "<keyid><TAB><fingerprint><TAB><expiry-label>" for each [S]-capable
+# subkey belonging to the given master key. Empty output means the master
+# has no signing-capable subkey.
+_gpg_signing_subkeys_for_master() {
+    local target="$1"
+    local cur_master="" pending_id="" pending_exp=""
+    local type keyid expiry fpr caps
+
+    while IFS=: read -r type _ _ _ keyid _ expiry _ _ fpr _ caps _; do
+        case "${type}" in
+            sec)
+                cur_master="${keyid}"
+                pending_id=""
+                ;;
+            ssb)
+                pending_id=""
+                if [[ "${cur_master}" == "${target}" && "${caps}" == *s* ]]; then
+                    pending_id="${keyid}"
+                    pending_exp="${expiry}"
+                fi
+                ;;
+            fpr)
+                if [[ -n "${pending_id}" ]]; then
+                    local exp_str="no expiry"
+                    if [[ -n "${pending_exp}" && "${pending_exp}" != "0" ]]; then
+                        exp_str="expires: $(date -d "@${pending_exp}" '+%Y-%m-%d' 2>/dev/null \
+                            || date -r "${pending_exp}" '+%Y-%m-%d' 2>/dev/null \
+                            || echo "${pending_exp}")"
+                    fi
+                    printf '%s\t%s\t%s\n' "${pending_id}" "${fpr}" "${exp_str}"
+                    pending_id=""
+                fi
+                ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+}
+
+# _gpg_resolve_signing_key <key-id>
+#
+# Validates a key ID intended for git's user.signingkey and corrects the
+# common mistake of supplying a master/primary key ID (or its fingerprint)
+# instead of its signing-capable [S] subkey.
+#
+# stdout: the key ID to actually use — ONLY this, so this function is safe
+#         to call as: key="$(_gpg_resolve_signing_key "${input}")"
+# stderr: all log_info/log_warn/log_error diagnostics
+#
+# Return codes:
+#   0  resolved (possibly unchanged) — stdout has the key to use
+#   1  the supplied key has no signing-capable subkey — caller should abort
+#
+# Cases:
+#   - <key-id> already matches an [S] subkey of its master (by keyid or
+#     fingerprint)         → returned unchanged
+#   - <key-id> is the master, or a non-signing subkey:
+#       - exactly one [S] subkey on that master  → warns and switches to it
+#       - more than one [S] subkey on that master → interactive selection
+#       - no [S] subkey on that master            → error, returns 1
+#   - <key-id> not found in the local secret keyring → warns and returns
+#     it unchanged (it may live on a smartcard or another machine)
+_gpg_resolve_signing_key() {
+    local input="${1:-}"
+    [[ -z "${input}" ]] && return 0
+
+    local target
+    target="$(_str_lower "${input#0x}")"
+
+    local master
+    master="$(_gpg_master_for_key "${target}")"
+
+    if [[ -z "${master}" ]]; then
+        log_warn "Key '${input}' was not found in the local secret keyring" >&2
+        log_warn "Proceeding with it as supplied — verify it is correct" >&2
+        log_warn "Run gpg-list-signing-keys to see available signing subkeys" >&2
+        printf '%s\n' "${input}"
+        return 0
+    fi
+
+    local signing
+    signing="$(_gpg_signing_subkeys_for_master "${master}")"
+
+    if [[ -z "${signing}" ]]; then
+        log_error "Key '${input}' has no signing-capable [S] subkey" >&2
+        log_error "Create one with: gpg-add-subkey ${master}" >&2
+        return 1
+    fi
+
+    # Already a valid [S] subkey of this master (matched by keyid or fpr)?
+    local kid fpr label
+    while IFS=$'\t' read -r kid fpr label; do
+        if [[ "$(_str_lower "${kid}")" == "${target}" || "$(_str_lower "${fpr}")" == "${target}" ]]; then
+            printf '%s\n' "${input}"
+            return 0
+        fi
+    done <<< "${signing}"
+
+    local count
+    count="$(printf '%s\n' "${signing}" | wc -l | tr -d ' ')"
+
+    log_warn "Key '${input}' is a master/primary key (or non-signing subkey), not a signing subkey" >&2
+
+    if [[ "${count}" -eq 1 ]]; then
+        local resolved
+        resolved="$(printf '%s\n' "${signing}" | cut -f1)"
+        log_warn "Switching to its signing subkey: ${resolved}" >&2
+        printf '%s\n' "${resolved}"
+        return 0
+    fi
+
+    log_warn "It has multiple signing subkeys — choose one:" >&2
+    echo >&2
+
+    local -a menu_ids=()
+    local i=1
+    while IFS=$'\t' read -r kid fpr label; do
+        printf "  %2d)  Key ID: %s  (%s)\n" "${i}" "${kid}" "${label}" >&2
+        menu_ids+=("${kid}")
+        i=$(( i + 1 ))
+    done <<< "${signing}"
+    echo >&2
+
+    local choice
+    while true; do
+        _read_prompt "  Select signing key (1-${#menu_ids[@]}): " choice
+        if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#menu_ids[@]} )); then
+            printf '%s\n' "$(_array_get menu_ids "${choice}")"
+            return 0
+        fi
+        log_warn "Invalid selection — enter a number between 1 and ${#menu_ids[@]}" >&2
+    done
+}
+
 # gpg-gitlab-keys
 # List GPG keys currently registered on the authenticated GitLab account.
 # Requires: glab CLI, authenticated via 'glab auth login'.

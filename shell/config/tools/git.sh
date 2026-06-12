@@ -431,6 +431,13 @@ git-add-project() {
 
     _git_require_yq || return 1
 
+    # Validate/resolve the signing key — corrects the common mistake of
+    # supplying a master key ID (or its fingerprint) instead of its [S]
+    # signing subkey.
+    if [[ -n "${signing_key}" ]] && command -v gpg &>/dev/null; then
+        signing_key="$(_gpg_resolve_signing_key "${signing_key}")" || return 1
+    fi
+
     local manifest; manifest="$(_git_manifest)"
     if [[ ! -f "${manifest}" ]]; then
         log_error "Manifest not found: ${manifest}"
@@ -520,12 +527,16 @@ git-update-project() {
                 updated=true; shift 2 ;;
             --signing-key)
                 [[ -z "${2:-}" ]] && { log_error "--signing-key requires a value"; return 1; }
-                git config --file "${profile_path}" user.signingkey "${2}"
+                local resolved_key="${2}"
+                if command -v gpg &>/dev/null; then
+                    resolved_key="$(_gpg_resolve_signing_key "${2}")" || return 1
+                fi
+                git config --file "${profile_path}" user.signingkey "${resolved_key}"
                 git config --file "${profile_path}" commit.gpgsign true
                 git config --file "${profile_path}" tag.gpgsign true
-                _git_manifest_update_field   "${context}" "${provider}" signing_key "${2}"
-                _git_host_vars_update_field  "${context}" "${provider}" signing_key "${2}"
-                log_info "Updated signing key → ${2}"
+                _git_manifest_update_field   "${context}" "${provider}" signing_key "${resolved_key}"
+                _git_host_vars_update_field  "${context}" "${provider}" signing_key "${resolved_key}"
+                log_info "Updated signing key → ${resolved_key}"
                 updated=true; shift 2 ;;
             --name)
                 [[ -z "${2:-}" ]] && { log_error "--name requires a value"; return 1; }

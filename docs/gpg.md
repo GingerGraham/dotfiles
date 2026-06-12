@@ -3,15 +3,31 @@
 GPG support spans two shell files:
 
 - `shell/config/tools/gpg.sh` — Tier 2, loaded whenever `gpg` is in `$PATH`. Fast inspection and listing functions always available.
-- `shell/config/lazy/gpg-management.sh` — Tier 3, lazy-loaded on first call. Interactive key lifecycle operations: creation, export, import, rotation, Bitwarden backup.
+- `shell/config/lazy/gpg-management.sh` — Tier 3, lazy-loaded on first call. Interactive key lifecycle operations: creation, export, import, rotation, and backup.
 
-The Bitwarden CLI installer (`install-bw-cli`) lives in `lazy/installers.sh` alongside the other install functions. Alternatively 1Password is also supported with the `install-op-cli` function and 1Password is supported as an export target.
+These functions integrate with two password managers for key backup (**Bitwarden** and **1Password**) and two git providers for publishing your signing key (**GitHub** and **GitLab**). Use whichever combination matches your setup — function names follow the pattern `gpg-<action>-<service>`, so an equivalent exists for each supported service.
+
+## Table of Contents
+
+- [Key structure](#key-structure)
+- [Prerequisites](#prerequisites)
+- [Typical workflow: new machine setup](#typical-workflow-new-machine-setup)
+- [Key lifecycle](#key-lifecycle)
+  - [Adding UIDs (email aliases)](#adding-uids-email-aliases)
+  - [Extending expiry](#extending-expiry)
+  - [Rotating a subkey](#rotating-a-subkey)
+  - [Restoring the master key temporarily](#restoring-the-master-key-temporarily)
+  - [New machine from existing backup](#new-machine-from-existing-backup)
+- [Publishing your signing key](#publishing-your-signing-key)
+- [Agent management](#agent-management)
+- [Function reference](#function-reference)
+- [GPG_TTY](#gpg_tty)
 
 ## Key structure
 
 The recommended structure created by `gpg-create-key` is a master key with separate subkeys for each capability:
 
-```
+```text
 Master key  [C]    certify only — sign other keys and subkeys
   └─ Subkey [S]    sign — git commits, tags, files
   └─ Subkey [E]    encrypt — files and secrets
@@ -21,16 +37,18 @@ Master key  [C]    certify only — sign other keys and subkeys
 The master key is used only for certifying: creating subkeys, signing other people's keys, and extending expiry. Day-to-day operations use subkeys exclusively. This means:
 
 - If a subkey is compromised, it can be revoked and replaced without losing your identity
-- The master key can be exported and stored offline (Bitwarden, encrypted USB) and then **removed from the local keyring** so it is never exposed during normal use
+- The master key can be exported and stored offline (Bitwarden, 1Password, encrypted USB) and then **removed from the local keyring** so it is never exposed during normal use
 - Git commit signing uses the `[S]` subkey fingerprint, not the master key
 
-When the master key is needed again (adding a subkey, extending expiry, certifying another key), import it from Bitwarden, perform the operation, then remove it again.
+When the master key is needed again (adding a subkey, extending expiry, certifying another key), import it from your backup, perform the operation, then remove it again.
 
 ## Prerequisites
 
 `gpg` must be installed. On Fedora it is present by default; on Ubuntu/Debian install `gnupg2`. The `gpg.sh` tools file guards itself with `command -v gpg` and will not load if GPG is absent.
 
-For Bitwarden export/import functions, the `bw` CLI must also be installed and your vault must be unlocked:
+For backup and restore functions, install and authenticate **one or both** of the supported password manager CLIs. The function families work identically — pick whichever matches your vault.
+
+### Bitwarden (`bw`)
 
 ```bash
 install-bw-cli                          # install the headless CLI
@@ -40,6 +58,28 @@ export BW_SESSION=$(bw unlock --raw)    # unlock and capture session token
 
 `BW_SESSION` must be set in the current shell for any `gpg-*-bitwarden` function to work. It is not persisted across sessions by design — re-run the `export` line after each login.
 
+### 1Password (`op`)
+
+```bash
+install-op-cli                          # 1Password CLI only
+# or, for biometric unlock support:
+install-1password                       # 1Password desktop app
+op signin                                # authenticate (not needed if using
+                                          # desktop app biometric integration)
+```
+
+`gpg-*-1password` functions accept an optional `--vault <name>` to target a specific vault; without it, `op`'s default vault is used.
+
+### Backup naming convention
+
+Both families store the same set of items — public key, secret key, subkeys-only, revocation certificate, and an optional passphrase — using the naming convention:
+
+```text
+<type> — [<qualifier>] <uid> (<fingerprint>)
+```
+
+`<qualifier>` defaults to the short hostname (`hostname -s`) so backups from different machines are distinct and never clobber each other. Override it with `--name <label>`.
+
 ## Typical workflow: new machine setup
 
 ### 1. Check for existing keys
@@ -48,12 +88,17 @@ export BW_SESSION=$(bw unlock --raw)    # unlock and capture session token
 gpg-list-signing-keys
 ```
 
-If you have keys backed up in Bitwarden, import them instead of creating new ones:
+If you have keys backed up already, import them instead of creating new ones:
 
 ```bash
+# Bitwarden
 export BW_SESSION=$(bw unlock --raw)
 gpg-import-bitwarden          # search vault interactively
-gpg-trust <fingerprint>       # set ultimate trust on your own key
+
+# 1Password
+gpg-import-1password          # search vault interactively
+
+gpg-trust <fingerprint>        # set ultimate trust on your own key
 ```
 
 ### 2. Create a new key set
@@ -74,29 +119,37 @@ Do this immediately after key creation, before the key is used anywhere:
 gpg-revoke <fingerprint>
 ```
 
-The certificate is saved to `~/.gnupg/revocations/<fingerprint>-revocation.asc`. It is also stored as part of the Bitwarden backup in the next step. If your key is ever compromised, importing this certificate and uploading it to a keyserver revokes the key publicly.
+The certificate is saved to `~/.gnupg/revocations/<fingerprint>-revocation.asc`. It is also stored as part of your backup in the next step. If your key is ever compromised, importing this certificate and uploading it to a keyserver revokes the key publicly.
 
-### 4. Back up to Bitwarden
+### 4. Back up your keys
 
 ```bash
+# Bitwarden
 export BW_SESSION=$(bw unlock --raw)
 gpg-export-bitwarden <fingerprint>
+
+# 1Password
+gpg-export-1password <fingerprint>
+# target a specific vault:
+gpg-export-1password <fingerprint> --vault "Secrets"
 ```
 
-This stores four Bitwarden secure notes:
+Each stores four items:
 
-| Note name | Contents |
+| Item name | Contents |
 |---|---|
-| `GPG Public Key — <uid> (<fp>)` | Armoured public key |
-| `GPG Secret Key — <uid> (<fp>)` | Full secret key (master + subkeys) |
-| `GPG Subkeys Only — <uid> (<fp>)` | Subkeys only, no master key material |
-| `GPG Revocation Certificate — <uid> (<fp>)` | Revocation certificate |
+| `GPG Public Key — [<host>] <uid> (<fp>)` | Armoured public key |
+| `GPG Secret Key — [<host>] <uid> (<fp>)` | Full secret key (master + subkeys) |
+| `GPG Subkeys Only — [<host>] <uid> (<fp>)` | Subkeys only, no master key material |
+| `GPG Revocation Certificate — [<host>] <uid> (<fp>)` | Revocation certificate |
 
-Re-running `gpg-export-bitwarden` after a rotation updates the existing notes rather than creating duplicates.
+If a passphrase is entered when prompted, it is also stored as a separate Login item: `GPG Key Passphrase — [<host>] <uid> (<fp>)`.
+
+Re-running either export after a rotation updates the existing items rather than creating duplicates.
 
 ### 5. Remove the master key from local keyring
 
-Once the master key is backed up, remove its secret material from this machine:
+Once your keys are backed up, remove the master key's secret material from this machine:
 
 ```bash
 gpg-remove-master <fingerprint>
@@ -117,6 +170,8 @@ This prints the long key ID of your `[S]` subkey and the exact `git-add-project`
 ```bash
 git-add-project Personal GitHub your@email.com <signing-subkey-id>
 ```
+
+The same applies for any other provider — substitute `GitLab`, `Bitbucket`, `AzureDevOps`, etc. for the context's `provider` value.
 
 Or to add signing to an existing project:
 
@@ -146,10 +201,11 @@ gpg-add-uid <master-fingerprint> # non-interactive key selection
 Common use cases:
 
 - GitHub noreply address: `<id>+username@users.noreply.github.com`
+- GitLab noreply address: `<id>-<username>@users.noreply.gitlab.com`
 - Work email alias
 - Alternate personal address
 
-GitHub verifies signed commits against **any UID on the key** — you do not need to set the GitHub noreply address as the primary UID, and doing so is usually wrong. Leave your real email as primary.
+Both GitHub and GitLab verify signed commits against **any UID on the key** — you do not need to set a provider's noreply address as the primary UID, and doing so is usually wrong. Leave your real email as primary.
 
 After `gpg-add-uid` completes, the new UID will show as `[ unknown]` trust in `gpg --list-keys`. This is expected — ownertrust is set on the key as a whole, not per-UID, but GPG resets the display state when a UID is added. The function re-applies ultimate ownertrust automatically. If you see `[ unknown]` persisting, run:
 
@@ -157,19 +213,19 @@ After `gpg-add-uid` completes, the new UID will show as `[ unknown]` trust in `g
 gpg-trust <master-fingerprint>
 ```
 
-Re-export to Bitwarden after adding a UID so your backup reflects the new identity:
+Re-export your backup after adding a UID so it reflects the new identity:
 
 ```bash
-gpg-export-bitwarden <master-fingerprint>
+gpg-export-bitwarden <master-fingerprint>     # or: gpg-export-1password
 ```
 
 The master secret key must be present locally to add a UID. If it has been removed, import it first, add the UID, re-export, then remove it again:
 
 ```bash
 export BW_SESSION=$(bw unlock --raw)
-gpg-import-bitwarden
+gpg-import-bitwarden          # or: gpg-import-1password
 gpg-add-uid <fingerprint>
-gpg-export-bitwarden <fingerprint>
+gpg-export-bitwarden <fingerprint>    # or: gpg-export-1password
 gpg-remove-master <fingerprint>
 ```
 
@@ -183,9 +239,9 @@ This extends both the master key and all subkeys. The master secret key must be 
 
 ```bash
 export BW_SESSION=$(bw unlock --raw)
-gpg-import-bitwarden
+gpg-import-bitwarden                  # or: gpg-import-1password
 gpg-extend-expiry <fingerprint> 2y
-gpg-export-bitwarden <fingerprint>    # update backup with new expiry
+gpg-export-bitwarden <fingerprint>    # or: gpg-export-1password — update backup with new expiry
 gpg-remove-master <fingerprint>       # take master offline again
 ```
 
@@ -202,35 +258,66 @@ Interactive mode (no arguments) will list available subkeys and prompt for each 
 After rotation:
 
 1. Update git projects that reference the old subkey ID: `git-update-project <ctx> <prov> --signing-key <new-subkey-id>`
-2. Re-export to Bitwarden: `gpg-export-bitwarden <master-fp>`
+2. Re-export your backup: `gpg-export-bitwarden <master-fp>` (or `gpg-export-1password`)
 3. Remove master again: `gpg-remove-master <master-fp>`
 
 ### Restoring the master key temporarily
 
 ```bash
+# Bitwarden
 export BW_SESSION=$(bw unlock --raw)
 gpg-import-bitwarden                  # imports the full secret key
+
+# 1Password
+gpg-import-1password                  # imports the full secret key
+
 # ... perform master-key operations ...
-gpg-export-bitwarden <fingerprint>    # update backup if anything changed
+
+gpg-export-bitwarden <fingerprint>    # or: gpg-export-1password — update backup if anything changed
 gpg-remove-master <fingerprint>       # take it offline again
 ```
 
 ### New machine from existing backup
 
 ```bash
+# Bitwarden
 export BW_SESSION=$(bw unlock --raw)
 gpg-import-bitwarden "GPG Subkeys Only — …"   # import subkeys only
+
+# 1Password
+gpg-import-1password "GPG Subkeys Only — …"   # import subkeys only
+
 gpg-trust <fingerprint>                        # set ultimate trust
 ```
 
-Import the subkeys-only note rather than the full secret key — there is no reason to put the master key on a new daily-use machine.
+Import the subkeys-only item rather than the full secret key — there is no reason to put the master key on a new daily-use machine.
+
+A key exported to a file can also be imported directly:
 
 ```bash
 gpg-import ~/transfer/gpg-<fp>-subkeys-only.asc
 gpg-trust <fingerprint>
 ```
 
-### Agent management
+## Publishing your signing key
+
+Once your signing subkey exists, publish its public key to your git provider so signed commits show as verified.
+
+```bash
+gpg-push-github     # interactive key selection
+gpg-push-gitlab     # interactive key selection
+```
+
+Both accept an explicit key ID to skip interactive selection, e.g. `gpg-push-github <key-id>`. Each requires the matching provider CLI to be installed and authenticated first:
+
+```bash
+install-gh    && gh auth login      # for gpg-push-github
+install-glab  && glab auth login    # for gpg-push-gitlab
+```
+
+`gpg-push-github` reports duplicates if the key is already registered; `gpg-push-gitlab` does the same.
+
+## Agent management
 
 ```bash
 gpg-agent-restart    # restart the agent after config changes
@@ -267,10 +354,14 @@ gpg-card-status      # show YubiKey / smartcard status
 | `gpg-export [fp] [dir]` | Export public and full secret key to files |
 | `gpg-export-master [fp] [dir]` | Export master key secret material only |
 | `gpg-export-subkeys [fp] [dir]` | Export subkeys-only (no master key material) |
-| `gpg-export-bitwarden [fp]` | Back up all key material as Bitwarden secure notes |
+| `gpg-export-bitwarden [fp] [--name <label>] [--master-only]` | Back up all key material to Bitwarden |
+| `gpg-export-1password [fp] [--name <label>] [--vault <name>] [--master-only]` | Back up all key material to 1Password |
 | `gpg-import <file>` | Import a key from an armoured file |
 | `gpg-import-bitwarden [note-name]` | Import a key from a Bitwarden secure note |
+| `gpg-import-1password [item-name] [--vault <name>]` | Import a key from a 1Password item |
 | `gpg-trust [fp] [level]` | Set owner trust (default: `ultimate`) |
+| `gpg-push-github [key-id]` | Push a public signing key to the authenticated GitHub account |
+| `gpg-push-gitlab [key-id]` | Push a public signing key to the authenticated GitLab account |
 
 All functions with optional arguments support interactive prompts when arguments are omitted.
 
@@ -278,7 +369,14 @@ All functions with optional arguments support interactive prompts when arguments
 
 | Function | Description |
 |---|---|
-| `install-bw-cli` | Install the Bitwarden headless CLI (`bw`) |
+| `install-bw-cli` | Install the Bitwarden CLI (`bw`) |
+| `install-bitwarden` | Install the Bitwarden desktop app |
+| `install-op-cli` | Install the 1Password CLI (`op`) |
+| `install-1password` | Install the 1Password desktop app |
+| `install-gh` | Install the GitHub CLI (`gh`), used by `gpg-push-github` |
+| `install-glab` | Install the GitLab CLI (`glab`), used by `gpg-push-gitlab` |
+
+See [installers.md](installers.md) for details on each.
 
 ## GPG_TTY
 

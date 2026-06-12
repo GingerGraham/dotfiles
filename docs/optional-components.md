@@ -2,7 +2,21 @@
 
 Two roles are optional within the `workstation` profile: **nvim** and **ai-tools**. Both require a companion private repository and are disabled automatically if no repo URL is provided.
 
----
+## Table of Contents
+
+- [nvim](#nvim)
+  - [What it does](#what-it-does)
+  - [Requirements](#requirements)
+  - [Enabling nvim](#enabling-nvim)
+  - [Disabling nvim](#disabling-nvim)
+  - [Sync behaviour](#sync-behaviour)
+- [ai-tools](#ai-tools)
+  - [What it does](#what-it-does-1)
+  - [Requirements](#requirements-1)
+  - [Enabling ai-tools](#enabling-ai-tools)
+  - [ai-config repo structure](#ai-config-repo-structure)
+  - [Disabling ai-tools](#disabling-ai-tools)
+  - [Sync behaviour](#sync-behaviour-1)
 
 ## nvim
 
@@ -25,7 +39,7 @@ The Neovim config itself lives entirely in the separate `nvim-config` repo. This
 
 `install.sh` prompts whether to enable the nvim role and asks for the repo SSH URL:
 
-```
+```text
 Enable nvim role? [Y/n]: Y
 nvim-config repo SSH URL: git@github-dotfiles-nvim:you/nvim-config.git
 ```
@@ -78,12 +92,10 @@ launchctl list | grep nvim-config
 
 Runtime config and logs:
 
-```
+```text
 ~/.config/nvim-config/sync.conf          # REPO_URL, DEV_MODE, GIT_BRANCH (created once, never overwritten)
 ~/.local/state/nvim-config-sync/logs/sync.log
 ```
-
----
 
 ## ai-tools
 
@@ -103,7 +115,7 @@ Runtime config and logs:
 
 **During first-run install:**
 
-```
+```text
 Enable ai-tools role? [Y/n]: Y
 ai-config repo SSH URL: git@github-dotfiles-ai:you/ai-config.git
 ```
@@ -120,7 +132,7 @@ ai_config_repo_url: "git@github-dotfiles-ai:you/ai-config.git"
 
 The `ai-config` repo is expected to follow this layout:
 
-```
+```text
 ai-config/
 ├── claude/          → ~/.claude/
 │   ├── skills/
@@ -154,7 +166,7 @@ launchctl list | grep ai-config
 
 Runtime config and logs:
 
-```
+```text
 ~/.config/ai-config/sync.conf
 ~/.local/share/ai-config-sync/logs/sync.log
 ```

@@ -1,5 +1,20 @@
 # Installation
 
+## Table of Contents
+
+- [Bootstrap (recommended)](#bootstrap-recommended)
+  - [Passing options through bootstrap](#passing-options-through-bootstrap)
+- [Running install.sh directly](#running-installsh-directly)
+  - [First-run prompts](#first-run-prompts)
+  - [Subsequent runs](#subsequent-runs)
+- [After installation: updating tools](#after-installation-updating-tools)
+  - [Update installed tools](#update-installed-tools)
+  - [Install a new tool](#install-a-new-tool)
+- [CLI reference](#cli-reference)
+  - [Examples](#examples)
+- [SSH deploy keys](#ssh-deploy-keys)
+- [host_vars reference](#host_vars-reference)
+
 ## Bootstrap (recommended)
 
 The fastest path to a working setup is the one-liner bootstrap. It clones the repo to a sensible location under your projects directory and then runs `install.sh` automatically.
@@ -39,8 +54,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/b
   --skip-ssh
 ```
 
----
-
 ## Running install.sh directly
 
 If you have already cloned the repo, run `install.sh` from the repo root:
@@ -57,7 +70,7 @@ On a machine where `ansible/host_vars/localhost.yml` does not yet exist, `instal
 2. **Machine name** — defaults to `hostname -s`
 3. **Projects base directory** — root of your project tree
 4. **Git global identity** — name, default email, optional GPG signing key
-5. **Git project contexts** — one or more context/provider/email tuples (e.g. Personal/GitHub, Acme/AzureDevOps); press Enter to finish; add more later with `git-add-project`
+5. **Git project contexts** — one or more context/provider/email tuples (e.g. Personal/GitHub, Personal/GitLab, Acme/AzureDevOps); press Enter to finish; add more later with `git-add-project`
 6. **nvim role** — whether to enable it and the SSH URL for your `nvim-config` repo (workstation profile only)
 7. **ai-tools role** — whether to enable it and the SSH URL for your `ai-config` repo (workstation profile only)
 
@@ -73,8 +86,6 @@ Once `host_vars/localhost.yml` exists, `install.sh` skips all prompts and runs A
 ./install.sh --check && ./install.sh
 ```
 
----
-
 ## After installation: updating tools
 
 After install.sh completes, you have access to 20+ managed development tools.
@@ -82,17 +93,13 @@ After install.sh completes, you have access to 20+ managed development tools.
 ### Update installed tools
 
 ```bash
-
 # Update everything
-
 update-tools
 
 # Update specific tools
-
-update-tools terraform aws kubernetes
+update-tools terraform aws kubectl
 
 # List what's installed
-
 update-tools --list
 ```
 
@@ -101,33 +108,35 @@ update-tools --list
 If you skipped some tools during initial setup, install them later:
 
 ```bash
-
 # Install or update a single tool
-
 install-helm
 install-ansible
 install-kubectl
+
+# Install the CLI for your git provider or password manager
+install-gh      # GitHub CLI
+install-glab    # GitLab CLI
+install-bw-cli  # Bitwarden CLI
+install-op-cli  # 1Password CLI
 ```
 
-See [docs/tool-management.md](docs/tool-management.md) for the complete tool list, troubleshooting, and how to add custom tools.
-
----
+See [docs/tool-management.md](tool-management.md) for the complete tool list, troubleshooting, and how to add custom tools, and [docs/installers.md](installers.md) for a per-tool installer reference.
 
 ## CLI reference
 
-| Flag                                       | Description                                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `--profile <workstation\|server\|minimal>` | Skip profile prompt and use the given value                                                                        |
-| `--machine-name <name>`                    | Skip machine name prompt                                                                                           |
-| `--playbook <site\|server>`                | Ansible playbook to run (default: `site`). Use `server` with `--profile server` for server deployments             |
-| `--projects-base <path>`                   | Skip projects base prompt. Tilde expansion handled (`~/Projects` is valid). Passed automatically by `bootstrap.sh` |
-| `--skip-roles <role[,role,...]>`           | Skip one or more roles; also suppresses related prompts. `common` cannot be skipped                                |
-| `--only-roles <role[,role,...]>`           | Run only the named roles. `common` is always prepended                                                             |
-| `--check`                                  | Ansible dry-run (`--check --diff`) — previews changes without applying                                             |
-| `--skip-ssh`                               | Skip SSH deploy key generation. Use when your personal SSH key already has access to all required repos            |
-| `--no-prereqs`                             | Skip prerequisite check and installation                                                                           |
-| `--ask-become-pass`, `-K`                  | Prompt for sudo password before running Ansible. Required on first run if packages need installing                 |
-| `-h`, `--help`                             | Show usage                                                                                                         |
+| Flag | Description |
+| --- | --- |
+| `--profile <workstation\|server\|minimal>` | Skip profile prompt and use the given value |
+| `--machine-name <name>` | Skip machine name prompt |
+| `--playbook <site\|server>` | Ansible playbook to run (default: `site`). Use `server` with `--profile server` for server deployments |
+| `--projects-base <path>` | Skip projects base prompt. Tilde expansion handled (`~/Projects` is valid). Passed automatically by `bootstrap.sh` |
+| `--skip-roles <role[,role,...]>` | Skip one or more roles; also suppresses related prompts. `common` cannot be skipped |
+| `--only-roles <role[,role,...]>` | Run only the named roles. `common` is always prepended |
+| `--check` | Ansible dry-run (`--check --diff`) — previews changes without applying |
+| `--skip-ssh` | Skip SSH deploy key generation. Use when your personal SSH key already has access to all required repos |
+| `--no-prereqs` | Skip prerequisite check and installation |
+| `--ask-become-pass`, `-K` | Prompt for sudo password before running Ansible. Required on first run if packages need installing |
+| `-h`, `--help` | Show usage |
 
 ### Examples
 
@@ -154,31 +163,27 @@ See [docs/tool-management.md](docs/tool-management.md) for the complete tool lis
 ./install.sh --skip-roles ai-tools
 ```
 
----
-
 ## SSH deploy keys
 
 The `dotfiles` repo itself is public — no deploy key is needed for it. The background sync uses HTTPS.
 
 Deploy keys are generated for **private companion repos only**:
 
-| Key                    | Repo        |
-| ---------------------- | ----------- |
+| Key | Repo |
+| --- | --- |
 | `~/.ssh/dotfiles_nvim` | nvim-config |
-| `~/.ssh/dotfiles_ai`   | ai-config   |
+| `~/.ssh/dotfiles_ai` | ai-config |
 
 SSH host aliases are written to `~/.ssh/config.d/10-dotfiles.conf`. Use these aliases in your `host_vars` repo URLs:
 
-```
+```text
 git@github-dotfiles-nvim:you/nvim-config.git
 git@github-dotfiles-ai:you/ai-config.git
 ```
 
-After `install.sh` generates the keys, add each public key as a read-only deploy key in the corresponding repository (Settings → Deploy keys → Add deploy key; write access: **no**).
+After `install.sh` generates the keys, add each public key as a read-only deploy key in the corresponding repository (Settings → Deploy keys → Add deploy key; write access: **no**). This applies regardless of which provider hosts the companion repo — GitHub, GitLab, and most other providers expose an equivalent deploy key setting.
 
 If neither companion repo URL is provided, the SSH phase is skipped entirely. Pass `--skip-ssh` to bypass it explicitly when your personal key already has access.
-
----
 
 ## host_vars reference
 
@@ -186,17 +191,18 @@ If neither companion repo URL is provided, the SSH phase is skipped entirely. Pa
 
 Key variables:
 
-| Variable                    | Purpose                                                                 |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `dotfiles_profile`          | Controls which roles run (`workstation` / `server` / `minimal`)         |
-| `machine_name`              | Friendly name used in git config and prompt                             |
-| `nvim_config_repo_url`      | SSH URL for nvim-config repo (leave empty to skip)                      |
-| `ai_config_repo_url`        | SSH URL for ai-config repo (leave empty to skip)                        |
-| `dotfiles_nvim_enabled`     | Fine-grained override: disable nvim role within workstation profile     |
+| Variable | Purpose |
+| --- | --- |
+| `dotfiles_profile` | Controls which roles run (`workstation` / `server` / `minimal`) |
+| `machine_name` | Friendly name used in git config and prompt |
+| `nvim_config_repo_url` | SSH URL for nvim-config repo (leave empty to skip) |
+| `ai_config_repo_url` | SSH URL for ai-config repo (leave empty to skip) |
+| `dotfiles_nvim_enabled` | Fine-grained override: disable nvim role within workstation profile |
 | `dotfiles_ai_tools_enabled` | Fine-grained override: disable ai-tools role within workstation profile |
-| `dotfiles_sync_enabled`     | Disable background sync timer                                           |
-| `dotfiles_extra_roles`      | List of additional role names to run on this machine                    |
-| `git_name`                  | Git global user name                                                    |
-| `git_default_email`         | Git global default email                                                |
-| `git_default_signing_key`   | Optional GPG key fingerprint for global commit signing                  |
-| `projects_base`             | Root of your project directory tree                                     |
+| `dotfiles_sync_enabled` | Disable background sync timer |
+| `dotfiles_extra_roles` | List of additional role names to run on this machine |
+| `git_name` | Git global user name |
+| `git_default_email` | Git global default email |
+| `git_default_signing_key` | Optional GPG key fingerprint for global commit signing |
+| `git_projects` | List of context/provider identity definitions — see [the git role README](../ansible/roles/git/README.md) |
+| `projects_base` | Root of your project directory tree |
