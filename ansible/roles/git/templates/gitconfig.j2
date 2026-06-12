@@ -45,12 +45,12 @@
     smudge = git-lfs smudge -- %f
     process = git-lfs filter-process
 
-# ── Project-specific identities ───────────────────────────────────────────────
-# Managed by Ansible and git-add-project. Do not add includeIf blocks manually.
-[include]
-    path = ~/.config/git/project-includes
-
 # ── Machine-local overrides ───────────────────────────────────────────────────
 # Credential helpers, work-in-progress settings — never managed by Ansible.
 [include]
     path = ~/.config/git/profiles/local.inc
+
+# ── Project-specific identities ───────────────────────────────────────────────
+# Managed by Ansible and git-add-project. Do not add includeIf blocks manually.
+[include]
+    path = ~/.config/git/project-includes

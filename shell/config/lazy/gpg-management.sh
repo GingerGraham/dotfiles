@@ -1738,6 +1738,8 @@ gpg-push-github() {
     if [[ ${gh_exit} -eq 0 ]]; then
         log_info "GPG key uploaded successfully"
         log_info "View at: https://github.com/settings/keys"
+        log_info "Note: GitHub will list the master key ID and all subkeys (sign/encrypt/auth)"
+        log_info "for this entry — GPG always exports the full key block, this is expected."
     else
         log_warn "gh gpg-key add exited ${gh_exit}"
         if echo "${gh_output}" | grep -qi "already exists\|duplicate\|already registered"; then
