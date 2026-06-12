@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # oh-my-zsh prompt engine — loaded by loader.sh only when:
-#   - oh-my-posh is NOT present (lost the prompt-engine election), AND
+#   - oh-my-posh and starship are NOT present (lost the prompt-engine election), AND
 #   - ~/.oh-my-zsh exists, AND
 #   - the current shell is zsh
 #

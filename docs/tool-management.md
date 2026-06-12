@@ -4,29 +4,31 @@ The dotfiles shell config automates discovery, installation, and updates for 20+
 
 ## Table of Contents
 
-- [Quick reference](#quick-reference)
-- [Managed tools](#managed-tools)
-- [How update-tools works](#how-update-tools-works)
-  - [Detection](#detection)
-  - [Orchestration](#orchestration)
-- [How installers work](#how-installers-work)
-  - [Built-in installers](#built-in-installers)
-- [Updater functions](#updater-functions)
-  - [Writing a custom updater](#writing-a-custom-updater)
-- [The installer ↔ updater contract](#the-installer--updater-contract)
-- [Usage patterns](#usage-patterns)
-  - [Update everything](#update-everything)
-  - [Update a subset](#update-a-subset)
-  - [See what's installed](#see-whats-installed)
-  - [Install a single tool](#install-a-single-tool)
-  - [Check what installers are available](#check-what-installers-are-available)
-- [Troubleshooting](#troubleshooting)
-  - [Tool shows as "not installed" but it is](#tool-shows-as-not-installed-but-it-is)
-  - [Updater failed](#updater-failed)
-  - ["Unknown tool" error](#unknown-tool-error)
-  - [Installer hung or asks for interactive input](#installer-hung-or-asks-for-interactive-input)
-- [Advanced: how lazy installers load](#advanced-how-lazy-installers-load)
-- [See also](#see-also)
+- [Tool management](#tool-management)
+  - [Table of Contents](#table-of-contents)
+  - [Quick reference](#quick-reference)
+  - [Managed tools](#managed-tools)
+  - [How update-tools works](#how-update-tools-works)
+    - [Detection](#detection)
+    - [Orchestration](#orchestration)
+  - [How installers work](#how-installers-work)
+    - [Built-in installers](#built-in-installers)
+  - [Updater functions](#updater-functions)
+    - [Writing a custom updater](#writing-a-custom-updater)
+  - [The installer ↔ updater contract](#the-installer--updater-contract)
+  - [Usage patterns](#usage-patterns)
+    - [Update everything](#update-everything)
+    - [Update a subset](#update-a-subset)
+    - [See what's installed](#see-whats-installed)
+    - [Install a single tool](#install-a-single-tool)
+    - [Check what installers are available](#check-what-installers-are-available)
+  - [Troubleshooting](#troubleshooting)
+    - [Tool shows as "not installed" but it is](#tool-shows-as-not-installed-but-it-is)
+    - [Updater failed](#updater-failed)
+    - ["Unknown tool" error](#unknown-tool-error)
+    - [Installer hung or asks for interactive input](#installer-hung-or-asks-for-interactive-input)
+  - [Advanced: how lazy installers load](#advanced-how-lazy-installers-load)
+  - [See also](#see-also)
 
 ## Quick reference
 
@@ -41,32 +43,34 @@ update-tools --list        # Show all managed tools and install status
 
 The registry currently includes:
 
-| Tool | Detection | Install | Use case |
-| --- | --- | --- | --- |
-| **tenv** | `command -v` | `install-tenv` | Manages terraform/tofu versions |
-| **terraform** | `command -v` | via tenv or `install-tenv` | Infrastructure as code |
-| **tofu** | `command -v` | via tenv or `install-tenv` | OpenTofu variant |
-| **cosign** | `command -v` | `install-cosign` | Container signing |
-| **aws** | `command -v` | `aws-update` | AWS CLI |
-| **az** | `command -v` | `az-update` | Azure CLI |
-| **kubectl** | `command -v` | `set-kubectl` | Kubernetes client |
-| **helm** | `command -v` | `install-helm` | Kubernetes package manager |
-| **tflint** | `command -v` | `install-tflint` | Terraform linter |
-| **trivy** | `command -v` | `install-trivy` | Container vulnerability scanner |
-| **ansible** | `command -v` | `install-ansible` | Configuration management |
-| **gh** | `command -v` | `install-gh` | GitHub CLI |
-| **glab** | `command -v` | `install-glab` | GitLab CLI |
-| **nvm** | `command -v` | `install-nvm` | Node version manager |
-| **oh-my-posh** | `command -v` | `install-oh-my-posh` | Prompt engine |
-| **oh-my-zsh** | `path:~/.oh-my-zsh` | `install-oh-my-zsh` | Zsh framework |
-| **edit** | `command -v` | `install-edit` | Microsoft Edit |
-| **claude** | `command -v` | `install-claude-code` | Claude Code CLI |
-| **copilot** | `command -v` | `install-copilot-cli` | GitHub Copilot CLI |
-| **bw** | `command -v` | `install-bw-cli` | Bitwarden CLI |
-| **bitwarden** | `command -v` | `install-bitwarden` | Bitwarden Desktop |
-| **op** | `command -v` | `install-op-cli` | 1Password CLI |
-| **1password** | `command -v` | `install-1password` | 1Password Desktop |
-| **noteshub** | `command -v` | `install-noteshub` | NotesHub |
+| Tool           | Detection           | Install                    | Use case                        |
+| -------------- | ------------------- | -------------------------- | ------------------------------- |
+| **1password**  | `command -v`        | `install-1password`        | 1Password Desktop               |
+| **ansible**    | `command -v`        | `install-ansible`          | Configuration management        |
+| **aws**        | `command -v`        | `aws-update`               | AWS CLI                         |
+| **az**         | `command -v`        | `az-update`                | Azure CLI                       |
+| **bitwarden**  | `command -v`        | `install-bitwarden`        | Bitwarden Desktop               |
+| **bw**         | `command -v`        | `install-bw-cli`           | Bitwarden CLI                   |
+| **claude**     | `command -v`        | `install-claude-code`      | Claude Code CLI                 |
+| **copilot**    | `command -v`        | `install-copilot-cli`      | GitHub Copilot CLI              |
+| **cosign**     | `command -v`        | `install-cosign`           | Container signing               |
+| **edit**       | `command -v`        | `install-edit`             | Microsoft Edit                  |
+| **gh**         | `command -v`        | `install-gh`               | GitHub CLI                      |
+| **glab**       | `command -v`        | `install-glab`             | GitLab CLI                      |
+| **helm**       | `command -v`        | `install-helm`             | Kubernetes package manager      |
+| **kubectl**    | `command -v`        | `set-kubectl`              | Kubernetes client               |
+| **noteshub**   | `command -v`        | `install-noteshub`         | NotesHub                        |
+| **nvm**        | `command -v`        | `install-nvm`              | Node version manager            |
+| **oh-my-posh** | `command -v`        | `install-oh-my-posh`       | Prompt engine                   |
+| **oh-my-zsh**  | `path:~/.oh-my-zsh` | `install-oh-my-zsh`        | Zsh framework                   |
+| **op**         | `command -v`        | `install-op-cli`           | 1Password CLI                   |
+| **opendeck**   | `command -v`        | `install-opendeck`         | Opendeck                        |
+| **starship**   | `command -v`        | `install-starship`         | Prompt engine                   |
+| **terraform**  | `command -v`        | via tenv or `install-tenv` | Infrastructure as code          |
+| **tenv**       | `command -v`        | `install-tenv`             | Manages terraform/tofu versions |
+| **tflint**     | `command -v`        | `install-tflint`           | Terraform linter                |
+| **tofu**       | `command -v`        | via tenv or `install-tenv` | OpenTofu variant                |
+| **trivy**      | `command -v`        | `install-trivy`            | Container vulnerability scanner |
 
 ## How update-tools works
 
@@ -152,7 +156,6 @@ Each tool's updater is a private function in `lazy/maintenance.sh`, usually name
 ```bash
 _update_aws()        # Calls aws-update from tools/aws.sh
 _update_terraform()  # Calls install-terraform (proxied via tenv if tenv is present)
-_update_omp()        # Updates oh-my-posh
 _update_omz()        # Updates oh-my-zsh via its upgrade.sh
 ```
 

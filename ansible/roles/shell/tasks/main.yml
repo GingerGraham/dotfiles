@@ -157,3 +157,13 @@
 
 - name: shell | migration | process pre-existing .zshrc content
   ansible.builtin.include_tasks: migration.yml
+
+# ============================================================================
+# Section 6b — Deploy default starship config (create once, never overwrite)
+# ============================================================================
+- name: Deploy default starship.toml (create once, never overwrite)
+  ansible.builtin.template:
+    src: starship.toml.j2
+    dest: "{{ xdg_config_home }}/starship.toml"
+    mode: "0644"
+    force: false

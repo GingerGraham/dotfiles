@@ -8,23 +8,25 @@ repo are immediately live in new shell sessions without re-running Ansible.
 
 ## What it deploys
 
-| Source (repo)          | Destination              | Notes                                      |
-| ---------------------- | ------------------------ | ------------------------------------------ |
-| `shell/config/`        | `~/.config/shell`        | Directory symlink — entire config tree     |
-| `shell/bashrc`         | `~/.bashrc`              | Thin stub that sources loader.sh           |
-| `shell/zshrc`          | `~/.zshrc`               | Thin stub that sources loader.sh           |
-| `shell/zshenv`         | `~/.zshenv`              | Sets ZDOTDIR for zsh                       |
-| *(template)*           | `~/.config/shell/env/90-local.sh` | Created once, never overwritten   |
+| Source (repo)   | Destination                       | Notes                                  |
+| --------------- | --------------------------------- | -------------------------------------- |
+| `shell/config/` | `~/.config/shell`                 | Directory symlink — entire config tree |
+| `shell/bashrc`  | `~/.bashrc`                       | Thin stub that sources loader.sh       |
+| `shell/zshrc`   | `~/.zshrc`                        | Thin stub that sources loader.sh       |
+| `shell/zshenv`  | `~/.zshenv`                       | Sets ZDOTDIR for zsh                   |
+| _(template)_    | `~/.config/shell/env/90-local.sh` | Created once, never overwritten        |
+| _(template)_    | `~/.config/starship.toml`         | Created once, never overwritten        |
 
 ## Idempotency behaviour
 
-| Scenario                                         | Behaviour                                      |
-| ------------------------------------------------ | ---------------------------------------------- |
-| linuxDotFiles symlink at `~/.bashrc` etc.        | Removed; replaced with dotfiles symlink        |
-| Real file (non-symlink) at `~/.bashrc` etc. | Backed up to `~/.config/dotfiles/migration/<filename>.pre-dotfiles.bak`; replaced |
-| `~/.config/shell` is already the correct symlink | No change (Ansible no-op)                      |
-| `~/.config/shell` is a real directory            | **Role fails with instructions** — manual step required |
-| `90-local.sh` already exists                     | Left untouched (`force: false`)                |
+| Scenario                                         | Behaviour                                                                         |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| linuxDotFiles symlink at `~/.bashrc` etc.        | Removed; replaced with dotfiles symlink                                           |
+| Real file (non-symlink) at `~/.bashrc` etc.      | Backed up to `~/.config/dotfiles/migration/<filename>.pre-dotfiles.bak`; replaced |
+| `~/.config/shell` is already the correct symlink | No change (Ansible no-op)                                                         |
+| `~/.config/shell` is a real directory            | **Role fails with instructions** — manual step required                           |
+| `90-local.sh` already exists                     | Left untouched (`force: false`)                                                   |
+| `starship.toml` already exists                   | Left untouched (`force: false`)                                                   |
 
 ## Machine-local env file
 
@@ -45,12 +47,12 @@ depends on.
 
 ## Variables
 
-| Variable                  | Default                          | Source              | Description                                 |
-| ------------------------- | -------------------------------- | ------------------- | ------------------------------------------- |
-| `shell_config_dir`        | `{{ xdg_config_home }}/shell`    | `group_vars/all.yml`| Symlink destination for the shell config tree |
-| `shell_migration_targets` | `[~/.bashrc, ~/.zshrc, ...]`     | `defaults/main.yml` | Paths checked for linuxDotFiles symlinks    |
-| `shell_stubs`             | `[bashrc, zshrc, zshenv]`        | `defaults/main.yml` | Stub files symlinked into HOME              |
-| `dotfiles_machine_name`   | `{{ ansible_hostname }}`         | Set by `common` role | Used in 90-local.sh template               |
+| Variable                  | Default                       | Source               | Description                                   |
+| ------------------------- | ----------------------------- | -------------------- | --------------------------------------------- |
+| `shell_config_dir`        | `{{ xdg_config_home }}/shell` | `group_vars/all.yml` | Symlink destination for the shell config tree |
+| `shell_migration_targets` | `[~/.bashrc, ~/.zshrc, ...]`  | `defaults/main.yml`  | Paths checked for linuxDotFiles symlinks      |
+| `shell_stubs`             | `[bashrc, zshrc, zshenv]`     | `defaults/main.yml`  | Stub files symlinked into HOME                |
+| `dotfiles_machine_name`   | `{{ ansible_hostname }}`      | Set by `common` role | Used in 90-local.sh template                  |
 
 ## Running this role alone
 

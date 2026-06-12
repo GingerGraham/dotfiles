@@ -11,7 +11,7 @@ done
 unset _arch_zsh_frag
 
 # Manjaro ships its own prompt — only use it if we have no prompt engine
-# (omp/omz election in loader.sh runs after distro/, so we check post-hoc
+# omp/starship/omz election in loader.sh runs after distro/, so we check post-hoc
 # via a hook registered here)
 # ── Distro-native prompt availability signal ──────────────────────────────────
 if [[ -f /usr/share/zsh/manjaro-zsh-prompt ]]; then

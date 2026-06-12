@@ -4,22 +4,24 @@ Shell config lives at `~/.config/shell/` — an XDG-compliant directory that is 
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Loading order](#loading-order)
-- [Three loading tiers](#three-loading-tiers)
-  - [Tier 1 — Eager, always](#tier-1--eager-always)
-  - [Tier 2 — Conditional eager](#tier-2--conditional-eager)
-  - [Tier 3 — Lazy](#tier-3--lazy)
-- [Prompt engine selection](#prompt-engine-selection)
-- [Exported variables](#exported-variables)
-- [Machine-local overrides](#machine-local-overrides)
-- [Shell introspection](#shell-introspection)
-- [Migration from an existing shell config](#migration-from-an-existing-shell-config)
-- [Tool installation & management](#tool-installation--management)
-  - [Installers (lazy/installers.sh)](#installers-lazyinstallerssh)
-  - [Maintenance (lazy/maintenance.sh)](#maintenance-lazymaintenancesh)
-- [Lazy loading architecture](#lazy-loading-architecture)
-- [Repo layout](#repo-layout)
+- [Shell configuration](#shell-configuration)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Loading order](#loading-order)
+  - [Three loading tiers](#three-loading-tiers)
+    - [Tier 1 — Eager, always](#tier-1--eager-always)
+    - [Tier 2 — Conditional eager](#tier-2--conditional-eager)
+    - [Tier 3 — Lazy](#tier-3--lazy)
+  - [Prompt engine selection](#prompt-engine-selection)
+  - [Exported variables](#exported-variables)
+  - [Machine-local overrides](#machine-local-overrides)
+  - [Shell introspection](#shell-introspection)
+  - [Migration from an existing shell config](#migration-from-an-existing-shell-config)
+  - [Tool installation \& management](#tool-installation--management)
+    - [Installers (lazy/installers.sh)](#installers-lazyinstallerssh)
+    - [Maintenance (lazy/maintenance.sh)](#maintenance-lazymaintenancesh)
+  - [Lazy loading architecture](#lazy-loading-architecture)
+  - [Repo layout](#repo-layout)
 
 ## Overview
 
@@ -40,7 +42,7 @@ Both `~/.bashrc` and `~/.zshrc` are thin stubs that do one thing: source `~/.con
 9. Source `platform/$DOTFILES_OS.sh`; additionally source `platform/wsl.sh` if `$DOTFILES_WSL == "true"`
 10. Source `distro/$DOTFILES_DISTRO.sh`
 11. Source completions with the same tool guards
-12. Elect a prompt engine (oh-my-posh → oh-my-zsh → distro-native → fallback PS1)
+12. Elect a prompt engine (oh-my-posh → starship → oh-my-zsh → distro-native → fallback PS1)
 13. Register lazy stubs for `lazy/`
 14. Source `env/90-local.sh` last — machine-local overrides win
 
@@ -52,32 +54,32 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 
 `env/` and `core/` load unconditionally on every shell start. Files here must be fast — no subprocesses, no network calls.
 
-| File | Purpose |
-| --- | --- |
-| `env/00-core.sh` | XDG paths, base PATH extensions, locale, history |
-| `env/10-editors.sh` | `EDITOR`, `VISUAL`, pager |
-| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks |
-| `env/90-local.sh` | Machine-local overrides — created once, never overwritten |
-| `core/aliases.sh` | Navigation aliases (`ls`, `cd`, common shortcuts) |
-| `core/functions.sh` | Shell introspection (`get-my-functions`, `dedupe-path`) |
-| `core/ssh.sh` | SSH agent helpers, `list-ssh-hosts` |
+| File                    | Purpose                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history          |
+| `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                 |
+| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks    |
+| `env/90-local.sh`       | Machine-local overrides — created once, never overwritten |
+| `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)         |
+| `core/functions.sh`     | Shell introspection (`get-my-functions`, `dedupe-path`)   |
+| `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                       |
 
 ### Tier 2 — Conditional eager
 
 `tools/`, `platform/`, and `distro/` files load only when the relevant condition is true. Each `tools/` file guards itself at the top with `command -v <tool> &>/dev/null || return 0`.
 
-| File | Guard | Contents |
-| --- | --- | --- |
-| `git.sh` | `command -v git` | Git aliases, worktree helpers, project management functions |
-| `kubernetes.sh` | `command -v kubectl` | `k` alias, context/namespace helpers |
-| `terraform.sh` | `command -v terraform` or `tofu` | Workspace aliases, install helper |
-| `ansible.sh` | `command -v ansible` | Playbook aliases, vault helpers |
-| `containers.sh` | `docker` or `podman` | Container aliases, image management |
-| `aws.sh` | `command -v aws` | Profile switching, region helpers |
-| `azure.sh` | `command -v az` | Subscription switching, login helpers |
-| `security.sh` | `clamscan` or `sonar-scanner` | AV scan aliases, scanner shortcut |
-| `gpg.sh` | `command -v gpg` | Key listing, signing key lookup for git, agent helpers |
-| `go.sh` | `command -v go` | GOPATH helpers, module aliases |
+| File            | Guard                            | Contents                                                    |
+| --------------- | -------------------------------- | ----------------------------------------------------------- |
+| `git.sh`        | `command -v git`                 | Git aliases, worktree helpers, project management functions |
+| `kubernetes.sh` | `command -v kubectl`             | `k` alias, context/namespace helpers                        |
+| `terraform.sh`  | `command -v terraform` or `tofu` | Workspace aliases, install helper                           |
+| `ansible.sh`    | `command -v ansible`             | Playbook aliases, vault helpers                             |
+| `containers.sh` | `docker` or `podman`             | Container aliases, image management                         |
+| `aws.sh`        | `command -v aws`                 | Profile switching, region helpers                           |
+| `azure.sh`      | `command -v az`                  | Subscription switching, login helpers                       |
+| `security.sh`   | `clamscan` or `sonar-scanner`    | AV scan aliases, scanner shortcut                           |
+| `gpg.sh`        | `command -v gpg`                 | Key listing, signing key lookup for git, agent helpers      |
+| `go.sh`         | `command -v go`                  | GOPATH helpers, module aliases                              |
 
 Platform and distro files add platform-specific aliases, PATH entries, and environment setup. `platform/wsl.sh` is sourced **in addition to** `platform/linux.sh` on WSL systems (not instead of it).
 
@@ -91,11 +93,11 @@ Platform and distro files add platform-specific aliases, PATH entries, and envir
 gpg-create-key
 ```
 
-| File | Contents |
-| --- | --- |
-| `installers.sh` | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
-| `maintenance.sh` | `update-tools` — orchestrated update of all managed tools |
-| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab) |
+| File                | Contents                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `installers.sh`     | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
+| `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                                 |
+| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)      |
 
 Use `get-my-installers` (alias: `installers`) to list all available lazy install commands.
 
@@ -104,21 +106,22 @@ Use `get-my-installers` (alias: `installers`) to list all available lazy install
 `loader.sh` elects a prompt engine in priority order:
 
 1. **oh-my-posh** — if `oh-my-posh` is in `$PATH`
-2. **oh-my-zsh** — if `~/.oh-my-zsh` exists and the shell is zsh
-3. **distro-native** — if the distro file exports `_DOTFILES_DISTRO_PROMPT_FILE` pointing to a valid file (zsh only)
-4. **Fallback PS1** — set unconditionally if none of the above match; detects terminal colour support and sets an appropriate `PS1`
+2. **starship** — if `starship` is in `$PATH`, existing config at `~/.config/starship.toml` is detected, or the default config is successfully created at startup (write permissions in `~/.config/` required)
+3. **oh-my-zsh** — if `~/.oh-my-zsh` exists and the shell is zsh
+4. **distro-native** — if the distro file exports `_DOTFILES_DISTRO_PROMPT_FILE` pointing to a valid file (zsh only)
+5. **Fallback PS1** — set unconditionally if none of the above match; detects terminal colour support and sets an appropriate `PS1`
 
 ## Exported variables
 
-| Variable | Values | Set by |
-| --- | --- | --- |
-| `DOTFILES_OS` | `Linux` / `Mac` | `loader.sh` |
-| `DOTFILES_WSL` | `true` / `false` | `loader.sh` |
-| `DOTFILES_DISTRO` | `rhel` / `debian` / `suse` / `arch` / `unknown` | `loader.sh` |
-| `DOTFILES_SHELL` | `bash` / `zsh` / `sh` | `loader.sh` |
-| `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`) | `env/90-local.sh` |
-| `SHELL_CONFIG_DIR` | `~/.config/shell` | `loader.sh` |
-| `DOTFILES_REPO_DIR` | path to repo | `env/00-core.sh` |
+| Variable                  | Values                                          | Set by            |
+| ------------------------- | ----------------------------------------------- | ----------------- |
+| `DOTFILES_OS`             | `Linux` / `Mac`                                 | `loader.sh`       |
+| `DOTFILES_WSL`            | `true` / `false`                                | `loader.sh`       |
+| `DOTFILES_DISTRO`         | `rhel` / `debian` / `suse` / `arch` / `unknown` | `loader.sh`       |
+| `DOTFILES_SHELL`          | `bash` / `zsh` / `sh`                           | `loader.sh`       |
+| `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`)             | `env/90-local.sh` |
+| `SHELL_CONFIG_DIR`        | `~/.config/shell`                               | `loader.sh`       |
+| `DOTFILES_REPO_DIR`       | path to repo                                    | `env/00-core.sh`  |
 
 ## Machine-local overrides
 

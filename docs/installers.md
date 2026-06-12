@@ -15,15 +15,17 @@ root is required.
 
 ## Table of Contents
 
-- [Available installers](#available-installers)
-- [GitHub CLI — install-gh](#github-cli--install-gh)
-- [GitLab CLI — install-glab](#gitlab-cli--install-glab)
-- [1Password Desktop — install-1password](#1password-desktop--install-1password)
-- [1Password CLI — install-op-cli](#1password-cli--install-op-cli)
-- [Node Version Manager — install-nvm](#node-version-manager--install-nvm)
-- [GitHub Copilot CLI — install-copilot-cli](#github-copilot-cli--install-copilot-cli)
-- [Claude Code — install-claude-code](#claude-code--install-claude-code)
-- [Node prerequisite (shared)](#node-prerequisite-shared)
+- [Installer functions](#installer-functions)
+  - [Table of Contents](#table-of-contents)
+  - [Available installers](#available-installers)
+  - [GitHub CLI — `install-gh`](#github-cli--install-gh)
+  - [GitLab CLI — `install-glab`](#gitlab-cli--install-glab)
+  - [1Password Desktop — `install-1password`](#1password-desktop--install-1password)
+  - [1Password CLI — `install-op-cli`](#1password-cli--install-op-cli)
+  - [Node Version Manager — `install-nvm`](#node-version-manager--install-nvm)
+  - [GitHub Copilot CLI — `install-copilot-cli`](#github-copilot-cli--install-copilot-cli)
+  - [Claude Code — `install-claude-code`](#claude-code--install-claude-code)
+  - [Node prerequisite (shared)](#node-prerequisite-shared)
 
 ## Available installers
 
@@ -40,8 +42,14 @@ root is required.
 | `install-oh-my-posh` | oh-my-posh prompt | Upstream install script / Homebrew |
 | `install-oh-my-zsh` | oh-my-zsh framework | Upstream install script |
 | `install-op-cli` | 1Password CLI (`op`) | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
+| `install-opendeck` | Opendeck | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
 | `install-noteshub` | NotesHub | GitHub release `.deb`/`.rpm` via package manager |
 | `install-nvm` | Node Version Manager | Official `install.sh` (version auto-detected), then installs the current LTS |
+| `install-starship` | Starship prompt | Official install script / Homebrew |
+| `install-tflint` | TFLint (Terraform linter) | GitHub release tarball → `~/.local/bin` |
+| `install-terraform` | Terraform CLI | Vendor repo per distro / Homebrew |
+| `install-tenv` | tenv (Terraform/OpenTofu version manager) | GitHub release tarball → `~/.local/bin` |
+| `install-tofu` | tofu CLI | GitHub release tarball → `~/.local/bin` |
 | `install-trivy` | Trivy scanner | Vendor repo per distro / Homebrew |
 
 GPG key backup/restore and signing-key publishing build on the password manager

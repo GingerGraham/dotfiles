@@ -173,6 +173,37 @@ install-oh-my-posh() {
     esac
 }
 
+# ── starship install/update ─────────────────────────────────────────────────
+
+_starship-install-linux() {
+    local install_dir="${HOME}/.local/bin"
+    mkdir -p "${install_dir}"
+    # The official script overwrites the binary in place, so this call
+    # serves as both the initial install and subsequent updates.
+    if curl -sS https://starship.rs/install.sh | sh -s -- -y -b "${install_dir}"; then
+        log_info "starship installed/updated in ${install_dir}"
+    else
+        log_error "starship install/update failed. Check your installation or try updating manually."
+        return 1
+    fi
+}
+
+_starship-install-macos() {
+    if command -v starship &>/dev/null; then
+        brew upgrade starship
+    else
+        brew install starship
+    fi
+}
+
+install-starship() {
+    case "${DOTFILES_OS}" in
+        Linux) _starship-install-linux ;;
+        Mac)   _starship-install-macos ;;
+        *)     log_error "Unsupported OS for starship install"; return 1 ;;
+    esac
+}
+
 # ── oh-my-zsh install ─────────────────────────────────────────────────────────
 
 install-oh-my-zsh() {

@@ -37,12 +37,13 @@ gh|gh|install-gh|install-gh|GitHub CLI
 glab|glab|install-glab|install-glab|GitLab CLI
 helm|helm|install-helm|install-helm|Helm
 kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
-oh-my-posh|oh-my-posh|_update_omp|install-oh-my-posh|oh-my-posh
+oh-my-posh|oh-my-posh|install-oh-my-posh|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
 op|op|install-op-cli|install-op-cli|1Password CLI
 opendeck|opendeck|install-opendeck|install-opendeck|Opendeck
 noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
+starship|command -v|install-starship|install-starship|Prompt engine
 tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
 terraform|terraform|_update_terraform|install-tenv|Terraform
 tflint|tflint|install-tflint|install-tflint|TFLint
@@ -90,7 +91,6 @@ _update_ensure_fn() {
 
 _update_aws() { _update_ensure_fn aws-update tools/aws.sh   && aws-update; }
 _update_az()  { _update_ensure_fn az-update  tools/azure.sh && az-update; }
-_update_omp() { _update_ensure_fn update-omp tools/omp.sh   && update-omp; }
 
 _update_kubectl() {
     _update_ensure_fn set-kubectl tools/kubernetes.sh || { log_warn "set-kubectl not available"; return 1; }

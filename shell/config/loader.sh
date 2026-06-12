@@ -249,11 +249,18 @@ done
 unset _lazy_file
 unset -f _register_lazy_stubs
 
-# Prompt engine — mutually exclusive; omp wins if both are present.
-# OMZ guard also requires zsh since it only makes sense there.
+# Prompt engine — mutually exclusive; priority is:
+#   1. oh-my-posh   (any shell)
+#   2. starship     (any shell) — preserves a pre-existing config (e.g. Omarchy)
+#   3. oh-my-zsh    (zsh only)
+#   4. distro-native prompt (zsh only, e.g. Manjaro powerline10k)
+#   5. fallback PS1
 if command -v oh-my-posh &>/dev/null; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omp.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omp.sh"
+elif command -v starship &>/dev/null; then
+    # shellcheck disable=SC1091
+    [[ -f "${SHELL_CONFIG_DIR}/tools/starship.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/starship.sh"
 elif [[ -d "${HOME}/.oh-my-zsh" ]] && [[ -n "${ZSH_VERSION}" ]]; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omz.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omz.sh"
@@ -263,7 +270,7 @@ elif [[ -n "${ZSH_VERSION}" ]] && [[ -n "${_DOTFILES_DISTRO_PROMPT_FILE:-}" ]] &
     export DOTFILES_PROMPT_ENGINE="distro-native"
     log_debug "loader: using distro-native zsh prompt"
 else
-    log_warn "No prompt engine found (oh-my-posh or oh-my-zsh). Using system/default prompt."
+    log_warn "No prompt engine found (oh-my-posh, starship, or oh-my-zsh). Using system/default prompt."
     if [[ -n "${BASH_VERSION:-}" ]]; then
         # We own the prompt in this branch — don't defer to whatever /etc/bash.bashrc
         # set. Ubuntu ships a plain PS1 there; the colour upgrade normally happens in

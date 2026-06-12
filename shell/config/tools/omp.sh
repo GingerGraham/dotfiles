@@ -109,12 +109,3 @@ set-omp-theme-permanent() {
     OMP_THEME="${1}"
     log_info "oh-my-posh: theme '${1}' set permanently in ${this_file}"
 }
-
-# Update oh-my-posh binary in-place using the official install script.
-update-omp() {
-    local omp_dir
-    omp_dir="$(dirname "$(command -v oh-my-posh)")"
-    log_info "Updating oh-my-posh binary in ${omp_dir} ..."
-    curl -s https://ohmyposh.dev/install.sh | bash -s -- -d "${omp_dir}"
-    log_info "oh-my-posh updated — restart your shell or run: source-shrc"
-}
