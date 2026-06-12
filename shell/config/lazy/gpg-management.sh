@@ -81,6 +81,51 @@ _gpg_passphrase_ready_check() {
     return 0
 }
 
+# _gpg_collect_signing_keys
+# Print one line per signing-capable ([S]) subkey in the local secret
+# keyring, as "<long-key-id><TAB><label>". Label is the first UID on the
+# key, with a "(+N more)" suffix if there are additional UIDs, plus an
+# expiry annotation.
+#
+# Used by gpg-push-github and gpg-push-gitlab so both present and validate
+# against exactly the same set of keys — the long key ID of the signing
+# subkey itself, matching the output of gpg-list-signing-keys.
+_gpg_collect_signing_keys() {
+    local type keyid expiry uid caps
+    local -a uids=()
+
+    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
+        case "${type}" in
+            sec|pub)
+                uids=()
+                ;;
+            uid)
+                [[ -n "${uid}" ]] && uids+=("${uid}")
+                ;;
+            ssb|sub)
+                [[ "${caps}" != *s* ]] && continue
+                [[ ${#uids[@]} -eq 0 ]] && continue
+
+                local exp_str="no expiry"
+                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
+                    local exp_formatted
+                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
+                        || echo "${expiry}")"
+                    exp_str="expires: ${exp_formatted}"
+                fi
+
+                local first_uid label
+                first_uid="$(_array_get uids 1)"
+                label="${first_uid}  [${exp_str}]"
+                [[ ${#uids[@]} -gt 1 ]] && label="${first_uid} (+$((${#uids[@]} - 1)) more)  [${exp_str}]"
+
+                printf '%s\t%s\n' "${keyid}" "${label}"
+                ;;
+        esac
+    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
+}
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 _gpg_require_key() {
@@ -1612,45 +1657,11 @@ gpg-push-github() {
     fi
     log_info "Authenticated to GitHub as: ${gh_user}"
 
-    # ── Collect available signing keys into arrays ────────────────────────────
-    local key_ids=()
-    local key_labels=()
-    local uids=()
+    # ── Collect available signing keys ────────────────────────────────────────
+    local signing_keys
+    signing_keys="$(_gpg_collect_signing_keys)"
 
-    while IFS=: read -r type _ _ _ keyid _ expiry _ _ uid _ caps _; do
-        case "${type}" in
-            sec|pub)
-                uids=()
-                ;;
-            uid)
-                [[ -n "${uid}" ]] && uids+=("${uid}")
-                ;;
-            ssb|sub)
-                [[ "${caps}" != *s* ]] && continue
-                [[ ${#uids[@]} -eq 0 ]] && continue
-
-                local exp_str="no expiry"
-                if [[ -n "${expiry}" && "${expiry}" != "0" ]]; then
-                    local exp_formatted
-                    exp_formatted="$(date -d "@${expiry}" '+%Y-%m-%d' 2>/dev/null \
-                        || date -r "${expiry}" '+%Y-%m-%d' 2>/dev/null \
-                        || echo "${expiry}")"
-                    exp_str="expires: ${exp_formatted}"
-                fi
-
-                # _array_get handles bash(0-based) vs zsh(1-based) transparently
-                local first_uid
-                first_uid="$(_array_get uids 1)"
-                local label="${first_uid}  [${exp_str}]"
-                [[ ${#uids[@]} -gt 1 ]] && label="${first_uid} (+$((${#uids[@]} - 1)) more)  [${exp_str}]"
-
-                key_ids+=("${keyid}")
-                key_labels+=("${label}")
-                ;;
-        esac
-    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
-
-    if [[ ${#key_ids[@]} -eq 0 ]]; then
+    if [[ -z "${signing_keys}" ]]; then
         log_error "No signing-capable keys found in local keyring"
         log_error "Create one with: gpg-create-key"
         return 1
@@ -1658,12 +1669,7 @@ gpg-push-github() {
 
     # ── Key selection ─────────────────────────────────────────────────────────
     if [[ -n "${selected_keyid}" ]]; then
-        local found=0
-        local k
-        for k in "${key_ids[@]}"; do
-            [[ "${k}" == "${selected_keyid}" ]] && { found=1; break; }
-        done
-        if [[ ${found} -eq 0 ]]; then
+        if ! printf '%s\n' "${signing_keys}" | cut -f1 | grep -qx "${selected_keyid}"; then
             log_error "Key ID '${selected_keyid}' not found among local signing keys"
             log_error "Run gpg-list-signing-keys to see available keys"
             return 1
@@ -1677,30 +1683,31 @@ gpg-push-github() {
         echo
         echo "  Available signing keys:"
         echo
-        # Use a counter rather than ${!array[@]} — bash-only index expansion
+
+        local -a menu_ids=()
         local i=1
         local kid klabel
-        for kid in "${key_ids[@]}"; do
-            klabel="$(_array_get key_labels "${i}")"
+        while IFS=$'\t' read -r kid klabel; do
             printf "  %2d)  Key ID: %s\n" "${i}" "${kid}"
             printf "       UID:    %s\n" "${klabel}"
             echo
+            menu_ids+=("${kid}")
             i=$(( i + 1 ))
-        done
+        done <<< "${signing_keys}"
 
         local choice
         while true; do
-            _read_prompt "  Select key (1-${#key_ids[@]}, or q to quit): " choice
+            _read_prompt "  Select key (1-${#menu_ids[@]}, or q to quit): " choice
             [[ "${choice}" == "q" || "${choice}" == "Q" ]] && {
                 log_info "Aborted"
                 return 0
             }
             if [[ "${choice}" =~ ^[0-9]+$ ]] \
-                && (( choice >= 1 && choice <= ${#key_ids[@]} )); then
-                selected_keyid="$(_array_get key_ids "${choice}")"
+                && (( choice >= 1 && choice <= ${#menu_ids[@]} )); then
+                selected_keyid="$(_array_get menu_ids "${choice}")"
                 break
             fi
-            log_warn "Invalid selection — enter a number between 1 and ${#key_ids[@]}"
+            log_warn "Invalid selection — enter a number between 1 and ${#menu_ids[@]}"
         done
     fi
 
@@ -1777,59 +1784,23 @@ gpg-push-gitlab() {
         return 1
     fi
 
-    # ── Key selection (same logic as gpg-push-github) ─────────────────────────
-    local -a key_ids=()
-    local -a key_labels=()
-    local cur_keyid="" cur_uids=() in_sec=false
+    # ── Collect available signing keys ────────────────────────────────────────
+    local signing_keys
+    signing_keys="$(_gpg_collect_signing_keys)"
 
-    while IFS=: read -r type _ _ _ _ _ _ _ _ uid _ _; do
-        case "${type}" in
-            sec)
-                if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
-                    key_ids+=("${cur_keyid}")
-                    key_labels+=("$(_array_get cur_uids 1)")
-                fi
-                cur_keyid="${uid}"; cur_uids=(); in_sec=true ;;
-            ssb) in_sec=false ;;
-            fpr) [[ "${in_sec}" == "true" && -z "${cur_keyid}" ]] && cur_keyid="${uid}" ;;
-            uid) cur_uids+=("${uid}") ;;
-        esac
-    done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
-    # Flush last key
-    if [[ -n "${cur_keyid}" && ${#cur_uids[@]} -gt 0 ]]; then
-        key_ids+=("${cur_keyid}")
-        key_labels+=("$(_array_get cur_uids 1)")
-    fi
-
-    # Filter to signing-capable keys only (same as gpg-push-github)
-    local -a sign_ids=() sign_labels=()
-    local i=1
-    local key_id key_label
-    for key_id in "${key_ids[@]}"; do
-        key_label="$(_array_get key_labels "${i}")"
-        if gpg --list-keys --with-colons "${key_id}" 2>/dev/null \
-                | awk -F: '/^(pub|sub)/{cap=$12} /^fpr/{if(cap~/s/){found=1}} END{exit !found}'; then
-            sign_ids+=("${key_id}")
-            sign_labels+=("${key_label}")
-        fi
-        i=$(( i + 1 ))
-    done
-
-    if [[ ${#sign_ids[@]} -eq 0 ]]; then
+    if [[ -z "${signing_keys}" ]]; then
         log_error "No signing-capable keys found in local keyring"
+        log_error "Create one with: gpg-create-key"
         return 1
     fi
 
+    # ── Key selection ─────────────────────────────────────────────────────────
     if [[ -n "${selected_keyid}" ]]; then
-        local found=0
-        local k
-        for k in "${sign_ids[@]}"; do
-            [[ "${k}" == "${selected_keyid}" ]] && { found=1; break; }
-        done
-        [[ ${found} -eq 0 ]] && {
+        if ! printf '%s\n' "${signing_keys}" | cut -f1 | grep -qx "${selected_keyid}"; then
             log_error "Key ID '${selected_keyid}' not found among local signing keys"
+            log_error "Run gpg-list-signing-keys to see available keys"
             return 1
-        }
+        fi
     else
         echo
         echo "═══════════════════════════════════════════════════════════════════"
@@ -1839,32 +1810,37 @@ gpg-push-gitlab() {
         echo
         echo "  Available signing keys:"
         echo
-        local idx=1
-        local sid slabel
-        for sid in "${sign_ids[@]}"; do
-            slabel="$(_array_get sign_labels "${idx}")"
-            printf "  %2d)  Key ID: %s\n" "${idx}" "${sid}"
-            printf "       UID:    %s\n" "${slabel}"
+
+        local -a menu_ids=()
+        local i=1
+        local kid klabel
+        while IFS=$'\t' read -r kid klabel; do
+            printf "  %2d)  Key ID: %s\n" "${i}" "${kid}"
+            printf "       UID:    %s\n" "${klabel}"
             echo
-            idx=$(( idx + 1 ))
-        done
+            menu_ids+=("${kid}")
+            i=$(( i + 1 ))
+        done <<< "${signing_keys}"
+
         local choice
         while true; do
-            _read_prompt "  Select key (1-${#sign_ids[@]}, or q to quit): " choice
+            _read_prompt "  Select key (1-${#menu_ids[@]}, or q to quit): " choice
             [[ "${choice}" == "q" || "${choice}" == "Q" ]] && {
-                log_info "Aborted"; return 0
+                log_info "Aborted"
+                return 0
             }
             if [[ "${choice}" =~ ^[0-9]+$ ]] \
-                && (( choice >= 1 && choice <= ${#sign_ids[@]} )); then
-                selected_keyid="$(_array_get sign_ids "${choice}")"
+                && (( choice >= 1 && choice <= ${#menu_ids[@]} )); then
+                selected_keyid="$(_array_get menu_ids "${choice}")"
                 break
             fi
-            log_warn "Invalid selection — enter a number between 1 and ${#sign_ids[@]}"
+            log_warn "Invalid selection — enter a number between 1 and ${#menu_ids[@]}"
         done
     fi
 
     log_info "Selected key: ${selected_keyid}"
 
+    # ── Export public key to temp file ────────────────────────────────────────
     local tmp_file
     tmp_file="$(mktemp /tmp/gpg-gitlab-XXXXXX.asc)"
     chmod 600 "${tmp_file}"
