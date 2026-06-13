@@ -1,0 +1,682 @@
+#!/usr/bin/env bash
+# lazy/installers-dev.sh
+# shellcheck disable=SC1091
+source "${SHELL_CONFIG_DIR:-$HOME/.config/shell}/lazy/installers-common.sh"
+
+
+# _node_version_at_least <major>
+# True if the active node's major version is >= <major>.
+_node_version_at_least() {
+    local want="$1" have
+    command -v node &>/dev/null || return 1
+    have="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
+    [[ -n "${have}" && "${have}" =~ ^[0-9]+$ && "${have}" -ge "${want}" ]]
+}
+
+
+# ── GitHub CLI install ────────────────────────────────────────────────────────
+
+# DNF5 (Fedora 41+) and DNF4 use different config-manager syntax.
+_gh_dnf_is_v5() {
+    command -v dnf5 &>/dev/null && return 0
+    dnf --version 2>/dev/null | head -1 | grep -qiE 'dnf5|^5\.'
+}
+
+
+_gh-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    [[ "${elevation_cmd}" == "run0" ]] && log_warn "run0 detected — multiple prompts expected"
+    local repo_url="https://cli.github.com/packages/rpm/gh-cli.repo"
+
+    if command -v dnf &>/dev/null; then
+        if _gh_dnf_is_v5; then
+            log_info "Configuring GitHub CLI repo (dnf5)..."
+            ${elevation_cmd} dnf install -y dnf5-plugins
+            ${elevation_cmd} dnf config-manager addrepo --from-repofile="${repo_url}" || true
+        else
+            log_info "Configuring GitHub CLI repo (dnf4)..."
+            ${elevation_cmd} dnf install -y 'dnf-command(config-manager)'
+            ${elevation_cmd} dnf config-manager --add-repo "${repo_url}"
+        fi
+        ${elevation_cmd} dnf install -y gh
+    elif command -v yum &>/dev/null; then
+        log_info "Configuring GitHub CLI repo (yum)..."
+        command -v yum-config-manager &>/dev/null || ${elevation_cmd} yum install -y yum-utils
+        ${elevation_cmd} yum-config-manager --add-repo "${repo_url}"
+        ${elevation_cmd} yum install -y gh
+    else
+        log_error "Neither dnf nor yum found"; return 1
+    fi
+}
+
+
+_gh-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if ! command -v wget &>/dev/null; then
+        log_info "Installing wget (required to fetch the keyring)..."
+        ${elevation_cmd} apt-get update && ${elevation_cmd} apt-get install -y wget
+    fi
+    local keyring="/etc/apt/keyrings/githubcli-archive-keyring.gpg"
+    ${elevation_cmd} mkdir -p -m 755 /etc/apt/keyrings
+    local tmp; tmp="$(mktemp)"
+    if ! wget -nv -O "${tmp}" https://cli.github.com/packages/githubcli-archive-keyring.gpg; then
+        log_error "Failed to download GitHub CLI keyring"; rm -f "${tmp}"; return 1
+    fi
+    ${elevation_cmd} install -m 644 "${tmp}" "${keyring}"
+    rm -f "${tmp}"
+    ${elevation_cmd} mkdir -p -m 755 /etc/apt/sources.list.d
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://cli.github.com/packages stable main" \
+        | ${elevation_cmd} tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y gh
+}
+
+
+_gh-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    local repo_url="https://cli.github.com/packages/rpm/gh-cli.repo"
+    if zypper lr 2>/dev/null | grep -qi 'gh-cli'; then
+        log_info "GitHub CLI zypper repo already present"
+    else
+        ${elevation_cmd} zypper addrepo "${repo_url}"
+    fi
+    ${elevation_cmd} zypper --gpg-auto-import-keys ref
+    ${elevation_cmd} zypper install -y gh
+}
+
+
+_gh-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm github-cli
+}
+
+
+_gh-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v gh &>/dev/null; then brew upgrade gh; else brew install gh; fi
+}
+
+
+# Distro-independent fallback: latest release tarball → ~/.local/bin/gh
+_gh-install-tarball() {
+    log_info "Falling back to a distro-independent binary install from GitHub releases..."
+    command -v tar &>/dev/null || { log_error "tar is required for the fallback install"; return 1; }
+
+    local api_response ver ver_num
+    api_response="$(curl -s https://api.github.com/repos/cli/cli/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -1)"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest gh version (GitHub API rate limit?)"; return 1; }
+    ver_num="${ver#v}"
+
+    local machine os arch ext
+    machine="$(uname -m)"; os="$(uname -s)"
+    case "${machine}" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
+    esac
+    case "${os}" in
+        Linux)  os="linux";  ext="tar.gz" ;;
+        Darwin) os="macOS";  ext="zip"    ;;
+        *) log_error "Unsupported OS: ${os}"; return 1 ;;
+    esac
+
+    local asset="gh_${ver_num}_${os}_${arch}.${ext}"
+    local url="https://github.com/cli/cli/releases/download/${ver}/${asset}"
+    local tmp_dir; tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+
+    if [[ "${ext}" == "zip" ]]; then
+        command -v unzip &>/dev/null || { log_error "unzip is required"; rm -rf "${tmp_dir}"; return 1; }
+        unzip -q "${tmp_dir}/${asset}" -d "${tmp_dir}"
+    else
+        tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+    fi
+
+    local bin; bin="$(find "${tmp_dir}" -type f -path '*/bin/gh' | head -1)"
+    [[ -z "${bin}" ]] && bin="$(find "${tmp_dir}" -type f -name gh -perm -u+x | head -1)"
+    if [[ -z "${bin}" ]]; then
+        log_error "gh binary not found in archive"; rm -rf "${tmp_dir}"; return 1
+    fi
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${bin}" "${HOME}/.local/bin/gh"
+    rm -rf "${tmp_dir}"
+    log_info "gh installed to ~/.local/bin/gh"
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+
+install-gh() {
+    log_info "Installing or updating GitHub CLI (gh)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _gh-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _gh-install-rhel   && ok=0 ;;
+                debian) _gh-install-debian && ok=0 ;;
+                suse)   _gh-install-suse   && ok=0 ;;
+                arch)   _gh-install-arch   && ok=0 ;;
+                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using distro-independent install" ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { _gh-install-tarball || return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for gh install"; return 1
+            ;;
+    esac
+
+    if command -v gh &>/dev/null; then
+        log_info "GitHub CLI installed: $(gh --version 2>/dev/null | head -1)"
+        echo
+        echo "  Authenticate with:"
+        echo "    gh auth login"
+    else
+        log_warn "gh not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
+
+# ── GitLab CLI install ────────────────────────────────────────────────────────
+# Fedora/RHEL: in official dnf repos as 'glab'.
+# Arch: in extra/glab via pacman.
+# Debian/openSUSE: no official vendor repo — binary tarball fallback.
+# macOS: Homebrew.
+
+_glab-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf install -y glab
+    elif command -v yum &>/dev/null; then
+        ${elevation_cmd} yum install -y glab
+    else
+        log_error "Neither dnf nor yum found"; return 1
+    fi
+}
+
+
+_glab-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm glab
+}
+
+
+_glab-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v glab &>/dev/null; then brew upgrade glab; else brew install glab; fi
+}
+
+
+# Distro-independent fallback: latest release tarball → ~/.local/bin/glab
+_glab-install-tarball() {
+    log_info "Falling back to distro-independent binary from GitLab releases..."
+    command -v tar &>/dev/null || { log_error "tar is required for the fallback install"; return 1; }
+
+    local api_response ver ver_num machine arch os ext asset url tmp_dir bin
+    api_response="$(curl -s https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases \
+        | grep '"tag_name"' | head -1 \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    ver="${api_response}"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version (GitLab API unavailable?)"; return 1; }
+    ver_num="${ver#v}"
+
+    machine="$(uname -m)"
+    case "${machine}" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
+    esac
+
+    # GitLab release assets use the pattern: glab_<ver>_Linux_<arch>.tar.gz
+    asset="glab_${ver_num}_Linux_${arch}.tar.gz"
+    url="https://gitlab.com/gitlab-org/cli/-/releases/${ver}/downloads/${asset}"
+    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+    tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+
+    bin="$(find "${tmp_dir}" -type f -name glab -perm -u+x | head -1)"
+    if [[ -z "${bin}" ]]; then
+        log_error "glab binary not found in archive"; rm -rf "${tmp_dir}"; return 1
+    fi
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${bin}" "${HOME}/.local/bin/glab"
+    rm -rf "${tmp_dir}"
+    log_info "glab installed to ~/.local/bin/glab"
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+
+install-glab() {
+    log_info "Installing or updating GitLab CLI (glab)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _glab-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _glab-install-rhel   && ok=0 ;;
+                arch)   _glab-install-arch   && ok=0 ;;
+                debian) log_warn "No official apt repo for glab — using tarball install" ;;
+                suse)   log_warn "No official zypper repo for glab — using tarball install" ;;
+                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using tarball install" ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { _glab-install-tarball || return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for glab install"; return 1
+            ;;
+    esac
+
+    if command -v glab &>/dev/null; then
+        log_info "GitLab CLI installed: $(glab --version 2>/dev/null | head -1)"
+        echo
+        echo "  Authenticate with:"
+        echo "    glab auth login"
+    else
+        log_warn "glab not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}
+
+
+# ── nvm (Node Version Manager) install ────────────────────────────────────────
+
+_nvm_latest_version() {
+    curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest 2>/dev/null \
+        | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
+        | head -1
+}
+
+
+# Detect a manually-installed system Node and, interactively, offer to remove it
+# so nvm becomes the sole manager. No-op for nvm-managed or non-interactive cases.
+_nvm_handle_system_node() {
+    local node_path npm_path
+    node_path="$(command -v node 2>/dev/null)"
+    npm_path="$(command -v npm 2>/dev/null)"
+
+    # Only act on a real on-disk binary (skip nvm stub *functions* and nvm paths).
+    [[ "${node_path}" == */* && -x "${node_path}" ]] || return 0
+    case "${node_path}" in
+        *"/.nvm/"*) return 0 ;;
+    esac
+
+    log_warn "A manually-installed Node.js was found:"
+    log_warn "  node: ${node_path}"
+    [[ -n "${npm_path}" ]] && log_warn "  npm:  ${npm_path}"
+    log_warn "nvm works best as the sole Node.js manager; a system Node on PATH can shadow"
+    log_warn "nvm's versions in non-login contexts."
+
+    if [[ ! -e /dev/tty ]]; then
+        log_info "Non-interactive shell — leaving the system Node in place."
+        return 0
+    fi
+
+    local reply
+    _read_prompt "Remove the system Node.js/npm via the package manager and use nvm instead? [y/N]: " reply
+    case "$(_str_lower "${reply}")" in
+        y|yes) ;;
+        *) log_info "Keeping the system Node.js. nvm will install alongside it."; return 0 ;;
+    esac
+
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 0; }
+    local elevation_cmd
+    elevation_cmd="$(get-elevation-command)" || { log_warn "No elevation available — cannot remove system Node."; return 0; }
+    log_warn "Removing system nodejs/npm — this may also remove packages that depend on them."
+    case "${PACKAGE_MANAGER}" in
+        dnf)    ${elevation_cmd} dnf remove -y nodejs npm ;;
+        yum)    ${elevation_cmd} yum remove -y nodejs npm ;;
+        apt)    ${elevation_cmd} apt-get remove -y nodejs npm ;;
+        zypper) ${elevation_cmd} zypper remove -y nodejs npm ;;
+        pacman) ${elevation_cmd} pacman -Rs --noconfirm nodejs npm ;;
+        brew)   brew uninstall node 2>/dev/null || true ;;
+        *) log_warn "Unknown package manager — remove Node.js manually if desired." ;;
+    esac
+}
+
+
+install-nvm() {
+    log_info "Installing or updating nvm (Node Version Manager)..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+    command -v git  &>/dev/null || log_warn "git not found — nvm self-update will be unavailable"
+
+    export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+    mkdir -p "${NVM_DIR}" || { log_error "Failed to create ${NVM_DIR}"; return 1; }
+
+    _nvm_handle_system_node
+
+    # Version is embedded in the install URL and changes over time — detect it,
+    # falling back to a pinned version if the API is unreachable / rate-limited.
+    local nvm_ver
+    nvm_ver="$(_nvm_latest_version)"
+    if [[ -z "${nvm_ver}" ]]; then
+        nvm_ver="v0.40.5"
+        log_warn "Could not query the latest nvm version (GitHub API rate limit?) — using ${nvm_ver}"
+    fi
+    log_info "Target nvm version: ${nvm_ver}"
+
+    local install_url="https://raw.githubusercontent.com/nvm-sh/nvm/${nvm_ver}/install.sh"
+    if ! curl -o- "${install_url}" | bash; then
+        log_error "nvm install script failed"
+        return 1
+    fi
+
+    # Load nvm now (replacing the lazy stubs from env/20-development.sh).
+    if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
+        unset -f nvm node npm npx yarn pnpm 2>/dev/null || true
+        # shellcheck disable=SC1091
+        source "${NVM_DIR}/nvm.sh"
+    else
+        log_error "nvm.sh not found at ${NVM_DIR} after install"
+        return 1
+    fi
+
+    # Install current LTS if nothing is in use; set a default for new shells.
+    local current
+    current="$(nvm current 2>/dev/null)"
+    if [[ -z "${current}" || "${current}" == "none" || "${current}" == "system" ]]; then
+        log_info "No nvm-managed Node in use — installing latest LTS..."
+        nvm install --lts || { log_error "nvm install --lts failed"; return 1; }
+        nvm use --lts
+        nvm alias default 'lts/*'
+    else
+        log_info "nvm already managing Node ${current} — keeping it as the active version"
+        nvm alias default &>/dev/null || nvm alias default "${current}"
+    fi
+
+    log_info "nvm ready — node $(node --version 2>/dev/null), npm $(npm --version 2>/dev/null)"
+    echo
+    echo "  nvm is loaded in this shell and lazy-loads in new shells. Common commands:"
+    echo "    nvm install --lts      # install the latest LTS"
+    echo "    nvm install 20         # install a specific major"
+    echo "    nvm use 20             # switch versions"
+    echo "    nvm alias default 20   # set the default for new shells"
+}
+
+
+# ── Microsoft Edit install ────────────────────────────────────────────────────
+#
+# _edit_arch_stem <version_string>
+#   Prints the platform-specific asset stem, e.g. "edit-2.0.0-x86_64-linux-gnu"
+#   Returns 1 on unsupported platform so callers can bail early.
+_edit_arch_stem() {
+    local normalized_ver="$1"
+    local machine; machine="$(uname -m)"
+    local kernel;  kernel="$(uname -s)"
+
+    local arch os_tag
+    case "${machine}" in
+        x86_64)         arch="x86_64"  ;;
+        aarch64|arm64)  arch="aarch64" ;;
+        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
+    esac
+
+    case "${kernel}" in
+        Linux)  os_tag="linux-gnu"    ;;
+        Darwin) os_tag="apple-darwin" ;;
+        *) log_error "Unsupported OS: ${kernel}"; return 1 ;;
+    esac
+
+    printf 'edit-%s-%s-%s' "${normalized_ver}" "${arch}" "${os_tag}"
+}
+
+
+# _edit_asset_url <api_response> <stem>
+#   Searches the GitHub API JSON for any download URL whose filename starts with
+#   <stem> and ends with a known archive extension.  Prints the URL.
+#   By matching on stem rather than full filename we survive extension changes.
+_edit_asset_url() {
+    local api_response="$1" stem="$2"
+    local url
+    # Match the stem followed by any extension (.tar.gz, .tar.zst, .zip, etc.)
+    url="$(printf '%s' "${api_response}" \
+        | grep "\"browser_download_url\":.*${stem}" \
+        | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' \
+        | head -1)"
+    printf '%s' "${url}"
+}
+
+
+# _edit_extract <archive> <dest_dir>
+#   Extracts .tar.gz, .tar.zst, or .zip into dest_dir.
+_edit_extract() {
+    local archive="$1" dest="$2"
+    case "${archive}" in
+        *.tar.gz)  tar -xzf "${archive}" -C "${dest}" ;;
+        *.tar.zst)
+            if command -v zstd &>/dev/null; then
+                tar -I zstd -xf "${archive}" -C "${dest}"
+            else
+                # tar on recent Linux/macOS handles zstd natively
+                tar -xf "${archive}" -C "${dest}"
+            fi
+            ;;
+        *.zip) unzip -q "${archive}" -d "${dest}" ;;
+        *) log_error "Unrecognised archive format: $(basename "${archive}")"; return 1 ;;
+    esac
+}
+
+
+# _edit_install_from_api_response <api_response> <display_version>
+#   Shared implementation used by both install-edit and install-edit-version.
+_edit_install_from_api_response() {
+    local api_response="$1" display_ver="$2"
+    local normalized_ver="${display_ver#v}"
+
+    local stem
+    stem="$(_edit_arch_stem "${normalized_ver}")" || return 1
+
+    local download_url
+    download_url="$(_edit_asset_url "${api_response}" "${stem}")"
+    if [[ -z "${download_url}" ]]; then
+        log_error "No release asset matching '${stem}' found for ${display_ver}"
+        log_info "Assets available in this release:"
+        printf '%s' "${api_response}" \
+            | grep '"browser_download_url":' \
+            | sed -E 's/.*"browser_download_url": *"([^"]+)".*/  \1/'
+        return 1
+    fi
+
+    # Derive the archive filename from the URL so extraction uses the right handler
+    local asset_name; asset_name="$(basename "${download_url}")"
+    local tmp_dir;    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset_name}..."
+    if ! _download_file_robust "${download_url}" "${tmp_dir}/${asset_name}"; then
+        rm -rf "${tmp_dir}"; return 1
+    fi
+
+    log_info "Extracting ${asset_name}..."
+    if ! _edit_extract "${tmp_dir}/${asset_name}" "${tmp_dir}"; then
+        log_error "Extraction failed for ${asset_name}"
+        rm -rf "${tmp_dir}"; return 1
+    fi
+
+    local binary; binary="$(find "${tmp_dir}" -name "edit" -type f -executable | head -1)"
+    if [[ -z "${binary}" ]]; then
+        log_error "edit binary not found in archive — contents:"
+        find "${tmp_dir}" -type f | sed 's/^/  /'
+        rm -rf "${tmp_dir}"; return 1
+    fi
+
+    mkdir -p "${HOME}/.local/bin"
+    cp "${binary}" "${HOME}/.local/bin/edit"
+    chmod +x "${HOME}/.local/bin/edit"
+    rm -rf "${tmp_dir}"
+    log_info "Microsoft Edit ${normalized_ver} installed to ~/.local/bin/edit"
+}
+
+
+install-edit() {
+    log_info "Installing or updating Microsoft Edit..."
+    command -v curl   &>/dev/null || { log_error "curl is required";   return 1; }
+    command -v tar    &>/dev/null || { log_error "tar is required"; return 1; }
+
+    local api_response ver
+    api_response="$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    [[ -z "${ver}" ]] && { log_error "Could not determine latest edit version"; return 1; }
+
+    log_info "Latest version: ${ver}"
+    _edit_install_from_api_response "${api_response}" "${ver}"
+}
+
+
+install-edit-version() {
+    local target_version="$1"
+    [[ -z "${target_version}" ]] && { log_error "Usage: install-edit-version <version>  (e.g. v2.0.0)"; return 1; }
+
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+    command -v tar  &>/dev/null || { log_error "tar is required"; return 1; }
+
+    log_info "Installing Microsoft Edit ${target_version}..."
+    local api_response
+    api_response="$(curl -s "https://api.github.com/repos/microsoft/edit/releases/tags/${target_version}")"
+    printf '%s' "${api_response}" | grep -q '"message": *"Not Found"' \
+        && { log_error "Version ${target_version} not found on GitHub"; return 1; }
+
+    _edit_install_from_api_response "${api_response}" "${target_version}"
+}
+
+
+list-edit-releases() {
+    curl -s https://api.github.com/repos/microsoft/edit/releases \
+        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+}
+
+
+# ── OpenDeck install ──────────────────────────────────────────────────────────
+install-opendeck() {
+    log_info "Installing or updating OpenDeck..."
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
+
+    local api_response ver elevation_cmd="" temp_dir
+    api_response="$(curl -s https://api.github.com/repos/nekename/OpenDeck/releases/latest)"
+    ver="$(echo "${api_response}" | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    [[ -z "${ver}" ]] && { log_error "Could not determine OpenDeck version"; return 1; }
+
+    if [[ "${PACKAGE_MANAGER}" != "brew" ]]; then
+        elevation_cmd="$(get-elevation-command)" || return 1
+    fi
+    temp_dir="$(mktemp -d)"
+
+    case "${PACKAGE_MANAGER}" in
+        apt)
+            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.deb"' \
+                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            [[ -z "${url}" ]] && { log_error "No DEB asset found"; rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/opendeck.deb" || { rm -rf "${temp_dir}"; return 1; }
+            ${elevation_cmd} dpkg -i "${temp_dir}/opendeck.deb" || ${elevation_cmd} apt-get install -f -y
+            ;;
+        dnf|yum|zypper)
+            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.rpm"' \
+                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            [[ -z "${url}" ]] && { log_error "No RPM asset found"; rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/opendeck.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
+                ${elevation_cmd} zypper install -y "${temp_dir}/opendeck.rpm"
+            else
+                ${elevation_cmd} "${PACKAGE_MANAGER}" install -y "${temp_dir}/opendeck.rpm"
+            fi
+            ;;
+        *)
+            log_error "No native package for ${PACKAGE_MANAGER}"; rm -rf "${temp_dir}"; return 1
+            ;;
+    esac
+
+    rm -rf "${temp_dir}"
+    log_info "OpenDeck installation complete"
+}
+
+
+install-opendeck-version() {
+    local target="$1"
+    [[ -z "${target}" ]] && { log_error "Usage: install-opendeck-version <version>"; return 1; }
+    log_info "install-opendeck-version: use install-opendeck for latest; specific-version flow not yet implemented"
+    return 1
+}
+
+
+list-opendeck-releases() {
+    curl -s https://api.github.com/repos/nekename/OpenDeck/releases \
+        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+}
+
+
+# ── NotesHub install ──────────────────────────────────────────────────────────
+install-noteshub() {
+    log_info "Installing or updating NotesHub..."
+    [[ -z "${PACKAGE_MANAGER}" ]] && { detect-package-manager || return 1; }
+
+    local api_response ver arch_suffix elevation_cmd="" temp_dir
+    api_response="$(curl -s https://api.github.com/repos/NotesHubApp/noteshub-releases/releases/latest)"
+    ver="$(echo "${api_response}" | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+    [[ -z "${ver}" ]] && { log_error "Could not determine NotesHub version"; return 1; }
+
+    case "$(uname -m)" in
+        x86_64)       arch_suffix="amd64" ;;
+        aarch64|arm64) arch_suffix="arm64" ;;
+        *) log_error "Unsupported arch: $(uname -m)"; return 1 ;;
+    esac
+
+    [[ "${PACKAGE_MANAGER}" != "brew" ]] && { elevation_cmd="$(get-elevation-command)" || return 1; }
+    temp_dir="$(mktemp -d)"
+
+    case "${PACKAGE_MANAGER}" in
+        apt)
+            local url; url="$(echo "${api_response}" | grep "\"browser_download_url\":.*noteshub_.*_${arch_suffix}\.deb\"" \
+                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            [[ -z "${url}" ]] && { log_error "No DEB asset"; rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/noteshub.deb" || { rm -rf "${temp_dir}"; return 1; }
+            ${elevation_cmd} dpkg -i "${temp_dir}/noteshub.deb" || ${elevation_cmd} apt-get install -f -y
+            ;;
+        dnf|yum|zypper)
+            [[ "${arch_suffix}" != "amd64" ]] && { log_error "RPM only for x86_64"; rm -rf "${temp_dir}"; return 1; }
+            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*NotesHub-.*\.x86_64\.rpm"' \
+                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            [[ -z "${url}" ]] && { log_error "No RPM asset"; rm -rf "${temp_dir}"; return 1; }
+            _download_file_robust "${url}" "${temp_dir}/noteshub.rpm" || { rm -rf "${temp_dir}"; return 1; }
+            if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
+                ${elevation_cmd} zypper install -y "${temp_dir}/noteshub.rpm"
+            else
+                ${elevation_cmd} "${PACKAGE_MANAGER}" install -y "${temp_dir}/noteshub.rpm"
+            fi
+            ;;
+        *)
+            log_error "No supported install method for ${PACKAGE_MANAGER}"; rm -rf "${temp_dir}"; return 1
+            ;;
+    esac
+
+    rm -rf "${temp_dir}"
+    log_info "NotesHub installation complete"
+}
+
+
+install-noteshub-version() {
+    local target="$1"
+    [[ -z "${target}" ]] && { log_error "Usage: install-noteshub-version <version>"; return 1; }
+    log_info "install-noteshub-version: use install-noteshub for latest; specific-version flow not yet implemented"
+    return 1
+}
+
+
+list-noteshub-releases() {
+    curl -s https://api.github.com/repos/NotesHubApp/noteshub-releases/releases \
+        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+}
+
