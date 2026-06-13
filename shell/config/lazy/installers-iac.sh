@@ -166,8 +166,8 @@ install-terraform() {
     tf_version="$(get-latest-terraform-version)"
     [[ -z "${tf_version}" ]] && { log_error "Could not determine Terraform version"; return 1; }
     case "${DOTFILES_OS}" in
-        Linux) _tf-install-linux "${tf_version}" && tflint-install && trivy-install ;;
-        Mac)   _tf-install-mac "${tf_version}"   && tflint-install && trivy-install ;;
+        Linux) _tf-install-linux "${tf_version}" && install-tflint && install-trivy ;;
+        Mac)   _tf-install-mac "${tf_version}"   && install-tflint && install-trivy ;;
         *)     log_error "Unsupported OS"; return 1 ;;
     esac
 }
@@ -437,4 +437,3 @@ install-tflint() {
         *)     log_error "Unsupported OS for tflint"; return 1 ;;
     esac
 }
-

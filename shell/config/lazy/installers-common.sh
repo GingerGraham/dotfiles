@@ -38,6 +38,16 @@ _download_file_robust() {
 
 # ── Shared npm helpers ────────────────────────────────────────────────────────
 
+# _node_version_at_least <major>
+# True if the active node's major version is >= <major>.
+_node_version_at_least() {
+    local want="$1" have
+    command -v node &>/dev/null || return 1
+    have="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
+    [[ -n "${have}" && "${have}" =~ ^[0-9]+$ && "${have}" -ge "${want}" ]]
+}
+
+
 # _ensure_npm — ensure npm is usable, preferring nvm. Returns 0 if npm resolves.
 # Priority: live npm → nvm stub → unsourced nvm (install LTS) → package manager.
 _ensure_npm() {
@@ -114,4 +124,3 @@ _npm_global_install() {
         npm install -g "${pkg}" || return 1
     fi
 }
-

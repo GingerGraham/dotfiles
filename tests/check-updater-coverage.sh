@@ -18,7 +18,13 @@ config_dir="${repo_root}/shell/config"
 
 # Installer files: any lazy/installers*.sh. Adding a new group file
 # (e.g. installers-ai.sh) is picked up automatically — no edit needed here.
+shopt -s nullglob
 installer_files=( "${repo_root}/shell/config/lazy/installers"*.sh )
+shopt -u nullglob
+if (( ${#installer_files[@]} == 0 )); then
+    echo "FAIL: no installer files found under shell/config/lazy/installers*.sh"
+    exit 1
+fi
 
 # install-* functions that intentionally aren't part of routine update-tools.
 # Keep short and justified.
