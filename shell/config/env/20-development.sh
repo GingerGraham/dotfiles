@@ -29,7 +29,10 @@ export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
 
 if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
     _load_nvm() {
-        unset -f nvm node npm npx yarn pnpm
+        for _nvm_fn in nvm node npm npx yarn pnpm; do
+            declare -f "${_nvm_fn}" &>/dev/null && unset -f "${_nvm_fn}"
+        done
+        unset _nvm_fn
         # shellcheck disable=SC1091
         source "${NVM_DIR}/nvm.sh"
         # shellcheck disable=SC1091
