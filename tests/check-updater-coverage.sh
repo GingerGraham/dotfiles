@@ -2,9 +2,9 @@
 # tests/check-updater-coverage.sh
 #
 # Keeps update-tools in sync with the installer set. Two checks:
-#   1. Every public install-* function in lazy/installers.sh is referenced
-#      somewhere in lazy/maintenance.sh (registry row or fallback updater),
-#      unless explicitly allow-listed.
+#   1. Every public install-* function in any lazy/installers*.sh file is
+#      referenced somewhere in lazy/maintenance.sh (registry row or fallback
+#      updater), unless explicitly allow-listed.
 #   2. Every updater/installer function named in the registry actually exists
 #      as a defined function somewhere under shell/config (catches typos like
 #      `helm-install` for `install-helm`).
@@ -13,15 +13,22 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-installers="${repo_root}/shell/config/lazy/installers.sh"
 maintenance="${repo_root}/shell/config/lazy/maintenance.sh"
 config_dir="${repo_root}/shell/config"
+
+# Installer files: any lazy/installers*.sh. Adding a new group file
+# (e.g. installers-ai.sh) is picked up automatically — no edit needed here.
+installer_files=( "${repo_root}/shell/config/lazy/installers"*.sh )
 
 # install-* functions that intentionally aren't part of routine update-tools.
 # Keep short and justified.
 allowlist=(
     install-edit-version      # pinned-version variant of install-edit
     install-noteshub-version  # pinned-version variant of install-noteshub
+    install-opendeck-version  # pinned-version variant of install-opendeck
+    install-zsh               # package-manager install, no-op if zsh present; OS owns updates
+    install-zsh-default-shell # one-time chsh action, not a versioned tool
+    install-zsh-plugins       # one-time plugin clone/install; re-clone semantics, not update-in-place
 )
 
 is_allowlisted() { local f="$1" a; for a in "${allowlist[@]}"; do [[ "${a}" == "${f}" ]] && return 0; done; return 1; }
@@ -29,7 +36,7 @@ is_allowlisted() { local f="$1" a; for a in "${allowlist[@]}"; do [[ "${a}" == "
 # ---- Check 1: every installer is wired into the updater -----------------------
 installers_found=()
 while IFS= read -r fn; do installers_found+=("${fn}"); done < <(
-    grep -Eo '^install-[a-zA-Z0-9_-]+[[:space:]]*\(\)' "${installers}" \
+    grep -Eho '^install-[a-zA-Z0-9_-]+[[:space:]]*\(\)' "${installer_files[@]}" \
         | sed -E 's/[[:space:]]*\(\).*//' | sort -u
 )
 
