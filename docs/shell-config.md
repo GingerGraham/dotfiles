@@ -75,6 +75,7 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 | `terraform.sh`  | `command -v terraform` or `tofu` | Workspace aliases, install helper                           |
 | `ansible.sh`    | `command -v ansible`             | Playbook aliases, vault helpers                             |
 | `containers.sh` | `docker` or `podman`             | Container aliases, image management                         |
+| `direnv.sh`     | `command -v direnv`              | direnv hooks, quiet output, config helpers                  |
 | `aws.sh`        | `command -v aws`                 | Profile switching, region helpers                           |
 | `azure.sh`      | `command -v az`                  | Subscription switching, login helpers                       |
 | `security.sh`   | `clamscan` or `sonar-scanner`    | AV scan aliases, scanner shortcut                           |

@@ -32,6 +32,7 @@ bw|bw|install-bw-cli|install-bw-cli|Bitwarden CLI
 claude|claude|install-claude-code|install-claude-code|Claude Code
 copilot|copilot|install-copilot-cli|install-copilot-cli|GitHub Copilot CLI
 cosign|cosign|install-cosign|install-cosign|cosign
+direnv|direnv|install-direnv|install-direnv|direnv
 edit|edit|install-edit|install-edit|Microsoft Edit
 gh|gh|install-gh|install-gh|GitHub CLI
 glab|glab|install-glab|install-glab|GitLab CLI

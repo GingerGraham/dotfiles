@@ -29,28 +29,30 @@ root is required.
 
 ## Available installers
 
-| Command | Installs | Method |
-| --- | --- | --- |
-| `install-1password` | 1Password Desktop | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback |
-| `install-bitwarden` | Bitwarden desktop app | Vendor package per distro / Flatpak / Homebrew cask |
-| `install-bw-cli` | Bitwarden CLI (`bw`) | npm global `@bitwarden/cli`, with a binary fallback |
-| `install-claude-code` | Claude Code (`claude`) | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback |
-| `install-copilot-cli` | GitHub Copilot CLI | npm global `@github/copilot` |
-| `install-edit` | Microsoft Edit | GitHub release tarball → `~/.local/bin` |
-| `install-gh` | GitHub CLI (`gh`) | Official package repo per distro, with a binary tarball fallback |
-| `install-glab` | GitLab CLI (`glab`) | Native dnf/pacman repo on Fedora/Arch; release tarball fallback |
-| `install-oh-my-posh` | oh-my-posh prompt | Upstream install script / Homebrew |
-| `install-oh-my-zsh` | oh-my-zsh framework | Upstream install script |
-| `install-op-cli` | 1Password CLI (`op`) | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
-| `install-opendeck` | Opendeck | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS |
-| `install-noteshub` | NotesHub | GitHub release `.deb`/`.rpm` via package manager |
-| `install-nvm` | Node Version Manager | Official `install.sh` (version auto-detected), then installs the current LTS |
-| `install-starship` | Starship prompt | Official install script / Homebrew |
-| `install-tflint` | TFLint (Terraform linter) | GitHub release tarball → `~/.local/bin` |
-| `install-terraform` | Terraform CLI | Vendor repo per distro / Homebrew |
-| `install-tenv` | tenv (Terraform/OpenTofu version manager) | GitHub release tarball → `~/.local/bin` |
-| `install-tofu` | tofu CLI | GitHub release tarball → `~/.local/bin` |
-| `install-trivy` | Trivy scanner | Vendor repo per distro / Homebrew |
+| Command               | Installs                                  | Method                                                                       |
+| --------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `install-1password`   | 1Password Desktop                         | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback       |
+| `install-bitwarden`   | Bitwarden desktop app                     | Vendor package per distro / Flatpak / Homebrew cask                          |
+| `install-bw-cli`      | Bitwarden CLI (`bw`)                      | npm global `@bitwarden/cli`, with a binary fallback                          |
+| `install-claude-code` | Claude Code (`claude`)                    | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
+| `install-copilot-cli` | GitHub Copilot CLI                        | npm global `@github/copilot`                                                 |
+| `install-cosign`      | cosign                                    | GitHub release tarball → `~/.local/bin`                                      |
+| `install-direnv`      | direnv                                    | Official install script / Homebrew                                           |
+| `install-edit`        | Microsoft Edit                            | GitHub release tarball → `~/.local/bin`                                      |
+| `install-gh`          | GitHub CLI (`gh`)                         | Official package repo per distro, with a binary tarball fallback             |
+| `install-glab`        | GitLab CLI (`glab`)                       | Native dnf/pacman repo on Fedora/Arch; release tarball fallback              |
+| `install-oh-my-posh`  | oh-my-posh prompt                         | Upstream install script / Homebrew                                           |
+| `install-oh-my-zsh`   | oh-my-zsh framework                       | Upstream install script                                                      |
+| `install-op-cli`      | 1Password CLI (`op`)                      | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS      |
+| `install-opendeck`    | Opendeck                                  | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS      |
+| `install-noteshub`    | NotesHub                                  | GitHub release `.deb`/`.rpm` via package manager                             |
+| `install-nvm`         | Node Version Manager                      | Official `install.sh` (version auto-detected), then installs the current LTS |
+| `install-starship`    | Starship prompt                           | Official install script / Homebrew                                           |
+| `install-tflint`      | TFLint (Terraform linter)                 | GitHub release tarball → `~/.local/bin`                                      |
+| `install-terraform`   | Terraform CLI                             | Vendor repo per distro / Homebrew                                            |
+| `install-tenv`        | tenv (Terraform/OpenTofu version manager) | GitHub release tarball → `~/.local/bin`                                      |
+| `install-tofu`        | tofu CLI                                  | GitHub release tarball → `~/.local/bin`                                      |
+| `install-trivy`       | Trivy scanner                             | Vendor repo per distro / Homebrew                                            |
 
 GPG key backup/restore and signing-key publishing build on the password manager
 and git provider CLIs above — see [gpg.md](gpg.md) for the `gpg-*-bitwarden`,
@@ -64,8 +66,8 @@ Uses GitHub's official package repository for the detected distro family:
 - **rhel** (Fedora, RHEL, Rocky, Alma): adds `gh-cli.repo`. DNF5 (Fedora 41+) and
   DNF4 use different `config-manager` syntax; the function detects which is present
   (`dnf5-plugins` + `config-manager addrepo` on DNF5, `dnf-command(config-manager)`
-  + `config-manager --add-repo` on DNF4) and uses `yum-config-manager` on yum-only
-  hosts.
+  - `config-manager --add-repo` on DNF4) and uses `yum-config-manager` on yum-only
+    hosts.
 - **debian** (Ubuntu, Debian, Mint): installs the keyring to
   `/etc/apt/keyrings/githubcli-archive-keyring.gpg` and adds the signed
   `github-cli.list` source.

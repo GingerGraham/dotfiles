@@ -680,3 +680,73 @@ list-noteshub-releases() {
         | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
 }
 
+# ── direnv install ────────────────────────────────────────────────────────────
+
+_direnv-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} dnf install -y direnv
+}
+
+_direnv-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} apt-get update && ${elevation_cmd} apt-get install -y direnv
+}
+
+_direnv-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} zypper install -y direnv
+}
+
+_direnv-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm direnv
+}
+
+_direnv-install-mac() {
+    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+    if command -v direnv &>/dev/null; then brew upgrade direnv; else brew install direnv; fi
+}
+
+# Distro-independent fallback: official install script → ~/.local/bin
+_direnv-install-script() {
+    log_info "Falling back to the official direnv install script..."
+    command -v curl &>/dev/null || { log_error "curl is required for the fallback install"; return 1; }
+    mkdir -p "${HOME}/.local/bin"
+    curl -sfL https://direnv.net/install.sh | bin_path="${HOME}/.local/bin" bash
+    [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+
+install-direnv() {
+    log_info "Installing or updating direnv..."
+
+    case "${DOTFILES_OS}" in
+        Mac)
+            _direnv-install-mac
+            ;;
+        Linux)
+            local ok=1
+            case "${DOTFILES_DISTRO}" in
+                rhel)   _direnv-install-rhel   && ok=0 ;;
+                debian) _direnv-install-debian && ok=0 ;;
+                suse)   _direnv-install-suse   && ok=0 ;;
+                arch)   _direnv-install-arch   && ok=0 ;;
+                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using install script" ;;
+            esac
+            [[ "${ok}" -ne 0 ]] && { _direnv-install-script || return 1; }
+            ;;
+        *)
+            log_error "Unsupported OS for direnv install"; return 1
+            ;;
+    esac
+
+    if command -v direnv &>/dev/null; then
+        log_info "direnv installed: $(direnv version 2>/dev/null)"
+        echo
+        echo "  Allow a project's .envrc with:"
+        echo "    direnv allow"
+    else
+        log_warn "direnv not found in PATH after install. Restart your shell or check ~/.local/bin."
+    fi
+}

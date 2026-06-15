@@ -1,0 +1,19 @@
+# direnv global configuration — created once by Ansible, never overwritten.
+# Edit freely; subsequent Ansible runs will not touch this file.
+# See: https://direnv.net/man/direnv.toml.1.html
+
+[global]
+# Load .env files automatically alongside .envrc (via dotenv_if_exists in .envrc).
+load_dotenv = true
+
+# Don't warn about long-running .envrc evaluations under this threshold.
+warn_timeout = "10s"
+
+# ── Whitelist ──────────────────────────────────────────────────────────────
+# Directories under here are auto-allowed — no "direnv: error .envrc is
+# blocked" prompt, and no need to run `direnv allow` per project.
+# Remove or tighten this if you'd rather approve each project individually.
+[whitelist]
+prefix = [
+    "{{ projects_base_expanded }}",
+]

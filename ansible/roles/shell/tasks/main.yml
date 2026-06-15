@@ -167,3 +167,23 @@
     dest: "{{ xdg_config_home }}/starship.toml"
     mode: "0644"
     force: false
+
+# ============================================================================
+# Section 6c — Deploy default direnv config (create once, never overwrite)
+# ============================================================================
+- name: shell | resolve projects_base path
+  ansible.builtin.set_fact:
+    projects_base_expanded: "{{ projects_base | replace('~', ansible_facts['env']['HOME']) }}"
+
+- name: Ensure ~/.config/direnv directory exists
+  ansible.builtin.file:
+    path: "{{ xdg_config_home }}/direnv"
+    state: directory
+    mode: "0755"
+
+- name: Deploy default direnv.toml (create once, never overwrite)
+  ansible.builtin.template:
+    src: direnv.toml.j2
+    dest: "{{ xdg_config_home }}/direnv/direnv.toml"
+    mode: "0644"
+    force: false

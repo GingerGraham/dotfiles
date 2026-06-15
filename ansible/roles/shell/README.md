@@ -15,6 +15,7 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | `shell/zshrc`   | `~/.zshrc`                        | Thin stub that sources loader.sh       |
 | `shell/zshenv`  | `~/.zshenv`                       | Sets ZDOTDIR for zsh                   |
 | _(template)_    | `~/.config/shell/env/90-local.sh` | Created once, never overwritten        |
+| _(template)_    | `~/.config/direnv/direnv.toml`    | Created once, never overwritten        |
 | _(template)_    | `~/.config/starship.toml`         | Created once, never overwritten        |
 
 ## Idempotency behaviour
@@ -26,6 +27,7 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | `~/.config/shell` is already the correct symlink | No change (Ansible no-op)                                                         |
 | `~/.config/shell` is a real directory            | **Role fails with instructions** — manual step required                           |
 | `90-local.sh` already exists                     | Left untouched (`force: false`)                                                   |
+| `direnv.toml` already exists                     | Left untouched (`force: false`)                                                   |
 | `starship.toml` already exists                   | Left untouched (`force: false`)                                                   |
 
 ## Machine-local env file
@@ -39,6 +41,29 @@ tier so its values override everything in the shared config.
 
 See the file itself for annotated examples.
 
+## direnv configuration
+
+`~/.config/direnv/direnv.toml` is templated on first Ansible run and never
+overwritten thereafter. Opinionated defaults:
+
+- `load_dotenv = true` — `.envrc` files using `dotenv_if_exists` will also
+  load a sibling `.env` file automatically.
+- `[whitelist] prefix` — your `projects_base` directory tree is pre-allowed,
+  so new `.envrc` files under it load without an explicit `direnv allow`.
+- `warn_timeout = "10s"` — suppresses the slow-`.envrc` warning under 10s.
+
+Shell integration (`tools/direnv.sh`, loaded when `direnv` is present):
+
+- Sets `DIRENV_LOG_FORMAT=""` to silence the per-directory load/unload log lines.
+- `edit-direnv-config` — open `direnv.toml` in `$EDITOR`.
+- `direnv-init-project [path]` — scaffold a starter `.envrc` (with
+  `dotenv_if_exists` and commented examples for AWS/Azure profile vars and
+  Python venv layout) in the given directory (default: cwd). Does not
+  overwrite an existing `.envrc`.
+
+Edit `direnv.toml` directly on the machine for further customisation
+(per-directory `[whitelist.exact]`, additional `[global]` settings, etc.).
+
 ## Dependencies
 
 Requires the `common` role to have run first. The `common` role creates the
@@ -47,12 +72,13 @@ depends on.
 
 ## Variables
 
-| Variable                  | Default                       | Source               | Description                                   |
-| ------------------------- | ----------------------------- | -------------------- | --------------------------------------------- |
-| `shell_config_dir`        | `{{ xdg_config_home }}/shell` | `group_vars/all.yml` | Symlink destination for the shell config tree |
-| `shell_migration_targets` | `[~/.bashrc, ~/.zshrc, ...]`  | `defaults/main.yml`  | Paths checked for linuxDotFiles symlinks      |
-| `shell_stubs`             | `[bashrc, zshrc, zshenv]`     | `defaults/main.yml`  | Stub files symlinked into HOME                |
-| `dotfiles_machine_name`   | `{{ ansible_hostname }}`      | Set by `common` role | Used in 90-local.sh template                  |
+| Variable                  | Default                        | Source               | Description                                   |
+| ------------------------- | ------------------------------ | -------------------- | --------------------------------------------- |
+| `shell_config_dir`        | `{{ xdg_config_home }}/shell`  | `group_vars/all.yml` | Symlink destination for the shell config tree |
+| `shell_migration_targets` | `[~/.bashrc, ~/.zshrc, ...]`   | `defaults/main.yml`  | Paths checked for linuxDotFiles symlinks      |
+| `shell_stubs`             | `[bashrc, zshrc, zshenv]`      | `defaults/main.yml`  | Stub files symlinked into HOME                |
+| `dotfiles_machine_name`   | `{{ ansible_hostname }}`       | Set by `common` role | Used in 90-local.sh template                  |
+| `projects_base`           | `{{ xdg_data_home }}/projects` | `group_vars/all.yml` | Used in direnv.toml template                  |
 
 ## Running this role alone
 
