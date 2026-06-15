@@ -743,6 +743,17 @@ install-direnv() {
 
     if command -v direnv &>/dev/null; then
         log_info "direnv installed: $(direnv version 2>/dev/null)"
+
+        # Attempt to install the shell hook into this session immediately
+        local direnv_tool_file="${SHELL_CONFIG_DIR}/tools/direnv.sh"
+        if [[ -f "${direnv_tool_file}" ]]; then
+            # shellcheck disable=SC1090
+            source "${direnv_tool_file}"
+        fi
+
+        echo
+        log_warn "If 'direnv allow' or .envrc loading doesn't work in this shell,"
+        log_warn "open a new terminal / log out and back in to fully activate direnv."
         echo
         echo "  Allow a project's .envrc with:"
         echo "    direnv allow"
