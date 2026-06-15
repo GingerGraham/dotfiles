@@ -256,6 +256,15 @@ Expire-Date: ${master_expiry}
 %echo Master key done
 EOF
 
+    # Snapshot existing secret-key fingerprints before generation so the
+    # newly created key can be identified unambiguously afterwards. Do NOT
+    # rely on `gpg --list-keys <email>` — this keyring may contain other
+    # keys (including older keys being replaced) that share the same
+    # email/UID, and an email-based lookup would match those too.
+    local fps_before
+    fps_before="$(gpg --list-secret-keys --with-colons 2>/dev/null \
+        | awk -F: '$1=="fpr"{print $10}')"
+
     gpg --full-generate-key --expert --batch "${param_file}"
     local gen_rc=$?
     rm -f "${param_file}"
@@ -265,13 +274,18 @@ EOF
         return 1
     fi
 
-    # Find the fingerprint of the key we just created
-    local fp
-    fp="$(gpg --list-keys --with-colons "${email}" 2>/dev/null \
-        | awk -F: '/^fpr/{print $10; exit}')"
+    # Identify the new key as the fingerprint present after generation but
+    # not before.
+    local fps_after fp
+    fps_after="$(gpg --list-secret-keys --with-colons 2>/dev/null \
+        | awk -F: '$1=="fpr"{print $10}')"
+
+    fp="$(comm -13 <(echo "${fps_before}" | sort) <(echo "${fps_after}" | sort) | head -n1)"
 
     if [[ -z "${fp}" ]]; then
-        log_error "Could not locate new key for ${email}. Check 'gpg-list'."
+        log_error "Could not determine fingerprint of the newly created key."
+        log_error "Check 'gpg-list-secret' manually and verify no subkeys were"
+        log_error "added to an unintended existing key before retrying."
         return 1
     fi
 
