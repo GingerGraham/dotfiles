@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.18"
+VERSION="1.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -233,6 +233,32 @@ parse_args() {
             *) die "Unknown option: $1 — use --help for usage" ;;
         esac
     done
+}
+
+# ── Hostname detection ────────────────────────────────────────────────────────
+# Not every minimal image ships the standalone `hostname` binary (Fedora
+# minimal, some WSL base images) even though hostnamectl/systemd is present.
+# Try hostnamectl first since it's the most consistently available, then
+# hostname, then uname -n as a last resort. Each command is guarded with
+# `command -v` and `|| true` so a missing binary never trips `set -e` —
+# the original bug here was the final command in a `||` chain failing
+# and killing the script before the user was ever prompted.
+_default_hostname() {
+    local name=""
+
+    if command -v hostnamectl &>/dev/null; then
+        name="$(hostnamectl --static 2>/dev/null)" || name=""
+    fi
+
+    if [[ -z "${name}" ]] && command -v hostname &>/dev/null; then
+        name="$(hostname -s 2>/dev/null)" || name="$(hostname 2>/dev/null)" || name=""
+    fi
+
+    if [[ -z "${name}" ]] && command -v uname &>/dev/null; then
+        name="$(uname -n 2>/dev/null)" || name=""
+    fi
+
+    printf '%s' "${name}"
 }
 
 # ── Repo structure sanity check ───────────────────────────────────────────────
@@ -490,7 +516,9 @@ _backfill_role_url() {
     info "Updated ${url_key} in host_vars."
 
     # Update the global variable for the SSH phase
-    case "${role}" in
+    case "${role}" in        NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
+        AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
+        PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         nvim)     NVIM_REPO_URL="${new_url}" ;;
         ai-tools) AI_REPO_URL="${new_url}"   ;;
     esac
@@ -505,6 +533,7 @@ generate_host_vars() {
         NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
         AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
+        MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
         # Honour CLI suppression — don't hand suppressed role URLs to the SSH phase.
         _role_is_suppressed "nvim"     && NVIM_REPO_URL=""
         _role_is_suppressed "ai-tools" && AI_REPO_URL=""
@@ -551,9 +580,17 @@ generate_host_vars() {
     MACHINE_NAME="${ARG_MACHINE_NAME}"
     if [[ -z "${MACHINE_NAME}" ]]; then
         local default_hostname
-        default_hostname="$(hostname -s 2>/dev/null || hostname)"
-        read -r -p "Machine name [${default_hostname}]: " MACHINE_NAME || true
-        MACHINE_NAME="${MACHINE_NAME:-${default_hostname}}"
+        default_hostname="$(_default_hostname)"
+
+        if [[ -n "${default_hostname}" ]]; then
+            read -r -p "Machine name [${default_hostname}]: " MACHINE_NAME || true
+            MACHINE_NAME="${MACHINE_NAME:-${default_hostname}}"
+        else
+            warn "Could not auto-detect a hostname (hostnamectl, hostname, and uname all unavailable)."
+            while [[ -z "${MACHINE_NAME}" ]]; do
+                read -r -p "Machine name (required): " MACHINE_NAME || true
+            done
+        fi
     fi
     info "Machine name: ${MACHINE_NAME}"
     echo
@@ -804,13 +841,13 @@ SSHEOF
 
     # dotfiles_nvim — only if a nvim-config URL was provided
     if [[ -n "${NVIM_REPO_URL}" ]]; then
-        generate_deploy_key "dotfiles_nvim" "dotfiles-nvim@$(hostname -s 2>/dev/null || hostname)"
+        generate_deploy_key "dotfiles_nvim" "dotfiles-nvim@${MACHINE_NAME}"
         _write_ssh_host_entry "github-dotfiles-nvim" "dotfiles_nvim" "${conf_file}"
     fi
 
     # dotfiles_ai — only if an ai-config URL was provided
     if [[ -n "${AI_REPO_URL}" ]]; then
-        generate_deploy_key "dotfiles_ai" "dotfiles-ai@$(hostname -s 2>/dev/null || hostname)"
+        generate_deploy_key "dotfiles_ai" "dotfiles-ai@${MACHINE_NAME}"
         _write_ssh_host_entry "github-dotfiles-ai" "dotfiles_ai" "${conf_file}"
     fi
 
