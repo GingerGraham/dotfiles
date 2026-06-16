@@ -3,6 +3,20 @@
 # shellcheck disable=SC1091
 source "${SHELL_CONFIG_DIR:-$HOME/.config/shell}/lazy/installers-common.sh"
 
+# _gh_release_asset_url <api_response_json> <extended_regex_pattern>
+# Extracts the first browser_download_url whose filename matches <pattern>.
+# Splits each browser_download_url onto its own line before filtering — a
+# GitHub/GitLab API response is one unbroken line, so a plain grep+sed here
+# would let a greedy regex match across every asset in the release rather
+# than just the one wanted, silently returning the wrong file.
+_gh_release_asset_url() {
+    local api_response="$1" pattern="$2"
+    printf '%s' "${api_response}" \
+        | grep -Eo '"browser_download_url": *"[^"]+"' \
+        | sed -E 's/.*"(https[^"]+)"/\1/' \
+        | grep -E "${pattern}" \
+        | head -1
+}
 
 # _node_version_at_least <major>
 # True if the active node's major version is >= <major>.
@@ -184,12 +198,24 @@ install-gh() {
     fi
 }
 
-
 # ── GitLab CLI install ────────────────────────────────────────────────────────
-# Fedora/RHEL: in official dnf repos as 'glab'.
-# Arch: in extra/glab via pacman.
-# Debian/openSUSE: no official vendor repo — binary tarball fallback.
-# macOS: Homebrew.
+# Fedora/RHEL: official dnf/yum repo package 'glab'.
+# Arch: official 'extra/glab' via pacman.
+# Debian/Ubuntu, openSUSE: no vendor apt/zypper repo exists, but GitLab attaches
+#   native .deb/.rpm packages to every release — download + install directly
+#   (same pattern as install-noteshub/install-opendeck).
+# macOS: Homebrew — GitLab's own docs call this the officially supported
+#   method for Linux too, hence its place in the fallback chain below.
+# Fallback (native path failed, or distro unrecognised): Homebrew/Linuxbrew if
+#   present, else the distro-independent release tarball.
+#
+# Snap is deliberately NOT used. glab ships as a strict-confinement snap, and
+# strict snaps' only $HOME access (the "home" interface) cannot read or create
+# hidden directories at all — confirmed as intentional snapd behaviour
+# (https://bugs.launchpad.net/snapd/+bug/1979060). glab's config lives at
+# ~/.config/glab-cli, a hidden directory, so the snap can never write it.
+# (glab does support GLAB_CONFIG_DIR to relocate config somewhere non-hidden
+# if you ever want the snap anyway — not worth the extra moving part here.)
 
 _glab-install-rhel() {
     local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
@@ -209,9 +235,69 @@ _glab-install-arch() {
 }
 
 
-_glab-install-mac() {
-    command -v brew &>/dev/null || { log_error "Homebrew required on macOS"; return 1; }
+# Shared: latest glab tag and arch suffix, used by the debian/suse/tarball paths.
+_glab-latest-tag() {
+    curl -s "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases?order_by=released_at&sort=desc&per_page=1" \
+        | grep -o '"tag_name": *"[^"]*"' \
+        | head -1 \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
+}
+
+_glab-arch-suffix() {
+    case "$(uname -m)" in
+        x86_64)        echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *) log_error "Unsupported architecture: $(uname -m)"; return 1 ;;
+    esac
+}
+
+
+# Direct .deb download from the GitLab release — no apt repo exists for glab.
+_glab-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    local ver ver_num arch asset url tmp_dir
+    ver="$(_glab-latest-tag)"; [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version"; return 1; }
+    ver_num="${ver#v}"
+    arch="$(_glab-arch-suffix)" || return 1
+
+    asset="glab_${ver_num}_linux_${arch}.deb"
+    url="https://gitlab.com/gitlab-org/cli/-/releases/${ver}/downloads/${asset}"
+    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+    ${elevation_cmd} dpkg -i "${tmp_dir}/${asset}" || ${elevation_cmd} apt-get install -f -y
+    rm -rf "${tmp_dir}"
+}
+
+
+# Direct .rpm download from the GitLab release — no zypper repo exists for glab.
+_glab-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    local ver ver_num arch asset url tmp_dir
+    ver="$(_glab-latest-tag)"; [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version"; return 1; }
+    ver_num="${ver#v}"
+    arch="$(_glab-arch-suffix)" || return 1
+
+    asset="glab_${ver_num}_linux_${arch}.rpm"
+    url="https://gitlab.com/gitlab-org/cli/-/releases/${ver}/downloads/${asset}"
+    tmp_dir="$(mktemp -d)"
+
+    log_info "Downloading ${asset}..."
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+    ${elevation_cmd} zypper install -y "${tmp_dir}/${asset}"
+    rm -rf "${tmp_dir}"
+}
+
+
+_glab-install-brew() {
+    command -v brew &>/dev/null || { log_error "Homebrew not found"; return 1; }
     if command -v glab &>/dev/null; then brew upgrade glab; else brew install glab; fi
+}
+
+
+_glab-install-mac() {
+    _glab-install-brew
 }
 
 
@@ -220,29 +306,24 @@ _glab-install-tarball() {
     log_info "Falling back to distro-independent binary from GitLab releases..."
     command -v tar &>/dev/null || { log_error "tar is required for the fallback install"; return 1; }
 
-    local api_response ver ver_num machine arch os ext asset url tmp_dir bin
-    api_response="$(curl -s https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases \
-        | grep '"tag_name"' | head -1 \
-        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
-    ver="${api_response}"
-    [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version (GitLab API unavailable?)"; return 1; }
+    local ver ver_num arch asset url tmp_dir bin
+    ver="$(_glab-latest-tag)"; [[ -z "${ver}" ]] && { log_error "Could not determine latest glab version (GitLab API unavailable?)"; return 1; }
     ver_num="${ver#v}"
+    arch="$(_glab-arch-suffix)" || return 1
 
-    machine="$(uname -m)"
-    case "${machine}" in
-        x86_64)        arch="amd64" ;;
-        aarch64|arm64) arch="arm64" ;;
-        *) log_error "Unsupported architecture: ${machine}"; return 1 ;;
-    esac
-
-    # GitLab release assets use the pattern: glab_<ver>_Linux_<arch>.tar.gz
-    asset="glab_${ver_num}_Linux_${arch}.tar.gz"
+    # GitLab release assets use lowercase "linux" (glab_<ver>_linux_<arch>.tar.gz)
+    # since the GitLab org took over the project — the old profclems/glab
+    # releases used "Linux", which is what broke this before.
+    asset="glab_${ver_num}_linux_${arch}.tar.gz"
     url="https://gitlab.com/gitlab-org/cli/-/releases/${ver}/downloads/${asset}"
     tmp_dir="$(mktemp -d)"
 
     log_info "Downloading ${asset}..."
     _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
-    tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+    if ! tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"; then
+        log_error "Archive did not extract — asset naming may have changed upstream again"
+        rm -rf "${tmp_dir}"; return 1
+    fi
 
     bin="$(find "${tmp_dir}" -type f -name glab -perm -u+x | head -1)"
     if [[ -z "${bin}" ]]; then
@@ -254,6 +335,18 @@ _glab-install-tarball() {
     log_info "glab installed to ~/.local/bin/glab"
     [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
         && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+}
+
+
+# Used if the matching native path above failed, or the distro is unrecognised:
+# Homebrew/Linuxbrew if present, then the release tarball as the last resort.
+_glab-install-fallback-chain() {
+    if command -v brew &>/dev/null; then
+        log_info "Homebrew detected — installing glab via brew..."
+        _glab-install-brew && return 0
+        log_warn "Homebrew install failed — trying the release tarball..."
+    fi
+    _glab-install-tarball
 }
 
 
@@ -270,11 +363,13 @@ install-glab() {
             case "${DOTFILES_DISTRO}" in
                 rhel)   _glab-install-rhel   && ok=0 ;;
                 arch)   _glab-install-arch   && ok=0 ;;
-                debian) log_warn "No official apt repo for glab — using tarball install" ;;
-                suse)   log_warn "No official zypper repo for glab — using tarball install" ;;
-                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — using tarball install" ;;
+                debian) _glab-install-debian && ok=0 ;;
+                suse)   _glab-install-suse   && ok=0 ;;
             esac
-            [[ "${ok}" -ne 0 ]] && { _glab-install-tarball || return 1; }
+            if [[ "${ok}" -ne 0 ]]; then
+                log_info "No working native package path for glab — trying brew/tarball..."
+                _glab-install-fallback-chain || return 1
+            fi
             ;;
         *)
             log_error "Unsupported OS for glab install"; return 1
@@ -290,7 +385,6 @@ install-glab() {
         log_warn "glab not found in PATH after install. Restart your shell or check ~/.local/bin."
     fi
 }
-
 
 # ── nvm (Node Version Manager) install ────────────────────────────────────────
 
@@ -436,18 +530,9 @@ _edit_arch_stem() {
 
 
 # _edit_asset_url <api_response> <stem>
-#   Searches the GitHub API JSON for any download URL whose filename starts with
-#   <stem> and ends with a known archive extension.  Prints the URL.
-#   By matching on stem rather than full filename we survive extension changes.
 _edit_asset_url() {
     local api_response="$1" stem="$2"
-    local url
-    # Match the stem followed by any extension (.tar.gz, .tar.zst, .zip, etc.)
-    url="$(printf '%s' "${api_response}" \
-        | grep "\"browser_download_url\":.*${stem}" \
-        | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' \
-        | head -1)"
-    printf '%s' "${url}"
+    _gh_release_asset_url "${api_response}" "${stem}"
 }
 
 
@@ -486,8 +571,8 @@ _edit_install_from_api_response() {
         log_error "No release asset matching '${stem}' found for ${display_ver}"
         log_info "Assets available in this release:"
         printf '%s' "${api_response}" \
-            | grep '"browser_download_url":' \
-            | sed -E 's/.*"browser_download_url": *"([^"]+)".*/  \1/'
+            | grep -Eo '"browser_download_url": *"[^"]+"' \
+            | sed -E 's/.*"(https[^"]+)"/  \1/'
         return 1
     fi
 
@@ -556,7 +641,9 @@ install-edit-version() {
 
 list-edit-releases() {
     curl -s https://api.github.com/repos/microsoft/edit/releases \
-        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+        | grep -o '"tag_name": *"[^"]*"' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
+        | head -10
 }
 
 
@@ -577,15 +664,13 @@ install-opendeck() {
 
     case "${PACKAGE_MANAGER}" in
         apt)
-            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.deb"' \
-                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            local url; url="$(_gh_release_asset_url "${api_response}" '\.deb$')"
             [[ -z "${url}" ]] && { log_error "No DEB asset found"; rm -rf "${temp_dir}"; return 1; }
             _download_file_robust "${url}" "${temp_dir}/opendeck.deb" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} dpkg -i "${temp_dir}/opendeck.deb" || ${elevation_cmd} apt-get install -f -y
             ;;
         dnf|yum|zypper)
-            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*\.rpm"' \
-                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            local url; url="$(_gh_release_asset_url "${api_response}" '\.rpm$')"
             [[ -z "${url}" ]] && { log_error "No RPM asset found"; rm -rf "${temp_dir}"; return 1; }
             _download_file_robust "${url}" "${temp_dir}/opendeck.rpm" || { rm -rf "${temp_dir}"; return 1; }
             if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
@@ -614,7 +699,9 @@ install-opendeck-version() {
 
 list-opendeck-releases() {
     curl -s https://api.github.com/repos/nekename/OpenDeck/releases \
-        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+        | grep -o '"tag_name": *"[^"]*"' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
+        | head -10
 }
 
 
@@ -639,16 +726,14 @@ install-noteshub() {
 
     case "${PACKAGE_MANAGER}" in
         apt)
-            local url; url="$(echo "${api_response}" | grep "\"browser_download_url\":.*noteshub_.*_${arch_suffix}\.deb\"" \
-                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            local url; url="$(_gh_release_asset_url "${api_response}" "noteshub_.*_${arch_suffix}\.deb")"
             [[ -z "${url}" ]] && { log_error "No DEB asset"; rm -rf "${temp_dir}"; return 1; }
             _download_file_robust "${url}" "${temp_dir}/noteshub.deb" || { rm -rf "${temp_dir}"; return 1; }
             ${elevation_cmd} dpkg -i "${temp_dir}/noteshub.deb" || ${elevation_cmd} apt-get install -f -y
             ;;
         dnf|yum|zypper)
             [[ "${arch_suffix}" != "amd64" ]] && { log_error "RPM only for x86_64"; rm -rf "${temp_dir}"; return 1; }
-            local url; url="$(echo "${api_response}" | grep '"browser_download_url":.*NotesHub-.*\.x86_64\.rpm"' \
-                | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
+            local url; url="$(_gh_release_asset_url "${api_response}" "NotesHub-.*\.x86_64\.rpm")"
             [[ -z "${url}" ]] && { log_error "No RPM asset"; rm -rf "${temp_dir}"; return 1; }
             _download_file_robust "${url}" "${temp_dir}/noteshub.rpm" || { rm -rf "${temp_dir}"; return 1; }
             if [[ "${PACKAGE_MANAGER}" == "zypper" ]]; then
@@ -677,7 +762,9 @@ install-noteshub-version() {
 
 list-noteshub-releases() {
     curl -s https://api.github.com/repos/NotesHubApp/noteshub-releases/releases \
-        | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | head -10
+        | grep -o '"tag_name": *"[^"]*"' \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
+        | head -10
 }
 
 # ── direnv install ────────────────────────────────────────────────────────────
