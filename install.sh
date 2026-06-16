@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -516,9 +516,7 @@ _backfill_role_url() {
     info "Updated ${url_key} in host_vars."
 
     # Update the global variable for the SSH phase
-    case "${role}" in        NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
-        AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
-        PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
+    case "${role}" in
         nvim)     NVIM_REPO_URL="${new_url}" ;;
         ai-tools) AI_REPO_URL="${new_url}"   ;;
     esac
