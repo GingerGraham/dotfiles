@@ -2,6 +2,13 @@
 # means the role never needs updating when a forge rotates its host key.
 # failed_when guards against an empty stdout so a network blip produces a
 # clear failure rather than silently writing nothing to known_hosts.
+#
+# ignore_errors: true makes this task non-fatal. ssh-keyscan is best-effort
+# pre-trust — if a forge is unreachable (corporate egress block, transient
+# network issue), we don't want that to abort the rest of the ssh role or
+# the play. Per-item results are still marked failed internally, so the
+# warning task below and the known_hosts task downstream can react to them
+# correctly; only the hard stop is suppressed.
 - name: Fetch host keys from Git forges via ssh-keyscan
   ansible.builtin.command:
     cmd: "ssh-keyscan -T {{ ssh_keyscan_timeout }} {{ item }}"
@@ -16,10 +23,34 @@
   loop: "{{ ssh_known_hosts_forges }}"
   loop_control:
     label: "{{ item }}"
+  ignore_errors: true
+
+# Surface failures explicitly rather than letting them pass silently. Without
+# this, a permanently-blocked forge would just quietly never get a
+# known_hosts entry, run after run, with no visible signal.
+- name: Warn about forges that could not be pre-trusted
+  ansible.builtin.debug:
+    msg: >-
+      ssh-keyscan could not reach: {{ _failed_keyscan_forges | join(', ') }}.
+      These hosts were NOT added to known_hosts on this run. The first SSH
+      connection to them may prompt for host-key verification, which will
+      hang in non-interactive contexts (e.g. an Ansible git clone) rather
+      than failing cleanly.
+  vars:
+    _failed_keyscan_forges: >-
+      {{ _forge_keyscans.results
+         | selectattr('failed', 'defined')
+         | selectattr('failed')
+         | map(attribute='item')
+         | list }}
+  when: _failed_keyscan_forges | length > 0
 
 # _forge_keyscans.results is a list of per-forge task results, each with a
 # stdout_lines list. subelements flattens this to (result, line) pairs so
 # the known_hosts module can be called once per key line.
+# skip_missing=True so a forge whose command result has no stdout_lines key
+# (e.g. the module itself errored rather than the command running and
+# returning non-zero) is dropped instead of raising a subelements error.
 # The when condition drops comment lines (ssh-keyscan emits a leading comment
 # with the scanned hostname) and blank lines.
 - name: Add forge host keys to known_hosts
@@ -28,7 +59,7 @@
     key: "{{ item.1 }}"
     path: "{{ ssh_known_hosts_path }}"
     state: present
-  loop: "{{ _forge_keyscans.results | subelements('stdout_lines') }}"
+  loop: "{{ _forge_keyscans.results | subelements('stdout_lines', skip_missing=True) }}"
   when:
     - item.1 | length > 0
     - not item.1.startswith('#')
