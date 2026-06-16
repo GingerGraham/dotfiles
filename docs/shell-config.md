@@ -16,6 +16,7 @@ Shell config lives at `~/.config/shell/` — an XDG-compliant directory that is 
   - [Exported variables](#exported-variables)
   - [Machine-local overrides](#machine-local-overrides)
   - [Shell introspection](#shell-introspection)
+    - [Adding a new getter](#adding-a-new-getter)
   - [Migration from an existing shell config](#migration-from-an-existing-shell-config)
   - [Tool installation \& management](#tool-installation--management)
     - [Installers (lazy/installers.sh)](#installers-lazyinstallerssh)
@@ -61,7 +62,7 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 | `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks    |
 | `env/90-local.sh`       | Machine-local overrides — created once, never overwritten |
 | `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)         |
-| `core/functions.sh`     | Shell introspection (`get-my-functions`, `dedupe-path`)   |
+| `core/functions.sh`     | Shell introspection (`get-fuctions`, `dedupe-path`)   |
 | `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                       |
 
 ### Tier 2 — Conditional eager
@@ -100,7 +101,7 @@ gpg-create-key
 | `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                                 |
 | `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)      |
 
-Use `get-my-installers` (alias: `installers`) to list all available lazy install commands.
+Use `get-installers` (alias: `installers`) to list all available lazy install commands.
 
 ## Prompt engine selection
 
@@ -139,14 +140,56 @@ Set `DOTFILES_SHOW_FUNCTIONS=true` here to print the function list automatically
 
 ## Shell introspection
 
-Two functions are available in every shell:
+`get-functions` lists every loaded function and alias not already covered by a dedicated getter, then prints a Getters section pointing at the rest:
 
 ```bash
-get-my-functions    # Lists all loaded functions and aliases
-get-my-installers   # Lists lazy install-* commands (alias: installers)
+get-functions    # Lists uncurated functions/aliases, plus a menu of getters
+get-installers   # alias: installers — lazy install-* commands
 ```
 
-`get-my-functions` excludes functions prefixed with `_` (private helpers) and functions prefixed with `install-` (those are shown by `get-my-installers` instead).
+Available getters today:
+
+| Getter                                 | Covers                                                 |
+| -------------------------------------- | ------------------------------------------------------ |
+| `get-gpg-functions`                    | `tools/gpg.sh` + `lazy/gpg-management.sh`              |
+| `get-git-functions`                    | `tools/git.sh` — project management vs general helpers |
+| `get-terraform-functions`              | `tools/terraform.sh` aliases and functions             |
+| `get-installers` (alias: `installers`) | every `install-*` function                             |
+
+### Adding a new getter
+
+Two generic primitives in `core/functions.sh` do the extraction and printing; every getter is a thin wrapper around them:
+
+- `_get_functions_in <label> <pattern> <file...>` — function names defined in the given file(s)
+- `_get_aliases_in <label> <pattern> <file...>` — same, for aliases
+
+`<pattern>` is an ERE applied to the extracted names: `""` shows everything, `'^foo-'` keeps only matches, `'!^foo-'` (leading `!`) drops matches instead. Private (`_`-prefixed) functions are always excluded automatically.
+
+A minimal getter for a new `tools/<name>.sh` file:
+
+```bash
+get-<name>-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _f="${_config_dir}/tools/<name>.sh"
+    _get_aliases_in   "<Name> aliases (tools/<name>.sh)"   "" "${_f}"
+    _get_functions_in "<Name> functions (tools/<name>.sh)" "" "${_f}"
+}
+```
+
+Then register it in `_function_getters_registry()` so `get-functions` excludes its functions/aliases and lists it in the Getters section:
+
+```text
+<name>|file:tools/<name>.sh|get-<name>-functions|<Label shown in the Getters section>
+```
+
+Filter tokens:
+
+- `file:<comma-separated paths relative to $SHELL_CONFIG_DIR>` — excludes by source file
+- `prefix:<name prefix>` — excludes by name prefix instead (used for `installers`, since `install-*` functions live across multiple files rather than one)
+
+No changes to `get-functions` itself are needed — that's the whole contract.
+
+`get-functions` excludes functions prefixed with `_` (private helpers) and functions prefixed with `install-` (those are shown by `get-installers` instead).
 
 ## Migration from an existing shell config
 
@@ -185,7 +228,7 @@ install-helm
 install-aws
 
 # See all available installers
-installers   # Alias for get-my-installers
+installers   # Alias for get-installers
 ```
 
 Installers are safe to call repeatedly; they detect the current version and skip re-download if already up-to-date.
@@ -265,7 +308,8 @@ shell/
     ├── platform/           # linux.sh, macos.sh, wsl.sh
     ├── distro/             # rhel.sh, debian.sh, suse.sh, arch.sh
     ├── lazy/                   # Lazy-loaded on first call, not at startup
-    │   ├── installers.sh       # install-<tool> and set-<tool> commands
+    │   ├── installers-X.sh     # install-<tool> and set-<tool> commands
+    |   |                       # Split into multiple files to avoid shell startup slowdown from parsing a single large file
     │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, etc.
     │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
     │   │                       # Coordinates install-* commands and automatic updates

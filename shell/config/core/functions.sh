@@ -7,7 +7,214 @@
 
 # _read_prompt <prompt_string> <variable_name>
 # Portable prompt+read for bash and zsh. zsh's `read -p` means "read from
-# coprocess", so we drive prompt and input through /dev/tty directly.
+# coprocess", so we drive prompt and input through /dev/tty directly.# ── Getter pattern ──────────────────────────────────────────────────────────
+# Two generic primitives that every "get-<domain>-functions" getter is built
+# from — one for function names, one for alias names. Both take a label, an
+# optional ERE pattern ("" = no filter, leading "!" = exclude matches instead
+# of include), and one or more files. Private (_-prefixed) functions are
+# always excluded; there's no equivalent alias convention so none are.
+_extract_function_names() {
+    grep -Eho '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "$@" 2>/dev/null \
+        | sed 's/[[:space:]]*()//' \
+        | grep -v '^_' \
+        | sort -u
+}
+
+_extract_alias_names() {
+    grep -Eho '^[[:space:]]*alias [a-zA-Z0-9_-]+=' "$@" 2>/dev/null \
+        | sed -E 's/^[[:space:]]*alias ([a-zA-Z0-9_-]+)=.*/\1/' \
+        | sort -u
+}
+
+# $1 label   $2 pattern (ERE, "" = none, leading "!" = exclude)   $3.. files
+_get_functions_in() {
+    local _label="$1" _pattern="$2"; shift 2
+    echo
+    echo "[INFO] ${_label}:"
+    if [[ $# -eq 0 ]]; then
+        echo "  (no files given)"; echo; return 1
+    fi
+    local _names; _names="$(_extract_function_names "$@")"
+    if [[ "${_pattern}" == \!* ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -Ev "${_pattern#!}")"
+    elif [[ -n "${_pattern}" ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -E "${_pattern}")"
+    fi
+    if [[ -z "${_names}" ]]; then
+        echo "  (none)"
+    else
+        printf '%s\n' "${_names}" | column
+    fi
+    echo
+}
+
+# $1 label   $2 pattern (ERE, "" = none, leading "!" = exclude)   $3.. files
+_get_aliases_in() {
+    local _label="$1" _pattern="$2"; shift 2
+    echo
+    echo "[INFO] ${_label}:"
+    if [[ $# -eq 0 ]]; then
+        echo "  (no files given)"; echo; return 1
+    fi
+    local _names; _names="$(_extract_alias_names "$@")"
+    if [[ "${_pattern}" == \!* ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -Ev "${_pattern#!}")"
+    elif [[ -n "${_pattern}" ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -E "${_pattern}")"
+    fi
+    if [[ -z "${_names}" ]]; then
+        echo "  (none)"
+    else
+        printf '%s\n' "${_names}" | column
+    fi
+    echo
+}
+
+# ── Getter registry ────────────────────────────────────────────────────────
+# Maps each domain getter to what it covers. get-functions reads this to (a)
+# exclude already-curated functions/aliases from its own output and (b) print
+# the Getters section. Two filter forms, same idea as _managed_tools_registry's
+# command/path: tokens:
+#   file:<comma-separated paths relative to $SHELL_CONFIG_DIR>
+#   prefix:<name prefix>
+# Add a row here whenever a new get-<domain>-functions getter is added — see
+# docs/shell-config.md for the full contract.
+_function_getters_registry() {
+    cat <<'EOF'
+gpg|file:tools/gpg.sh,lazy/gpg-management.sh|get-gpg-functions|GPG key, signing & Git integration helpers
+git|file:tools/git.sh|get-git-functions|Git project management & worktree helpers
+terraform|file:tools/terraform.sh|get-terraform-functions|Terraform/OpenTofu/Terragrunt aliases & helpers
+installers|prefix:install-|get-installers|Lazy-loaded install-* commands
+EOF
+}
+
+# ── Introspection: list loaded functions and aliases ─────────────────────────
+# Excludes private (_-prefixed) functions and anything covered by a getter in
+# the registry above — run that getter for the full detail on each area.
+get-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _name _filter _getter _label _rel _f
+
+    local -a _exclude_fn_names=() _exclude_alias_names=() _exclude_prefixes=()
+    while IFS='|' read -r _name _filter _getter _label; do
+        [[ -z "${_name}" ]] && continue
+        case "${_filter}" in
+            file:*)
+                while IFS= read -r _rel; do
+                    [[ -z "${_rel}" ]] && continue
+                    _f="${_config_dir}/${_rel}"
+                    [[ -f "${_f}" ]] || continue
+                    while IFS= read -r _fn; do
+                        [[ -n "${_fn}" ]] && _exclude_fn_names+=("${_fn}")
+                    done < <(_extract_function_names "${_f}")
+                    while IFS= read -r _an; do
+                        [[ -n "${_an}" ]] && _exclude_alias_names+=("${_an}")
+                    done < <(_extract_alias_names "${_f}")
+                done < <(printf '%s\n' "${_filter#file:}" | tr ',' '\n')
+                ;;
+            prefix:*)
+                _exclude_prefixes+=("${_filter#prefix:}")
+                ;;
+        esac
+    done < <(_function_getters_registry)
+
+    _getfns_excluded() {
+        local _fn="$1" _e _p
+        for _e in "${_exclude_fn_names[@]}"; do [[ "${_fn}" == "${_e}" ]] && return 0; done
+        for _p in "${_exclude_prefixes[@]}"; do [[ "${_fn}" == "${_p}"* ]] && return 0; done
+        return 1
+    }
+    _getalias_excluded() {
+        local _an="$1" _e
+        for _e in "${_exclude_alias_names[@]}"; do [[ "${_an}" == "${_e}" ]] && return 0; done
+        return 1
+    }
+
+    echo
+    echo "[INFO] Loaded functions:"
+    if [[ -n "${BASH_VERSION}" ]]; then
+        declare -F \
+            | awk '{print $3}' \
+            | grep -v '^_' \
+            | while read -r fn; do
+                grep -rlq "^${fn}[[:space:]]*()" "${_config_dir}" 2>/dev/null \
+                    && ! _getfns_excluded "${fn}" \
+                    && echo "${fn}"
+              done \
+            | sort | column
+    elif [[ -n "${ZSH_VERSION}" ]]; then
+        grep -Eho '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' \
+            "${_config_dir}"/**/*.sh 2>/dev/null \
+            | sed 's/[[:space:]]*()//' | awk -F: '{print $NF}' \
+            | grep -v '^_' \
+            | sort -u \
+            | while read -r fn; do
+                _getfns_excluded "${fn}" || echo "${fn}"
+              done \
+            | column
+    fi
+
+    echo
+    echo "[INFO] Loaded aliases:"
+    if [[ -n "${BASH_VERSION}" ]]; then
+        alias | sed 's/alias //g' | awk -F= '{print $1}' | sort \
+            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
+            | column
+    elif [[ -n "${ZSH_VERSION}" ]]; then
+        # shellcheck disable=SC2154
+        alias -L | sed 's/alias //g' | awk -F= '{print $1}' | sort \
+            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
+            | column
+    fi
+
+    echo
+    echo "[INFO] Getters — run any of these for full detail on that area:"
+    while IFS='|' read -r _name _filter _getter _label; do
+        [[ -z "${_name}" ]] && continue
+        printf '  %-22s %s\n' "${_getter}" "${_label}"
+    done < <(_function_getters_registry)
+    echo
+
+    unset -f _getfns_excluded _getalias_excluded
+}
+
+# ── Introspection: list install-* functions ───────────────────────────────────
+get-installers() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    _get_functions_in "Install commands (lazy-loaded on first use)" '^install-' \
+        "${_config_dir}"/lazy/installers*.sh
+}
+
+# ── Introspection: list GPG functions and aliases ─────────────────────────────
+get-gpg-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    _get_functions_in "GPG functions — tools/gpg.sh (Tier 2, always loaded when gpg present)" \
+        "" "${_config_dir}/tools/gpg.sh"
+    _get_aliases_in "GPG aliases — tools/gpg.sh" \
+        "" "${_config_dir}/tools/gpg.sh"
+    _get_functions_in "GPG functions — lazy/gpg-management.sh (Tier 3, lazy-loaded on first call)" \
+        "" "${_config_dir}/lazy/gpg-management.sh"
+}
+
+# ── Introspection: list git functions ─────────────────────────────────────────
+get-git-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _f="${_config_dir}/tools/git.sh"
+    _get_functions_in "Git project management functions (tools/git.sh)" \
+        '^git-(add|update|remove|list|sync|projects)-' "${_f}"
+    _get_functions_in "Git helper functions (tools/git.sh)" \
+        '!^git-(add|update|remove|list|sync|projects)-' "${_f}"
+}
+
+# ── Introspection: list Terraform/OpenTofu/Terragrunt functions and aliases ──
+get-terraform-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _f="${_config_dir}/tools/terraform.sh"
+    _get_aliases_in "Terraform / OpenTofu / Terragrunt aliases (tools/terraform.sh)" \
+        "" "${_f}"
+    _get_functions_in "Terraform / OpenTofu functions (tools/terraform.sh)" \
+        "" "${_f}"
+}
 _read_prompt() {
     local _rp_prompt="$1"
     local _rp_var="$2"
@@ -135,20 +342,138 @@ elevate-cmd() {
     ${elevation_cmd} ${cmd_to_run}
 }
 
-# ── Introspection: list loaded functions and aliases ──────────────────────────
-# install-* functions are excluded — use get-my-installers (alias: installers) to list them.
-get-my-functions() {
+# ── Getter pattern ──────────────────────────────────────────────────────────
+# Two generic primitives that every "get-<domain>-functions" getter is built
+# from — one for function names, one for alias names. Both take a label, an
+# optional ERE pattern ("" = no filter, leading "!" = exclude matches instead
+# of include), and one or more files. Private (_-prefixed) functions are
+# always excluded; there's no equivalent alias convention so none are.
+_extract_function_names() {
+    grep -Eho '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "$@" 2>/dev/null \
+        | sed 's/[[:space:]]*()//' \
+        | grep -v '^_' \
+        | sort -u
+}
+
+_extract_alias_names() {
+    grep -Eho '^[[:space:]]*alias [a-zA-Z0-9_-]+=' "$@" 2>/dev/null \
+        | sed -E 's/^[[:space:]]*alias ([a-zA-Z0-9_-]+)=.*/\1/' \
+        | sort -u
+}
+
+# $1 label   $2 pattern (ERE, "" = none, leading "!" = exclude)   $3.. files
+_get_functions_in() {
+    local _label="$1" _pattern="$2"; shift 2
+    echo
+    echo "[INFO] ${_label}:"
+    if [[ $# -eq 0 ]]; then
+        echo "  (no files given)"; echo; return 1
+    fi
+    local _names; _names="$(_extract_function_names "$@")"
+    if [[ "${_pattern}" == \!* ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -Ev "${_pattern#!}")"
+    elif [[ -n "${_pattern}" ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -E "${_pattern}")"
+    fi
+    if [[ -z "${_names}" ]]; then
+        echo "  (none)"
+    else
+        printf '%s\n' "${_names}" | column
+    fi
+    echo
+}
+
+# $1 label   $2 pattern (ERE, "" = none, leading "!" = exclude)   $3.. files
+_get_aliases_in() {
+    local _label="$1" _pattern="$2"; shift 2
+    echo
+    echo "[INFO] ${_label}:"
+    if [[ $# -eq 0 ]]; then
+        echo "  (no files given)"; echo; return 1
+    fi
+    local _names; _names="$(_extract_alias_names "$@")"
+    if [[ "${_pattern}" == \!* ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -Ev "${_pattern#!}")"
+    elif [[ -n "${_pattern}" ]]; then
+        _names="$(printf '%s\n' "${_names}" | grep -E "${_pattern}")"
+    fi
+    if [[ -z "${_names}" ]]; then
+        echo "  (none)"
+    else
+        printf '%s\n' "${_names}" | column
+    fi
+    echo
+}
+
+# ── Getter registry ────────────────────────────────────────────────────────
+# Maps each domain getter to what it covers. get-functions reads this to (a)
+# exclude already-curated functions/aliases from its own output and (b) print
+# the Getters section. Two filter forms, same idea as _managed_tools_registry's
+# command/path: tokens:
+#   file:<comma-separated paths relative to $SHELL_CONFIG_DIR>
+#   prefix:<name prefix>
+# Add a row here whenever a new get-<domain>-functions getter is added — see
+# docs/shell-config.md for the full contract.
+_function_getters_registry() {
+    cat <<'EOF'
+gpg|file:tools/gpg.sh,lazy/gpg-management.sh|get-gpg-functions|GPG key, signing & Git integration helpers
+git|file:tools/git.sh|get-git-functions|Git project management & worktree helpers
+terraform|file:tools/terraform.sh|get-terraform-functions|Terraform/OpenTofu/Terragrunt aliases & helpers
+installers|prefix:install-|get-installers|Lazy-loaded install-* commands
+EOF
+}
+
+# ── Introspection: list loaded functions and aliases ─────────────────────────
+# Excludes private (_-prefixed) functions and anything covered by a getter in
+# the registry above — run that getter for the full detail on each area.
+get-functions() {
     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _name _filter _getter _label _rel _f
+
+    local -a _exclude_fn_names=() _exclude_alias_names=() _exclude_prefixes=()
+    while IFS='|' read -r _name _filter _getter _label; do
+        [[ -z "${_name}" ]] && continue
+        case "${_filter}" in
+            file:*)
+                while IFS= read -r _rel; do
+                    [[ -z "${_rel}" ]] && continue
+                    _f="${_config_dir}/${_rel}"
+                    [[ -f "${_f}" ]] || continue
+                    while IFS= read -r _fn; do
+                        [[ -n "${_fn}" ]] && _exclude_fn_names+=("${_fn}")
+                    done < <(_extract_function_names "${_f}")
+                    while IFS= read -r _an; do
+                        [[ -n "${_an}" ]] && _exclude_alias_names+=("${_an}")
+                    done < <(_extract_alias_names "${_f}")
+                done < <(printf '%s\n' "${_filter#file:}" | tr ',' '\n')
+                ;;
+            prefix:*)
+                _exclude_prefixes+=("${_filter#prefix:}")
+                ;;
+        esac
+    done < <(_function_getters_registry)
+
+    _getfns_excluded() {
+        local _fn="$1" _e _p
+        for _e in "${_exclude_fn_names[@]}"; do [[ "${_fn}" == "${_e}" ]] && return 0; done
+        for _p in "${_exclude_prefixes[@]}"; do [[ "${_fn}" == "${_p}"* ]] && return 0; done
+        return 1
+    }
+    _getalias_excluded() {
+        local _an="$1" _e
+        for _e in "${_exclude_alias_names[@]}"; do [[ "${_an}" == "${_e}" ]] && return 0; done
+        return 1
+    }
+
     echo
     echo "[INFO] Loaded functions:"
     if [[ -n "${BASH_VERSION}" ]]; then
-        # shellcheck disable=SC2016
         declare -F \
             | awk '{print $3}' \
             | grep -v '^_' \
-            | grep -v '^install-' \
             | while read -r fn; do
                 grep -rlq "^${fn}[[:space:]]*()" "${_config_dir}" 2>/dev/null \
+                    && ! _getfns_excluded "${fn}" \
                     && echo "${fn}"
               done \
             | sort | column
@@ -157,105 +482,75 @@ get-my-functions() {
             "${_config_dir}"/**/*.sh 2>/dev/null \
             | sed 's/[[:space:]]*()//' | awk -F: '{print $NF}' \
             | grep -v '^_' \
-            | grep -v '^install-' \
-            | sort -u | column
+            | sort -u \
+            | while read -r fn; do
+                _getfns_excluded "${fn}" || echo "${fn}"
+              done \
+            | column
     fi
 
     echo
     echo "[INFO] Loaded aliases:"
     if [[ -n "${BASH_VERSION}" ]]; then
-        alias | sed 's/alias //g' | awk -F= '{print $1}' | sort | column
+        alias | sed 's/alias //g' | awk -F= '{print $1}' | sort \
+            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
+            | column
     elif [[ -n "${ZSH_VERSION}" ]]; then
         # shellcheck disable=SC2154
-        alias -L | sed 's/alias //g' | awk -F= '{print $1}' | sort | column
+        alias -L | sed 's/alias //g' | awk -F= '{print $1}' | sort \
+            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
+            | column
     fi
+
     echo
-    echo "[INFO] Run 'get-my-installers' (or 'installers') to list install commands."
+    echo "[INFO] Getters — run any of these for full detail on that area:"
+    while IFS='|' read -r _name _filter _getter _label; do
+        [[ -z "${_name}" ]] && continue
+        printf '  %-22s %s\n' "${_getter}" "${_label}"
+    done < <(_function_getters_registry)
+    echo
+
+    unset -f _getfns_excluded _getalias_excluded
 }
 
 # ── Introspection: list install-* functions ───────────────────────────────────
-get-my-installers() {
+get-installers() {
     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
-    echo
-    echo "[INFO] Install commands (lazy-loaded on first use):"
-    if [[ -n "${BASH_VERSION}" ]]; then
-        declare -F \
-            | awk '{print $3}' \
-            | grep '^install-' \
-            | sort | column
-    elif [[ -n "${ZSH_VERSION}" ]]; then
-        grep -Eho '^install-[a-zA-Z0-9_-]+[[:space:]]*\(\)' \
-            "${_config_dir}"/**/*.sh 2>/dev/null \
-            | sed 's/[[:space:]]*()//' \
-            | sort -u | column
-    fi
-    echo
+    _get_functions_in "Install commands (lazy-loaded on first use)" '^install-' \
+        "${_config_dir}"/lazy/installers*.sh
 }
 
-# ── Introspection: list GPG functions ─────────────────────────────────────────
-# Shows functions from tools/gpg.sh (always loaded when gpg present) and
-# lazy/gpg-management.sh (loaded on first call). Grouped by tier.
+# ── Introspection: list GPG functions and aliases ─────────────────────────────
 get-gpg-functions() {
     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
-    local _tools_file="${_config_dir}/tools/gpg.sh"
-    local _lazy_file="${_config_dir}/lazy/gpg-management.sh"
-
-    local _extract_fns
-    _extract_fns() {
-        grep -Eo '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "$1" 2>/dev/null \
-            | sed 's/[[:space:]]*()//' \
-            | grep -v '^_' \
-            | sort
-    }
-
-    echo
-    echo "[INFO] GPG functions — tools/gpg.sh (Tier 2, always loaded when gpg present):"
-    if [[ -f "${_tools_file}" ]]; then
-        _extract_fns "${_tools_file}" | column
-    else
-        echo "  (file not found: ${_tools_file})"
-    fi
-
-    echo
-    echo "[INFO] GPG functions — lazy/gpg-management.sh (Tier 3, lazy-loaded on first call):"
-    if [[ -f "${_lazy_file}" ]]; then
-        _extract_fns "${_lazy_file}" | column
-    else
-        echo "  (file not found: ${_lazy_file})"
-    fi
-    echo
-
-    unset -f _extract_fns
+    _get_functions_in "GPG functions — tools/gpg.sh (Tier 2, always loaded when gpg present)" \
+        "" "${_config_dir}/tools/gpg.sh"
+    _get_aliases_in "GPG aliases — tools/gpg.sh" \
+        "" "${_config_dir}/tools/gpg.sh"
+    _get_functions_in "GPG functions — lazy/gpg-management.sh (Tier 3, lazy-loaded on first call)" \
+        "" "${_config_dir}/lazy/gpg-management.sh"
 }
 
 # ── Introspection: list git functions ─────────────────────────────────────────
-# Shows functions from tools/git.sh, grouped into project management and
-# general helpers. Private helpers (prefixed _) are excluded.
 get-git-functions() {
     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
-    local _tools_file="${_config_dir}/tools/git.sh"
+    local _f="${_config_dir}/tools/git.sh"
+    _get_aliases_in "Git aliases (tools/git.sh)" \
+        "" "${_f}"
+    _get_functions_in "Git project management functions (tools/git.sh)" \
+        '^git-(add|update|remove|list|sync|projects)-' "${_f}"
+    _get_functions_in "Git helper functions (tools/git.sh)" \
+        '!^git-(add|update|remove|list|sync|projects)-' "${_f}"
+}
 
-    if [[ ! -f "${_tools_file}" ]]; then
-        echo
-        echo "  (file not found: ${_tools_file})"
-        echo
-        return 1
-    fi
-
-    local _all_fns
-    _all_fns="$(grep -Eo '^[a-zA-Z_-][a-zA-Z0-9_-]*[[:space:]]*\(\)' "${_tools_file}" \
-        | sed 's/[[:space:]]*()//' \
-        | grep -v '^_' \
-        | sort)"
-
-    echo
-    echo "[INFO] Git project management functions (tools/git.sh):"
-    echo "${_all_fns}" | grep -E '^git-(add|update|remove|list|sync|projects)-' | column
-
-    echo
-    echo "[INFO] Git helper functions (tools/git.sh):"
-    echo "${_all_fns}" | grep -vE '^git-(add|update|remove|list|sync|projects)-' | column
-    echo
+# ── Introspection: list Terraform/OpenTofu/Terragrunt functions and aliases ──
+get-terraform-functions() {
+    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+    local _f="${_config_dir}/tools/terraform.sh"
+    _get_aliases_in "Terraform / OpenTofu / Terragrunt aliases (tools/terraform.sh)" \
+        "" "${_f}"
+    _get_functions_in "Terraform / OpenTofu functions (tools/terraform.sh)" \
+        "" "${_f}"
 }
 
 # ── Shell Sourcing ────────────────────────────────────────

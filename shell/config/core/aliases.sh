@@ -73,16 +73,16 @@ if command -v uv &>/dev/null; then
     alias install-specify="uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git"
 fi
 
-# ── get-my-functions shortcut ─────────────────────────────────────────────────
-if command -v get-my-functions &>/dev/null; then
-    alias aliases="get-my-functions"
-    alias reset-shell="clear && get-my-functions"
-    alias rs="clear && get-my-functions"
+# ── get-functions shortcut ─────────────────────────────────────────────────
+if command -v get-functions &>/dev/null; then
+    alias aliases="get-functions"
+    alias reset-shell="clear && get-functions"
+    alias rs="clear && get-functions"
 fi
 
-# ── get-my-installers shortcut ─────────────────────────────────────────────────
-if command -v get-my-installers &>/dev/null; then
-    alias installers="get-my-installers"
+# ── get-installers shortcut ─────────────────────────────────────────────────
+if command -v get-installers &>/dev/null; then
+    alias installers="get-installers"
 fi
 
 # ── SSH hosts ─────────────────────────────────────────────────────────────────

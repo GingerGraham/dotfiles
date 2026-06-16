@@ -5,7 +5,7 @@
 call to any `install-*` function. List them at any time with:
 
 ```bash
-installers            # alias for get-my-installers
+installers            # alias for get-installers
 ```
 
 All installers are idempotent — running one again updates the tool in place where

@@ -103,8 +103,8 @@ get-latest-terraform-version() {
 }
 
 get-latest-opentofu-version() {
-    curl -s https://checkpoint-api.hashicorp.com/v1/check/opentofu \
+    curl -s https://api.github.com/repos/opentofu/opentofu/releases/latest \
         | tr -d '\r' \
-        | grep -Eo '"current_version":"[0-9]+\.[0-9]+\.[0-9]+"' \
+        | grep -Eo '"tag_name": ?"v[0-9]+\.[0-9]+\.[0-9]+"' \
         | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'
 }

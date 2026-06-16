@@ -321,6 +321,6 @@ dedupe-path 2>/dev/null || true
 # ── Interactive startup ───────────────────────────────────────────────────────
 # Only runs in interactive shells — skipped in scripts, cron, SSH non-interactive.
 # Set DOTFILES_SHOW_FUNCTIONS=true in env/90-local.sh to enable.
-if [[ $- == *i* ]] && [[ "${DOTFILES_SHOW_FUNCTIONS}" == "true" ]] && command -v get-my-functions &>/dev/null; then
-    get-my-functions
+if [[ $- == *i* ]] && [[ "${DOTFILES_SHOW_FUNCTIONS}" == "true" ]] && command -v get-functions &>/dev/null; then
+    get-functions
 fi

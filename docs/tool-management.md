@@ -144,7 +144,7 @@ Installers are safe to call even if the tool is already installed. They use vers
 All `install-*` commands are discoverable:
 
 ```bash
-installers             # Lists all available install-* commands (same as get-my-installers)
+installers             # Lists all available install-* commands (same as get-installers)
 ```
 
 See [installers.md](installers.md) for a per-tool reference, including the GitLab CLI, Bitwarden, and 1Password installers.
@@ -255,7 +255,7 @@ Installs or updates kubectl standalone. Use this when you don't have the tool ye
 ### Check what installers are available
 
 ```bash
-get-my-installers
+get-installers
 # or
 installers
 ```
