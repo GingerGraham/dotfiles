@@ -45,3 +45,17 @@
 - name: Deploy SSH client defaults config snippet
   ansible.builtin.include_tasks: client-defaults.yml
   when: ssh_deploy_client_defaults | bool
+
+# ============================================================================
+# Section 5 — Local agent routing (create once, never overwrite)
+# ============================================================================
+# Generic, agent-agnostic scaffold. This role never assumes a specific SSH
+# agent (Bitwarden, gnome-keyring, 1Password, etc.) is present — that's a
+# machine-local choice, filled in by hand after first deploy. See the file
+# itself for instructions and the ssh role README for the load-order contract.
+- name: Deploy 01-agent.conf scaffold (create once, never overwrite)
+  ansible.builtin.template:
+    src: config.d/01-agent.conf.j2
+    dest: "{{ ssh_config_d_dir }}/01-agent.conf"
+    mode: "0600"
+    force: false

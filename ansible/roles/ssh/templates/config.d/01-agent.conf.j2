@@ -1,0 +1,54 @@
+# ~/.ssh/config.d/01-agent.conf
+# SSH agent routing for {{ dotfiles_machine_name | default(ansible_facts['hostname']) }}
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS FILE IS MANAGED LOCALLY — NOT BY ANSIBLE
+# ─────────────────────────────────────────────────────────────────────────────
+# Created once by Ansible on first run. Never overwritten on subsequent runs.
+# Gitignored — all edits stay local to this machine.
+#
+# PURPOSE
+#   Pin which SSH agent socket each Host block should use, via IdentityAgent.
+#   Left empty by default — no agent is assumed. SSH falls back to its normal
+#   behaviour (try $SSH_AUTH_SOCK, then the IdentityFile paths in 00-defaults)
+#   until you fill this in.
+#
+#   This is only needed if more than one SSH agent is running on this machine
+#   and you need different hosts to use different agents/keys — for example, a
+#   password-manager agent (Bitwarden, 1Password) for personal/work logins,
+#   alongside the desktop session's own agent (gnome-keyring, KDE Wallet, or
+#   a plain ssh-agent) holding other keys such as deploy keys added via
+#   ssh-add for github-dotfiles-*.
+#
+#   If this machine only ever has one agent running, you don't need this file
+#   at all — leave it empty and SSH will just use $SSH_AUTH_SOCK as normal.
+#
+# LOAD ORDER
+#   config.d/ files load in filename sort order; first matched setting wins
+#   per Host pattern. This file (01-) loads right after 00-defaults.conf and
+#   before 10-dotfiles.conf, so agent routing is settled before any per-repo
+#   or per-host override is considered. Put your Host blocks here — most
+#   specific pattern first (e.g. github-dotfiles-* before a catch-all Host *)
+#   so the right agent is picked for deploy keys vs personal/work logins.
+#
+# FINDING YOUR AGENT SOCKET
+#   Password manager agents (varies by app/version — check its docs/settings
+#   if these don't match):
+#     Bitwarden Desktop  ~/.bitwarden-ssh-agent.sock
+#     1Password           ~/.1password/agent.sock
+#
+#   Desktop session agent on Linux:
+#     gnome-keyring   echo "$XDG_RUNTIME_DIR/gcr/ssh"   (usually /run/user/<uid>/gcr/ssh)
+#     plain ssh-agent echo "$SSH_AUTH_SOCK"             (run from the shell that started it)
+#
+#   To confirm a socket is live and which keys it holds:
+#     SSH_AUTH_SOCK=/path/to/socket ssh-add -l
+#
+# EXAMPLE
+#   Host github-dotfiles-*
+#       IdentityAgent /run/user/1000/gcr/ssh
+#
+#   Host *
+#       IdentityAgent ~/.bitwarden-ssh-agent.sock
+#
+# ─────────────────────────────────────────────────────────────────────────────

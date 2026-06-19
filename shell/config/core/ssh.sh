@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # SSH helpers — listing hosts and key management.
 
-# ── Override the basic sshhosts alias with the full function ──────────────────
-alias sshhosts="list-ssh-hosts"
-
+# ── List SSH hosts ─────────────────────────────────────────────────────────────
 list-ssh-hosts() {
     local config_dir="${HOME}/.ssh/config.d"
     local main_config="${HOME}/.ssh/config"

@@ -86,8 +86,12 @@ if command -v get-installers &>/dev/null; then
 fi
 
 # ── SSH hosts ─────────────────────────────────────────────────────────────────
-# Overridden by core/ssh.sh once list-ssh-hosts is defined
-alias sshhosts='grep -E "^Host\s" "${HOME}/.ssh/config"'
+# If list-ssh-hosts is defined, use it; otherwise, fallback to a simple grep.
+if declare -f list-ssh-hosts &>/dev/null; then
+    alias sshhosts="list-ssh-hosts"
+else
+    alias sshhosts='grep -E "^Host\s" "${HOME}/.ssh/config"'
+fi
 
 # ── iTerm2 ────────────────────────────────────────────────────────────────────
 if command -v it2profile &>/dev/null; then

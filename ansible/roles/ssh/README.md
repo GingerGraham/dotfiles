@@ -30,33 +30,63 @@ This role runs on all profiles (workstation, server, minimal).
 - Touch `~/.ssh/config.d/10-dotfiles.conf`. That file is owned by
   `install.sh` and holds the SSH host aliases for deploy keys. This role
   will not overwrite or remove it.
+  - Prescribe or configure a specific SSH agent (Bitwarden, gnome-keyring,
+    1Password, etc.). The role deploys an empty `01-agent.conf` scaffold
+    (see below) for IdentityAgent routing, but which agent(s) a machine
+    actually runs is a local decision, not something Ansible installs or
+    configures. Agent helper functions live in `shell/config/core/ssh.sh`
+    (shell layer).
 - Install or configure `ssh-agent` or `ssh-add` automation. That lives in
   `shell/config/core/ssh.sh` (shell layer).
 
 ## config.d load order
 
 Files in `config.d/` are loaded in filename sort order. This role reserves
-the `00-` prefix for the defaults snippet. install.sh uses `10-`. Leave gaps
-for future additions:
+the `00-` prefix for the defaults snippet and `01-` for local agent routing.
+install.sh uses `10-`. Leave gaps for future additions:
 
-| File | Owner | Purpose |
-|---|---|---|
-| `00-defaults.conf` | Ansible ssh role | Global `Host *` hardened defaults |
-| `10-dotfiles.conf` | `install.sh` | Deploy key host aliases for companion repos |
-| `20-*.conf` and beyond | User / future roles | Per-host or per-employer overrides |
+| File                   | Owner                                  | Purpose                                     |
+| ---------------------- | -------------------------------------- | ------------------------------------------- |
+| `00-defaults.conf`     | Ansible ssh role                       | Global `Host *` hardened defaults           |
+| `01-agent.conf`        | Ansible ssh role (created once) → user | Local `IdentityAgent` routing — see below   |
+| `10-dotfiles.conf`     | `install.sh`                           | Deploy key host aliases for companion repos |
+| `20-*.conf` and beyond | User / future roles                    | Per-host or per-employer overrides          |
+
+## SSH agent routing (01-agent.conf)
+
+`config.d/01-agent.conf` is templated by Ansible on first run and never
+overwritten thereafter — same pattern as `90-local.sh` in the shell role.
+It ships empty (commented scaffold only): this role makes no assumption
+about which SSH agent is running on a given machine.
+
+It loads right after `00-defaults.conf` and before `10-dotfiles.conf`, so
+agent routing is settled before any per-repo or per-host override is
+considered.
+
+Fill it in by hand when a machine runs more than one SSH agent and
+different hosts need different keys — for example, routing personal/work
+logins through a password-manager agent (Bitwarden, 1Password) while
+deploy keys added via `ssh-add` (`github-dotfiles-*`) stay on the desktop
+session's own agent (gnome-keyring, KDE Wallet, etc.).
+
+If a machine only ever runs one agent, leave this file empty — SSH will
+just use `$SSH_AUTH_SOCK` as normal and no further config is needed.
+
+See the comments in the deployed file for the exact syntax and common
+agent socket paths.
 
 ## Variables
 
-| Variable | Default | Override in | Purpose |
-|---|---|---|---|
-| `ssh_dir` | `~/.ssh` | `defaults/main.yml` | Base SSH directory |
-| `ssh_config_d_dir` | `~/.ssh/config.d` | `defaults/main.yml` | Config fragment directory |
-| `ssh_config_path` | `~/.ssh/config` | `defaults/main.yml` | Main SSH config file |
-| `ssh_known_hosts_path` | `~/.ssh/known_hosts` | `defaults/main.yml` | known_hosts file |
-| `ssh_cm_sockets_dir` | `~/.ssh/cm_sockets` | `defaults/main.yml` | ControlMaster socket directory |
-| `ssh_known_hosts_forges` | `[github.com, gitlab.com, bitbucket.org]` | `host_vars/localhost.yml` | Forges to pre-trust in known_hosts |
-| `ssh_keyscan_timeout` | `10` | `defaults/main.yml` | Timeout per ssh-keyscan call (seconds) |
-| `ssh_deploy_client_defaults` | `true` | `host_vars/localhost.yml` | Deploy the `00-defaults.conf` snippet |
+| Variable                     | Default                                   | Override in               | Purpose                                |
+| ---------------------------- | ----------------------------------------- | ------------------------- | -------------------------------------- |
+| `ssh_dir`                    | `~/.ssh`                                  | `defaults/main.yml`       | Base SSH directory                     |
+| `ssh_config_d_dir`           | `~/.ssh/config.d`                         | `defaults/main.yml`       | Config fragment directory              |
+| `ssh_config_path`            | `~/.ssh/config`                           | `defaults/main.yml`       | Main SSH config file                   |
+| `ssh_known_hosts_path`       | `~/.ssh/known_hosts`                      | `defaults/main.yml`       | known_hosts file                       |
+| `ssh_cm_sockets_dir`         | `~/.ssh/cm_sockets`                       | `defaults/main.yml`       | ControlMaster socket directory         |
+| `ssh_known_hosts_forges`     | `[github.com, gitlab.com, bitbucket.org]` | `host_vars/localhost.yml` | Forges to pre-trust in known_hosts     |
+| `ssh_keyscan_timeout`        | `10`                                      | `defaults/main.yml`       | Timeout per ssh-keyscan call (seconds) |
+| `ssh_deploy_client_defaults` | `true`                                    | `host_vars/localhost.yml` | Deploy the `00-defaults.conf` snippet  |
 
 ## Adding a private forge
 
