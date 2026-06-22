@@ -28,7 +28,11 @@ ai_sync_script_dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/ai-config-sy
 #
 # Override in group_vars/all.yml to adjust for OS differences (macOS paths
 # are set via the copilot_config_dest expression there).
+#
+# antigravity: ~/.gemini is the config path kept from Gemini CLI for backwards
+# compatibility — the binary is 'agy' but the config dir was not renamed.
 ai_tool_destinations:
+  antigravity: "{{ ansible_facts['env']['HOME'] }}/.gemini"
   claude: "{{ ansible_facts['env']['HOME'] }}/.claude"
   copilot: "{{ xdg_config_home }}/github-copilot"
   cursor: "{{ ansible_facts['env']['HOME'] }}/.cursor"

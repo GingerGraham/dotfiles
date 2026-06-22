@@ -25,6 +25,7 @@ root is required.
   - [Node Version Manager — `install-nvm`](#node-version-manager--install-nvm)
   - [GitHub Copilot CLI — `install-copilot-cli`](#github-copilot-cli--install-copilot-cli)
   - [Claude Code — `install-claude-code`](#claude-code--install-claude-code)
+  - [Antigravity CLI — `install-antigravity`](#antigravity-cli--install-antigravity)
   - [Node prerequisite (shared)](#node-prerequisite-shared)
 
 ## Available installers
@@ -32,6 +33,7 @@ root is required.
 | Command               | Installs                                  | Method                                                                       |
 | --------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- |
 | `install-1password`   | 1Password Desktop                         | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback       |
+| `install-antigravity` | Antigravity CLI (`agy`)                   | Official curl-to-bash installer → `~/.local/bin`                             |
 | `install-bitwarden`   | Bitwarden desktop app                     | Vendor package per distro / Flatpak / Homebrew cask                          |
 | `install-bw-cli`      | Bitwarden CLI (`bw`)                      | npm global `@bitwarden/cli`, with a binary fallback                          |
 | `install-claude-code` | Claude Code (`claude`)                    | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
@@ -39,6 +41,7 @@ root is required.
 | `install-cosign`      | cosign                                    | GitHub release tarball → `~/.local/bin`                                      |
 | `install-direnv`      | direnv                                    | Official install script / Homebrew                                           |
 | `install-edit`        | Microsoft Edit                            | GitHub release tarball → `~/.local/bin`                                      |
+| `install-gemini-cli`  | _(alias for `install-antigravity`)_       | See Antigravity CLI                                                          |
 | `install-gh`          | GitHub CLI (`gh`)                         | Official package repo per distro, with a binary tarball fallback             |
 | `install-glab`        | GitLab CLI (`glab`)                       | Native dnf/pacman repo on Fedora/Arch; release tarball fallback              |
 | `install-oh-my-posh`  | oh-my-posh prompt                         | Upstream install script / Homebrew                                           |
@@ -53,11 +56,6 @@ root is required.
 | `install-tenv`        | tenv (Terraform/OpenTofu version manager) | GitHub release tarball → `~/.local/bin`                                      |
 | `install-tofu`        | tofu CLI                                  | GitHub release tarball → `~/.local/bin`                                      |
 | `install-trivy`       | Trivy scanner                             | Vendor repo per distro / Homebrew                                            |
-
-GPG key backup/restore and signing-key publishing build on the password manager
-and git provider CLIs above — see [gpg.md](gpg.md) for the `gpg-*-bitwarden`,
-`gpg-*-1password`, `gpg-push-github`, and `gpg-push-gitlab` functions. Update
-orchestration for all of the above is covered in [tool-management.md](tool-management.md).
 
 ## GitHub CLI — `install-gh`
 
@@ -152,6 +150,30 @@ Node.js 18+).
 
 Launch `claude` to authenticate (opens a browser on first run). Requires a Claude
 Pro/Max plan or an Anthropic Console (API) account.
+
+## Antigravity CLI — `install-antigravity`
+
+Google's successor to Gemini CLI. Uses the official curl-to-bash installer
+(`curl -fsSL https://antigravity.google/cli/install.sh | bash`), which places the
+`agy` binary in `~/.local/bin`. No Node.js dependency.
+
+**`install-gemini-cli` is an alias** for this function — Google deprecated Gemini
+CLI in favour of Antigravity CLI, so both names invoke the same installer.
+
+**RC file cleanup:** the upstream installer appends
+`export PATH="~/.local/bin:$PATH"` to every shell profile it finds (`.bashrc`,
+`.zshrc`, `.zprofile`, `.bash_profile`, `.profile`). Since those files are managed
+symlinks into the dotfiles repo, that append would land as an uncommitted diff and
+break the ongoing git sync. The installer automatically removes those injected
+lines after the upstream script finishes — `~/.local/bin` is already in `PATH` via
+`env/00-core.sh` and no manual cleanup is required.
+
+Config and conversation history are stored in `~/.gemini/` (the directory name was
+not changed when the CLI was renamed). The `ai-config` repo roams these files under
+an `antigravity/` subdirectory that deploys to `~/.gemini/`.
+
+Launch `agy` to authenticate (opens a browser on first run). Requires a Google
+account.
 
 ## Node prerequisite (shared)
 

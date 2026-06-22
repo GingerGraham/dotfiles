@@ -25,6 +25,7 @@ _managed_tools_registry() {
     cat <<'EOF'
 1password|1password|install-1password|install-1password|1Password Desktop
 ansible|ansible|install-ansible|install-ansible|Ansible
+antigravity|agy|install-antigravity|install-antigravity|Antigravity CLI
 aws|aws|_update_aws|aws-update|AWS CLI
 az|az|_update_az|az-update|Azure CLI
 bitwarden|bitwarden|install-bitwarden|install-bitwarden|Bitwarden Desktop

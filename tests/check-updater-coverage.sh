@@ -30,6 +30,7 @@ fi
 # Keep short and justified.
 allowlist=(
     install-edit-version      # pinned-version variant of install-edit
+    install-gemini-cli        # alias for install-antigravity; Google deprecated Gemini CLI
     install-noteshub-version  # pinned-version variant of install-noteshub
     install-opendeck-version  # pinned-version variant of install-opendeck
     install-zsh               # package-manager install, no-op if zsh present; OS owns updates

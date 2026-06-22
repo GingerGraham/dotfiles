@@ -102,6 +102,7 @@
 
 - name: Set per-tool destination paths for Linux / WSL
   ansible.builtin.set_fact:
+    _ai_dest_antigravity: "{{ ai_tool_destinations.antigravity }}"
     _ai_dest_claude: "{{ ai_tool_destinations.claude }}"
     _ai_dest_copilot: "{{ ai_tool_destinations.copilot }}"
     _ai_dest_cursor: "{{ ai_tool_destinations.cursor }}"
@@ -110,6 +111,7 @@
 
 - name: Set per-tool destination paths for macOS (cursor override)
   ansible.builtin.set_fact:
+    _ai_dest_antigravity: "{{ ai_tool_destinations.antigravity }}"
     _ai_dest_claude: "{{ ai_tool_destinations.claude }}"
     _ai_dest_copilot: "{{ ai_tool_destinations.copilot }}"
     _ai_dest_cursor: >-
@@ -320,6 +322,57 @@
   when: _ai_kiro_src.stat.exists and _ai_kiro_src.stat.isdir
   loop_control:
     label: "{{ item.path | relpath(ai_config_clone_dir + '/kiro') }}"
+
+# ── Antigravity CLI ───────────────────────────────────────────────────────────
+
+- name: Check whether antigravity/ source directory exists in ai-config
+  ansible.builtin.stat:
+    path: "{{ ai_config_clone_dir }}/antigravity"
+  register: _ai_antigravity_src
+
+- name: Ensure Antigravity config destination directory exists
+  ansible.builtin.file:
+    path: "{{ _ai_dest_antigravity }}"
+    state: directory
+    mode: "0755"
+  when: _ai_antigravity_src.stat.exists and _ai_antigravity_src.stat.isdir
+
+- name: Find all files in antigravity/ source directory
+  ansible.builtin.find:
+    paths: "{{ ai_config_clone_dir }}/antigravity"
+    recurse: true
+    file_type: file
+  register: _ai_antigravity_files
+  when: _ai_antigravity_src.stat.exists and _ai_antigravity_src.stat.isdir
+
+- name: Ensure subdirectory structure exists under Antigravity destination
+  ansible.builtin.file:
+    path: >-
+      {{ _ai_dest_antigravity }}/{{
+        (item.path | relpath(ai_config_clone_dir + '/antigravity')) | dirname
+      }}
+    state: directory
+    mode: "0755"
+  loop: "{{ _ai_antigravity_files.files | default([]) }}"
+  when:
+    - _ai_antigravity_src.stat.exists and _ai_antigravity_src.stat.isdir
+    - (item.path | relpath(ai_config_clone_dir + '/antigravity') | dirname) != '.'
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Deploy Antigravity config files (never overwrite existing)
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: >-
+      {{ _ai_dest_antigravity }}/{{
+        item.path | relpath(ai_config_clone_dir + '/antigravity')
+      }}
+    mode: "0644"
+    force: false
+  loop: "{{ _ai_antigravity_files.files | default([]) }}"
+  when: _ai_antigravity_src.stat.exists and _ai_antigravity_src.stat.isdir
+  loop_control:
+    label: "{{ item.path | relpath(ai_config_clone_dir + '/antigravity') }}"
 
 # ============================================================================
 # Section 4 — Sync infrastructure

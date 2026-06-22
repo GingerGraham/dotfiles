@@ -21,28 +21,34 @@ is empty — the role exits cleanly without creating any directories or files.
 
 ## Tool → Destination Mapping
 
-| Source (in `ai-config` repo) | Linux / WSL destination            | macOS destination                                  |
-|------------------------------|------------------------------------|----------------------------------------------------|
-| `claude/`                    | `~/.claude/`                       | `~/.claude/`                                       |
-| `copilot/`                   | `~/.config/github-copilot/`        | `~/.config/github-copilot/`                        |
-| `cursor/`                    | `~/.cursor/`                       | `~/Library/Application Support/Cursor/User/`       |
-| `kiro/`                      | `~/.kiro/`                         | `~/.kiro/`                                         |
+| Source (in `ai-config` repo) | Linux / WSL destination     | macOS destination                            |
+| ---------------------------- | --------------------------- | -------------------------------------------- |
+| `antigravity/`               | `~/.gemini/`                | `~/.gemini/`                                 |
+| `claude/`                    | `~/.claude/`                | `~/.claude/`                                 |
+| `copilot/`                   | `~/.config/github-copilot/` | `~/.config/github-copilot/`                  |
+| `cursor/`                    | `~/.cursor/`                | `~/Library/Application Support/Cursor/User/` |
+| `kiro/`                      | `~/.kiro/`                  | `~/.kiro/`                                   |
+
+> **Note — Antigravity config path:** Google retained `~/.gemini/` as the config
+> directory when renaming Gemini CLI to Antigravity CLI (binary: `agy`). The source
+> subdirectory in the `ai-config` repo is named `antigravity/` for clarity, but it
+> deploys to `~/.gemini/` on disk.
 
 If a source subdirectory does not exist in the cloned repo, that tool's deploy
 block is skipped entirely — no error, no empty directory.
 
 ## Variables
 
-| Variable | Default | Override in | Purpose |
-|---|---|---|---|
-| `ai_config_repo_url` | `""` | `host_vars/localhost.yml` | URL of the ai-config repo. Role is a no-op when empty. |
-| `ai_config_branch` | `main` | `host_vars/localhost.yml` | Branch to track. |
-| `ai_config_update` | `true` | `host_vars/localhost.yml` | Pull on every Ansible run when true. |
-| `ai_config_clone_dir` | `~/.local/share/ai-config` | `group_vars/all.yml` | Where the repo is cloned. Not a user-facing directory. |
-| `ai_state_dir` | `~/.local/share/ai-config-sync` | `group_vars/all.yml` | Sync state and logs. |
-| `ai_sync_conf_path` | `~/.config/ai-config/sync.conf` | `group_vars/all.yml` | Runtime config for the sync script. |
-| `ai_sync_script_dest` | `~/.local/bin/ai-config-sync` | `group_vars/all.yml` | Deployed sync script path. |
-| `ai_tool_destinations` | See defaults | `group_vars/all.yml` | Per-tool destination path map. |
+| Variable               | Default                         | Override in               | Purpose                                                |
+| ---------------------- | ------------------------------- | ------------------------- | ------------------------------------------------------ |
+| `ai_config_repo_url`   | `""`                            | `host_vars/localhost.yml` | URL of the ai-config repo. Role is a no-op when empty. |
+| `ai_config_branch`     | `main`                          | `host_vars/localhost.yml` | Branch to track.                                       |
+| `ai_config_update`     | `true`                          | `host_vars/localhost.yml` | Pull on every Ansible run when true.                   |
+| `ai_config_clone_dir`  | `~/.local/share/ai-config`      | `group_vars/all.yml`      | Where the repo is cloned. Not a user-facing directory. |
+| `ai_state_dir`         | `~/.local/share/ai-config-sync` | `group_vars/all.yml`      | Sync state and logs.                                   |
+| `ai_sync_conf_path`    | `~/.config/ai-config/sync.conf` | `group_vars/all.yml`      | Runtime config for the sync script.                    |
+| `ai_sync_script_dest`  | `~/.local/bin/ai-config-sync`   | `group_vars/all.yml`      | Deployed sync script path.                             |
+| `ai_tool_destinations` | See defaults                    | `group_vars/all.yml`      | Per-tool destination path map.                         |
 
 ## Adding a New Tool
 
@@ -51,9 +57,11 @@ block is skipped entirely — no error, no empty directory.
 3. Add any generated/local-state paths to `.gitignore` in `ai-config`.
 4. Add the destination path to `ai_tool_destinations` in `defaults/main.yml`
    and `group_vars/all.yml`.
-5. Add a deploy block to `tasks/main.yml` following the existing pattern
+5. Add `_ai_dest_<tool>` to both `set_fact` tasks at the top of `tasks/main.yml`
+   (one for Linux/WSL, one for macOS).
+6. Add a deploy block to `tasks/main.yml` following the existing pattern
    (stat check → mkdir dest → find files → deploy subdirs → copy files).
-6. Add the same tool deploy block to `scripts/ai-config-sync.sh`'s
+7. Add the same tool deploy call to `scripts/ai-config-sync.sh`'s
    `deploy_all_tools()` function.
 
 ## Never-Overwrite Semantics
@@ -126,6 +134,7 @@ ai-config-sync
 │   └── logs/sync.log
 
 Per-tool destinations (populated from ai-config repo):
+~/.gemini/                            ← from ai-config/antigravity/
 ~/.claude/                              ← from ai-config/claude/
 ~/.config/github-copilot/              ← from ai-config/copilot/
 ~/.cursor/                             ← from ai-config/cursor/ (Linux)

@@ -125,6 +125,11 @@ deploy_tool() {
 deploy_all_tools() {
     log "Deploying config files from ${AI_CONFIG_CLONE_DIR}"
 
+    # ── Antigravity CLI ──────────────────────────────────────────────────────
+    # Config path is ~/.gemini — retained from Gemini CLI for backwards compat;
+    # the binary was renamed to 'agy' but the config directory was not.
+    deploy_tool "antigravity" "${HOME}/.gemini"
+
     # ── Claude ──────────────────────────────────────────────────────────────
     deploy_tool "claude" "${HOME}/.claude"
 
@@ -141,7 +146,6 @@ deploy_all_tools() {
     # ── Kiro ─────────────────────────────────────────────────────────────────
     deploy_tool "kiro" "${HOME}/.kiro"
 }
-
 # ── Main sync logic ───────────────────────────────────────────────────────────
 
 do_sync() {

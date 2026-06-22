@@ -79,3 +79,96 @@ install-claude-code() {
     _claude_post_install
 }
 
+
+# ── Antigravity CLI install ───────────────────────────────────────────────────
+# Google's successor to Gemini CLI. Native curl-to-bash installer places the
+# binary (agy) in ~/.local/bin. Config lives in ~/.gemini/ (retained from the
+# Gemini CLI path for backwards compatibility).
+#
+# The upstream installer appends `export PATH="~/.local/bin:$PATH"` to every
+# shell profile it finds. Since our RC files are managed symlinks into the
+# dotfiles repo, that append would land as an uncommitted diff and break the
+# ongoing git sync. _agy_scrub_rc_files removes those injected lines
+# post-install; ~/.local/bin is already in PATH via env/00-core.sh.
+
+_agy_scrub_rc_files() {
+    # All five files the Antigravity installer is known to modify.
+    # readlink -f resolves symlinks so edits go to the real repo file, not the
+    # symlink itself. Files that don't exist yet are silently skipped.
+    local -a _rc_files=(
+        "${HOME}/.bashrc"
+        "${HOME}/.zshrc"
+        "${HOME}/.zprofile"
+        "${HOME}/.bash_profile"
+        "${HOME}/.profile"
+    )
+
+    local _f _target _tmp _changed=0
+    for _f in "${_rc_files[@]}"; do
+        _target="$(readlink -f "${_f}" 2>/dev/null)" || continue
+        [[ -f "${_target}" ]] || continue
+
+        _tmp="$(mktemp)"
+        # Strip the comment the installer prepends and the PATH export line.
+        # Pattern is deliberately broad on the path segment so it works for any
+        # username/home directory and on both Linux and macOS.
+        sed -E \
+            -e '/^# Added by Antigravity CLI installer[[:space:]]*$/d' \
+            -e '/^export PATH="[^"]*\/\.local\/bin:\$PATH"[[:space:]]*$/d' \
+            "${_target}" > "${_tmp}"
+
+        if ! diff -q "${_target}" "${_tmp}" &>/dev/null; then
+            cp "${_tmp}" "${_target}"
+            log_info "  cleaned installer PATH injection from: ${_target}"
+            _changed=1
+        fi
+        rm -f "${_tmp}"
+    done
+
+    if (( _changed )); then
+        log_info "Installer PATH injections removed — ~/.local/bin is already managed by env/00-core.sh"
+    fi
+}
+
+_agy_post_install() {
+    if command -v agy &>/dev/null; then
+        log_info "Antigravity CLI installed: $(agy --version 2>/dev/null | head -1)"
+    else
+        log_info "Antigravity CLI installed to ~/.local/bin/agy"
+        log_warn "Restart your shell or ensure ~/.local/bin is on PATH if 'agy' is not found."
+    fi
+    echo
+    echo "  Launch and authenticate (opens a browser on first run):"
+    echo "    agy"
+    echo "  Config and conversation history are stored in ~/.gemini/"
+}
+
+install-antigravity() {
+    log_info "Installing or updating Antigravity CLI..."
+
+    case "${DOTFILES_OS}" in
+        Linux|Mac)
+            if ! command -v curl &>/dev/null; then
+                log_error "curl is required to install Antigravity CLI. Install it via your package manager."
+                return 1
+            fi
+            log_info "Running the upstream Antigravity CLI installer..."
+            if curl -fsSL https://antigravity.google/cli/install.sh | bash; then
+                _agy_scrub_rc_files
+                _agy_post_install
+                return 0
+            else
+                log_error "Antigravity CLI installer script failed."
+                return 1
+            fi
+            ;;
+        *)
+            log_error "Antigravity CLI install is only supported on Linux and macOS."
+            return 1
+            ;;
+    esac
+}
+
+# Google is deprecating Gemini CLI in favour of Antigravity CLI.
+# install-gemini-cli is kept as a convenience alias so muscle memory still works.
+alias install-gemini-cli="install-antigravity"
