@@ -91,10 +91,26 @@ install-claude-code() {
 # ongoing git sync. _agy_scrub_rc_files removes those injected lines
 # post-install; ~/.local/bin is already in PATH via env/00-core.sh.
 
+_agy_resolve_realpath() {
+    # Portable symlink resolution:
+    #   1. readlink -f  — GNU coreutils; all Linux distros (Fedora, Debian, Arch, openSUSE)
+    #   2. python3      — macOS ships Python 3 but not GNU coreutils by default
+    #   3. raw path     — last resort; sed -i on a symlink edits the target on Linux
+    #                     anyway, and this branch is only hit if both tools are absent
+    local _path="$1"
+    if readlink -f "${_path}" &>/dev/null 2>&1; then
+        readlink -f "${_path}"
+    elif command -v python3 &>/dev/null; then
+        python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "${_path}"
+    else
+        echo "${_path}"
+    fi
+}
+
 _agy_scrub_rc_files() {
     # All five files the Antigravity installer is known to modify.
-    # readlink -f resolves symlinks so edits go to the real repo file, not the
-    # symlink itself. Files that don't exist yet are silently skipped.
+    # _agy_resolve_realpath follows symlinks so edits go to the real repo file;
+    # the [[ -f ]] guard skips files that don't exist on this machine.
     local -a _rc_files=(
         "${HOME}/.bashrc"
         "${HOME}/.zshrc"
@@ -105,7 +121,7 @@ _agy_scrub_rc_files() {
 
     local _f _target _tmp _changed=0
     for _f in "${_rc_files[@]}"; do
-        _target="$(readlink -f "${_f}" 2>/dev/null)" || continue
+        _target="$(_agy_resolve_realpath "${_f}")" || continue
         [[ -f "${_target}" ]] || continue
 
         _tmp="$(mktemp)"
