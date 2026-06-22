@@ -87,64 +87,9 @@ install-claude-code() {
 #
 # The upstream installer appends `export PATH="~/.local/bin:$PATH"` to every
 # shell profile it finds. Since our RC files are managed symlinks into the
-# dotfiles repo, that append would land as an uncommitted diff and break the
-# ongoing git sync. _agy_scrub_rc_files removes those injected lines
-# post-install; ~/.local/bin is already in PATH via env/00-core.sh.
-
-_agy_resolve_realpath() {
-    # Portable symlink resolution:
-    #   1. readlink -f  — GNU coreutils; all Linux distros (Fedora, Debian, Arch, openSUSE)
-    #   2. python3      — macOS ships Python 3 but not GNU coreutils by default
-    #   3. raw path     — last resort; sed -i on a symlink edits the target on Linux
-    #                     anyway, and this branch is only hit if both tools are absent
-    local _path="$1"
-    if readlink -f "${_path}" &>/dev/null 2>&1; then
-        readlink -f "${_path}"
-    elif command -v python3 &>/dev/null; then
-        python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "${_path}"
-    else
-        echo "${_path}"
-    fi
-}
-
-_agy_scrub_rc_files() {
-    # All five files the Antigravity installer is known to modify.
-    # _agy_resolve_realpath follows symlinks so edits go to the real repo file;
-    # the [[ -f ]] guard skips files that don't exist on this machine.
-    local -a _rc_files=(
-        "${HOME}/.bashrc"
-        "${HOME}/.zshrc"
-        "${HOME}/.zprofile"
-        "${HOME}/.bash_profile"
-        "${HOME}/.profile"
-    )
-
-    local _f _target _tmp _changed=0
-    for _f in "${_rc_files[@]}"; do
-        _target="$(_agy_resolve_realpath "${_f}")" || continue
-        [[ -f "${_target}" ]] || continue
-
-        _tmp="$(mktemp)"
-        # Strip the comment the installer prepends and the PATH export line.
-        # Pattern is deliberately broad on the path segment so it works for any
-        # username/home directory and on both Linux and macOS.
-        sed -E \
-            -e '/^# Added by Antigravity CLI installer[[:space:]]*$/d' \
-            -e '/^export PATH="[^"]*\/\.local\/bin:\$PATH"[[:space:]]*$/d' \
-            "${_target}" > "${_tmp}"
-
-        if ! diff -q "${_target}" "${_tmp}" &>/dev/null; then
-            cp "${_tmp}" "${_target}"
-            log_info "  cleaned installer PATH injection from: ${_target}"
-            _changed=1
-        fi
-        rm -f "${_tmp}"
-    done
-
-    if (( _changed )); then
-        log_info "Installer PATH injections removed — ~/.local/bin is already managed by env/00-core.sh"
-    fi
-}
+# dotfiles repo, that append would land as an uncommitted diff and block the
+# sync timer. _restore_managed_shell_files (core/functions.sh) resets them;
+# ~/.local/bin is already in PATH via env/00-core.sh.
 
 _agy_post_install() {
     if command -v agy &>/dev/null; then
@@ -170,7 +115,7 @@ install-antigravity() {
             fi
             log_info "Running the upstream Antigravity CLI installer..."
             if curl -fsSL https://antigravity.google/cli/install.sh | bash; then
-                _agy_scrub_rc_files
+                _restore_managed_shell_files
                 _agy_post_install
                 return 0
             else

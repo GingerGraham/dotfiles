@@ -493,6 +493,14 @@ install-nvm() {
     fi
 
     log_info "nvm ready — node $(node --version 2>/dev/null), npm $(npm --version 2>/dev/null)"
+
+    # The nvm installer appends PATH exports to every shell profile it finds.
+    # Our RC files are managed symlinks into the dotfiles repo, so those appends
+    # land as uncommitted diffs and block the sync timer. Reset them now;
+    # ~/.local/bin and nvm's own PATH are already handled by env/00-core.sh
+    # and env/20-development.sh respectively.
+    _restore_managed_shell_files
+
     echo
     echo "  nvm is loaded in this shell and lazy-loads in new shells. Common commands:"
     echo "    nvm install --lts      # install the latest LTS"

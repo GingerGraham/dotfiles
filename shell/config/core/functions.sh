@@ -39,6 +39,110 @@ _array_get() {
     fi
 }
 
+# _resolve_realpath <path>
+# Portable symlink resolution for Linux and macOS.
+#   1. readlink -f  — GNU coreutils; available on all Linux distros
+#   2. python3      — macOS ships Python 3 but not GNU coreutils by default
+#   3. raw path     — last resort; only hit if both tools are absent
+_resolve_realpath() {
+    local _path="$1"
+    if readlink -f "${_path}" &>/dev/null 2>&1; then
+        readlink -f "${_path}"
+    elif command -v python3 &>/dev/null; then
+        python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "${_path}"
+    else
+        echo "${_path}"
+    fi
+}
+
+# _restore_managed_shell_files
+# Resets all repo-managed shell stub files to their committed state via
+# git restore. Used after third-party installers (nvm, antigravity, etc.)
+# inject lines into managed RC files, leaving the working tree dirty and
+# blocking the sync timer from pulling.
+#
+# The five files match shell_stubs in ansible/roles/shell/defaults/main.yml.
+# Each is a symlink into the dotfiles repo; _resolve_realpath follows the
+# link so git restore operates on the real file path inside the working tree.
+_restore_managed_shell_files() {
+    local -a _stubs=(
+        "${HOME}/.bash_profile"
+        "${HOME}/.bashrc"
+        "${HOME}/.zprofile"
+        "${HOME}/.zshrc"
+        "${HOME}/.zshenv"
+    )
+
+    local _f _real _repo_root
+    local _restored=0 _failed=0
+
+    for _f in "${_stubs[@]}"; do
+        # Skip stubs that don't exist on this machine (e.g. zsh files on a
+        # bash-only server profile).
+        [[ -e "${_f}" ]] || continue
+
+        _real="$(_resolve_realpath "${_f}")"
+
+        # Derive git repo root from the resolved path so git -C works correctly
+        # regardless of cwd.
+        _repo_root="$(git -C "$(dirname "${_real}")" rev-parse --show-toplevel 2>/dev/null)"
+        if [[ -z "${_repo_root}" ]]; then
+            log_warn "_restore_managed_shell_files: ${_real} is not inside a git repo — skipping"
+            (( _failed++ )) || true
+            continue
+        fi
+
+        if git -C "${_repo_root}" restore "${_real}" 2>/dev/null; then
+            log_info "  restored: ${_real}"
+            (( _restored++ )) || true
+        else
+            log_warn "  git restore failed: ${_real}"
+            (( _failed++ )) || true
+        fi
+    done
+
+    if (( _failed > 0 )); then
+        log_warn "_restore_managed_shell_files: ${_failed} file(s) could not be restored"
+        return 1
+    fi
+
+    log_info "_restore_managed_shell_files: ${_restored} file(s) restored to committed state"
+    return 0
+}
+
+# unblock-sync
+# Public entry point for clearing installer-injected debris from managed shell
+# files. Restores all stub files to their committed state and reports the
+# outcome. Useful after any installer that pollutes RC files (nvm, antigravity,
+# etc.) or any time the dotfiles sync timer is blocked by a dirty working tree.
+unblock-sync() {
+    log_info "Restoring managed shell files to committed state..."
+
+    if ! _restore_managed_shell_files; then
+        log_warn "unblock-sync: some files could not be restored — check the output above"
+        return 1
+    fi
+
+    # Show remaining git status for the managed files so the user can see if
+    # anything is still dirty (e.g. a non-stub managed file was also modified).
+    local _repo_root
+    _repo_root="$(git -C "$(dirname "$(_resolve_realpath "${HOME}/.bashrc")")" \
+        rev-parse --show-toplevel 2>/dev/null)"
+
+    if [[ -n "${_repo_root}" ]]; then
+        local _status
+        _status="$(git -C "${_repo_root}" status --short 2>/dev/null)"
+        if [[ -z "${_status}" ]]; then
+            log_info "Working tree is clean — sync timer will proceed normally"
+        else
+            log_warn "Working tree still has changes (non-stub files?):"
+            printf '%s\n' "${_status}" | while IFS= read -r _line; do
+                log_warn "  ${_line}"
+            done
+        fi
+    fi
+}
+
 # ── cheat.sh lookup ───────────────────────────────────────────────────────────
 cheat() {
     curl "https://cheat.sh/$1"
