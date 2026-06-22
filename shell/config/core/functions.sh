@@ -210,8 +210,12 @@ EOF
 }
 
 # ── Introspection: list loaded functions and aliases ─────────────────────────
-# Excludes private (_-prefixed) functions and anything covered by a getter in
-# the registry above — run that getter for the full detail on each area.
+# Lists only functions and aliases defined in $SHELL_CONFIG_DIR — nothing from
+# bash-logger, nvm stubs, zsh plugins, or any other external source can appear.
+# loader.sh is excluded: it contains only infrastructure (fallback log_* stubs,
+# detection logic) and no user-facing functions or aliases.
+# Excludes private (_-prefixed) names and anything covered by a getter in the
+# registry above — run that getter for full detail on each area.
 get-functions() {
     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
     local _name _filter _getter _label _rel _f
@@ -251,35 +255,46 @@ get-functions() {
         return 1
     }
 
-    echo
-    echo "[INFO] Loaded functions:"
-    local _globstar_was_off=0 _candidates
+    # Collect source files: all .sh under $SHELL_CONFIG_DIR, excluding loader.sh
+    # (loader.sh is infrastructure — fallback log_* stubs, detection — not user API)
+    local _globstar_was_off=0
+    local -a _source_files=()
     if [[ -n "${BASH_VERSION}" ]]; then
         shopt -q globstar || { shopt -s globstar; _globstar_was_off=1; }
     fi
-    _candidates="$(_extract_function_names "${_config_dir}"/**/*.sh 2>/dev/null)"
+    while IFS= read -r _sf; do
+        [[ -n "${_sf}" ]] && _source_files+=("${_sf}")
+    done < <(printf '%s\n' "${_config_dir}"/**/*.sh 2>/dev/null \
+        | grep -v "/${_config_dir##*/}/loader\.sh$" \
+        | grep -Fv "/loader.sh")
     if [[ -n "${BASH_VERSION}" && "${_globstar_was_off}" -eq 1 ]]; then
         shopt -u globstar
     fi
-    printf '%s\n' "${_candidates}" \
-        | sort -u \
-        | while read -r fn; do
-            [[ -z "${fn}" ]] && continue
-            declare -f "${fn}" &>/dev/null || continue
-            _getfns_excluded "${fn}" || echo "${fn}"
-          done \
-        | column
 
+    # ── Functions ─────────────────────────────────────────────────────────────
+    echo
+    echo "[INFO] Loaded functions:"
+    if [[ "${#_source_files[@]}" -gt 0 ]]; then
+        _extract_function_names "${_source_files[@]}" \
+            | sort -u \
+            | while read -r fn; do
+                [[ -z "${fn}" ]] && continue
+                declare -f "${fn}" &>/dev/null || continue
+                _getfns_excluded "${fn}" || echo "${fn}"
+              done \
+            | column
+    fi
+
+    # ── Aliases ───────────────────────────────────────────────────────────────
     echo
     echo "[INFO] Loaded aliases:"
-    if [[ -n "${BASH_VERSION}" ]]; then
-        alias | sed 's/alias //g' | awk -F= '{print $1}' | sort \
-            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
-            | column
-    elif [[ -n "${ZSH_VERSION}" ]]; then
-        # shellcheck disable=SC2154
-        alias -L | sed 's/alias //g' | awk -F= '{print $1}' | sort \
-            | while read -r an; do _getalias_excluded "${an}" || echo "${an}"; done \
+    if [[ "${#_source_files[@]}" -gt 0 ]]; then
+        _extract_alias_names "${_source_files[@]}" \
+            | sort -u \
+            | while read -r an; do
+                [[ -z "${an}" ]] && continue
+                _getalias_excluded "${an}" || echo "${an}"
+              done \
             | column
     fi
 
