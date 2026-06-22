@@ -111,7 +111,7 @@ export DOTFILES_SHELL
 DOTFILES_SHOW_FUNCTIONS="${DOTFILES_SHOW_FUNCTIONS:-false}"
 
 # ── Lazy-load helper ─────────────────────────────────────────────────────────
-bash_lazy_load() {
+_bash_lazy_load() {
     local stub_name="$1"
     local source_file="$2"
     # shellcheck disable=SC2140,SC2086
@@ -239,7 +239,7 @@ _register_lazy_stubs() {
     local source_file="$1"
     local fn
     while IFS= read -r fn; do
-        [[ -n "${fn}" ]] && bash_lazy_load "${fn}" "${source_file}"
+        [[ -n "${fn}" ]] && _bash_lazy_load "${fn}" "${source_file}"
     done < <(grep -E '^[a-zA-Z][a-zA-Z0-9_-]+\s*\(\)' "${source_file}" 2>/dev/null \
              | sed 's/[[:space:]]*().*//')
 }

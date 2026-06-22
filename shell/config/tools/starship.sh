@@ -25,7 +25,9 @@ log_debug "starship: initialised (config: ${STARSHIP_CONFIG:-${XDG_CONFIG_HOME:-
 # ── functions ────────────────────────────────────────────────────────────────
 
 # Open the active starship config in $EDITOR.
-edit-starship-config() {
-    local config_file="${STARSHIP_CONFIG:-${XDG_CONFIG_HOME:-${HOME}/.config}/starship.toml}"
-    "${EDITOR:-vi}" "${config_file}"
-}
+if command -v starship >/dev/null 2>&1; then
+    edit-starship-config() {
+        local config_file="${STARSHIP_CONFIG:-${XDG_CONFIG_HOME:-${HOME}/.config}/starship.toml}"
+        "${EDITOR:-vi}" "${config_file}"
+    }
+fi
