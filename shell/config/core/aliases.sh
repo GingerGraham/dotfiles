@@ -9,8 +9,15 @@ alias dirsize="du -sh"
 alias cls="clear"
 
 # ── Network diagnostics ───────────────────────────────────────────────────────
-alias routeprint="netstat -rn"
-alias printrt="netstat -rn"
+# Prefer ss (iproute2, standard on modern Linux) over the deprecated netstat.
+# Fall back to netstat for macOS and any system without ss.
+if command -v ss &>/dev/null; then
+    alias routeprint="ss -rn"
+    alias printrt="ss -rn"
+elif command -v netstat &>/dev/null; then
+    alias routeprint="netstat -rn"
+    alias printrt="netstat -rn"
+fi
 
 # ── SSH agent ─────────────────────────────────────────────────────────────────
 alias sshclear="ssh-add -D"
@@ -40,7 +47,7 @@ if command -v acpi &>/dev/null; then
     alias power="acpi -a"
 fi
 
-# ── Tmux ─────────────────────────────────────────────────────────────────────
+# ── Tmux ──────────────────────────────────────────────────────────────────────
 if command -v tmux &>/dev/null; then
     alias tmux-new='tmux new-session -s main'
     alias tmux-attach='tmux attach-session -t main'
@@ -56,7 +63,7 @@ if command -v wl-copy &>/dev/null; then
     alias clip="wl-copy"
 fi
 
-# ── File manager ─────────────────────────────────────────────────────────────
+# ── File manager ──────────────────────────────────────────────────────────────
 command -v nautilus &>/dev/null && alias explorer="nautilus --browser &"
 
 # ── VPN ───────────────────────────────────────────────────────────────────────
@@ -73,14 +80,14 @@ if command -v uv &>/dev/null; then
     alias install-specify="uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git"
 fi
 
-# ── get-functions shortcut ─────────────────────────────────────────────────
+# ── get-functions shortcut ────────────────────────────────────────────────────
 if command -v get-functions &>/dev/null; then
     alias aliases="get-functions"
     alias reset-shell="clear && get-functions"
     alias rs="clear && get-functions"
 fi
 
-# ── get-installers shortcut ─────────────────────────────────────────────────
+# ── get-installers shortcut ───────────────────────────────────────────────────
 if command -v get-installers &>/dev/null; then
     alias installers="get-installers"
 fi

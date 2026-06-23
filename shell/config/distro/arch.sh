@@ -19,3 +19,21 @@ if [[ -f /usr/share/zsh/manjaro-zsh-prompt ]]; then
 else
     export _DOTFILES_DISTRO_PROMPT_FILE=""
 fi
+
+# ── Package update aliases ────────────────────────────────────────────────────
+# pacman is always present on Arch. AUR helpers (yay, paru) are optional and
+# user-installed — guard each independently so only what's present is exposed.
+if command -v pacman &>/dev/null; then
+    alias pacman-update='sudo pacman -Syu --noconfirm'
+fi
+
+# yay is the most common AUR helper — provides AUR + official repo updates.
+# If present it supersedes plain pacman for day-to-day updates.
+if command -v yay &>/dev/null; then
+    alias yay-update='yay -Syu --noconfirm'
+fi
+
+# paru is a Rust-based AUR helper, increasingly common on newer installs.
+if command -v paru &>/dev/null; then
+    alias paru-update='paru -Syu --noconfirm'
+fi

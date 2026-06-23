@@ -274,6 +274,11 @@ _get_functions_in() {
 }
 
 # $1 label   $2 pattern (ERE, "" = none, leading "!" = exclude)   $3.. files
+# Live-state gate: only aliases actually defined in the current shell session
+# are shown. Mirrors the declare -f gate used for functions — aliases that
+# exist in source files but weren't loaded (e.g. distro-specific aliases on
+# the wrong distro) are silently excluded. Works identically in bash and zsh:
+# `alias name` exits 0 if defined, non-zero if not.
 _get_aliases_in() {
     local _label="$1" _pattern="$2"; shift 2
     echo
@@ -287,6 +292,11 @@ _get_aliases_in() {
     elif [[ -n "${_pattern}" ]]; then
         _names="$(printf '%s\n' "${_names}" | grep -E "${_pattern}")"
     fi
+    # Live-state gate: drop any alias not defined in this shell session.
+    _names="$(printf '%s\n' "${_names}" | while IFS= read -r _an; do
+        [[ -z "${_an}" ]] && continue
+        alias "${_an}" &>/dev/null && echo "${_an}"
+    done)"
     if [[ -z "${_names}" ]]; then
         echo "  (none)"
     else
@@ -390,6 +400,10 @@ get-functions() {
     fi
 
     # ── Aliases ───────────────────────────────────────────────────────────────
+    # Live-state gate: `alias name` exits 0 if defined in this shell session,
+    # non-zero otherwise — works identically in bash and zsh. This ensures
+    # distro-specific aliases (apt-update, dnf-update, etc.) never appear on
+    # systems where their source file wasn't loaded.
     echo
     echo "[INFO] Loaded aliases:"
     if [[ "${#_source_files[@]}" -gt 0 ]]; then
@@ -397,6 +411,7 @@ get-functions() {
             | sort -u \
             | while read -r an; do
                 [[ -z "${an}" ]] && continue
+                alias "${an}" &>/dev/null || continue
                 _getalias_excluded "${an}" || echo "${an}"
               done \
             | column

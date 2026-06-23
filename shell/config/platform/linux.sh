@@ -10,8 +10,14 @@ if command -v systemctl &>/dev/null; then
     alias services="systemctl --type=service --state=running"
 fi
 
-# ── Flush DNS ──────────────────────────────────────────────────────────────────
-if command -v systemd-resolve &>/dev/null; then
+# ── Flush DNS ─────────────────────────────────────────────────────────────────
+# resolvectl is the current binary (systemd 239+, Fedora 33+, Ubuntu 20.04+).
+# systemd-resolve is the legacy name kept as a symlink on some distros but
+# absent on others. Check resolvectl first; fall back for older systems.
+if command -v resolvectl &>/dev/null; then
+    alias flush-dns="sudo resolvectl flush-caches"
+    alias flushdns="sudo resolvectl flush-caches"
+elif command -v systemd-resolve &>/dev/null; then
     alias flush-dns="sudo systemd-resolve --flush-caches"
     alias flushdns="sudo systemd-resolve --flush-caches"
 fi
