@@ -35,9 +35,12 @@ copilot|copilot|install-copilot-cli|install-copilot-cli|GitHub Copilot CLI
 cosign|cosign|install-cosign|install-cosign|cosign
 direnv|direnv|install-direnv|install-direnv|direnv
 edit|edit|install-edit|install-edit|Microsoft Edit
+flatpak|flatpak|install-flatpak|install-flatpak|Flatpak
+fzf|fzf|install-fzf|install-fzf|fzf (fuzzy finder)
 gh|gh|install-gh|install-gh|GitHub CLI
 glab|glab|install-glab|install-glab|GitLab CLI
 helm|helm|install-helm|install-helm|Helm
+jq|jq|install-jq|install-jq|jq (JSON processor)
 kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
 oh-my-posh|oh-my-posh|install-oh-my-posh|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
@@ -45,12 +48,14 @@ op|op|install-op-cli|install-op-cli|1Password CLI
 opendeck|opendeck|install-opendeck|install-opendeck|Opendeck
 noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
+snapd|snap|install-snapd|install-snapd|snapd
 starship|command -v|install-starship|install-starship|Prompt engine
 tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
 terraform|terraform|_update_terraform|install-tenv|Terraform
 tflint|tflint|install-tflint|install-tflint|TFLint
 tofu|tofu|_update_tofu|install-tenv|OpenTofu
 trivy|trivy|install-trivy|install-trivy|Trivy
+yq|yq|install-yq|install-yq|yq (YAML processor)
 EOF
 }
 

@@ -856,3 +856,295 @@ install-direnv() {
         log_warn "direnv not found in PATH after install. Restart your shell or check ~/.local/bin."
     fi
 }
+
+# ── fzf install ───────────────────────────────────────────────────────────────
+
+_fzf-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if command -v dnf &>/dev/null; then
+        # fzf is in EPEL on RHEL 8, base repos on RHEL 9+ and Fedora
+        ${elevation_cmd} dnf install -y fzf
+    elif command -v yum &>/dev/null; then
+        ${elevation_cmd} yum install -y epel-release 2>/dev/null || true
+        ${elevation_cmd} yum install -y fzf
+    else
+        log_error "Neither dnf nor yum found"; return 1
+    fi
+}
+
+_fzf-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y fzf
+}
+
+_fzf-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} zypper install -y fzf
+}
+
+_fzf-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm fzf
+}
+
+_fzf-install-mac() {
+    command -v brew &>/dev/null || { log_error "brew is required on macOS"; return 1; }
+    if command -v fzf &>/dev/null; then brew upgrade fzf; else brew install fzf; fi
+}
+
+# Binary fallback — latest GitHub release → ~/.local/bin
+_fzf-install-binary() {
+    log_info "fzf: falling back to binary install from GitHub releases..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+    command -v tar  &>/dev/null || { log_error "tar is required";  return 1; }
+
+    local api_response ver arch url asset tmp_dir
+    api_response="$(curl -s https://api.github.com/repos/junegunn/fzf/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/' | head -1)"
+    [[ -z "${ver}" ]] && { log_error "fzf: could not determine latest version"; return 1; }
+
+    case "$(uname -m)" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "fzf: unsupported architecture $(uname -m)"; return 1 ;;
+    esac
+
+    asset="fzf-${ver}-linux_${arch}.tar.gz"
+    url="$(_gh_release_asset_url "${api_response}" "fzf-${ver}-linux_${arch}\.tar\.gz")"
+    [[ -z "${url}" ]] && { log_error "fzf: no matching asset for ${asset}"; return 1; }
+
+    tmp_dir="$(mktemp -d)"
+    _download_file_robust "${url}" "${tmp_dir}/${asset}" || { rm -rf "${tmp_dir}"; return 1; }
+    tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${tmp_dir}/fzf" "${HOME}/.local/bin/fzf"
+    rm -rf "${tmp_dir}"
+    log_info "fzf ${ver} installed to ~/.local/bin/fzf"
+}
+
+install-fzf() {
+    log_info "Installing or updating fzf..."
+
+    case "${DOTFILES_OS}" in
+        Mac) _fzf-install-mac; return $? ;;
+        Linux) ;;
+        *) log_error "Unsupported OS for fzf install"; return 1 ;;
+    esac
+
+    local ok=1
+    case "${DOTFILES_DISTRO}" in
+        rhel)   _fzf-install-rhel   && ok=0 ;;
+        debian) _fzf-install-debian && ok=0 ;;
+        suse)   _fzf-install-suse   && ok=0 ;;
+        arch)   _fzf-install-arch   && ok=0 ;;
+        *)      log_warn "fzf: unknown distro (${DOTFILES_DISTRO}) — trying binary install" ;;
+    esac
+    [[ "${ok}" -ne 0 ]] && { _fzf-install-binary || return 1; }
+
+    if command -v fzf &>/dev/null; then
+        log_info "fzf installed: $(fzf --version)"
+    else
+        log_warn "fzf not on PATH after install — check ~/.local/bin is in PATH"
+    fi
+}
+
+
+# ── jq install ────────────────────────────────────────────────────────────────
+# jq is in default repos for all four distro families — package manager is
+# always the right choice. Binary fallback retained for unknown distros only.
+
+_jq-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if command -v dnf &>/dev/null; then
+        ${elevation_cmd} dnf install -y jq
+    else
+        ${elevation_cmd} yum install -y jq
+    fi
+}
+
+_jq-install-debian() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} apt-get update
+    ${elevation_cmd} apt-get install -y jq
+}
+
+_jq-install-suse() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} zypper install -y jq
+}
+
+_jq-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    ${elevation_cmd} pacman -S --noconfirm jq
+}
+
+_jq-install-mac() {
+    command -v brew &>/dev/null || { log_error "brew is required on macOS"; return 1; }
+    if command -v jq &>/dev/null; then brew upgrade jq; else brew install jq; fi
+}
+
+_jq-install-binary() {
+    log_info "jq: falling back to binary install from GitHub releases..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    local api_response ver arch url tmp_dir
+    api_response="$(curl -s https://api.github.com/repos/jqlang/jq/releases/latest)"
+    # jq tags are `jq-1.7.1`, not `v1.7.1`
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"jq-([^"]+)".*/\1/' | head -1)"
+    [[ -z "${ver}" ]] && { log_error "jq: could not determine latest version"; return 1; }
+
+    case "$(uname -m)" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "jq: unsupported architecture $(uname -m)"; return 1 ;;
+    esac
+
+    # Asset naming changed in 1.7: jq-linux64 → jq-linux-amd64
+    url="$(_gh_release_asset_url "${api_response}" "jq-linux-(${arch}|64)$")"
+    [[ -z "${url}" ]] && { log_error "jq: no matching asset for linux/${arch}"; return 1; }
+
+    tmp_dir="$(mktemp -d)"
+    _download_file_robust "${url}" "${tmp_dir}/jq" || { rm -rf "${tmp_dir}"; return 1; }
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${tmp_dir}/jq" "${HOME}/.local/bin/jq"
+    rm -rf "${tmp_dir}"
+    log_info "jq ${ver} installed to ~/.local/bin/jq"
+}
+
+install-jq() {
+    log_info "Installing or updating jq..."
+
+    case "${DOTFILES_OS}" in
+        Mac) _jq-install-mac; return $? ;;
+        Linux) ;;
+        *) log_error "Unsupported OS for jq install"; return 1 ;;
+    esac
+
+    local ok=1
+    case "${DOTFILES_DISTRO}" in
+        rhel)   _jq-install-rhel   && ok=0 ;;
+        debian) _jq-install-debian && ok=0 ;;
+        suse)   _jq-install-suse   && ok=0 ;;
+        arch)   _jq-install-arch   && ok=0 ;;
+        *)      log_warn "jq: unknown distro (${DOTFILES_DISTRO}) — trying binary install" ;;
+    esac
+    [[ "${ok}" -ne 0 ]] && { _jq-install-binary || return 1; }
+
+    command -v jq &>/dev/null \
+        && log_info "jq installed: $(jq --version 2>/dev/null)" \
+        || log_warn "jq not on PATH after install — check ~/.local/bin is in PATH"
+}
+
+
+# ── yq install ────────────────────────────────────────────────────────────────
+# mikefarah/yq package availability:
+#   - Fedora: base repos (F38+)
+#   - RHEL 9+: EPEL (enabled as a side-effect of install-snapd on rhel, but
+#               not guaranteed here — attempt and fall through on failure)
+#   - Ubuntu/Debian: apt ships yq 3.x (Python wrapper, wrong tool) — skip apt
+#   - openSUSE: third-party OBS repo only — not worth adding a repo for
+#   - Arch: AUR `yq` package
+# Binary install is therefore the primary path for debian and suse.
+
+_yq-install-rhel() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    if command -v dnf &>/dev/null; then
+        # Fedora: yq is in base repos — try direct install first
+        # RHEL/Rocky/Alma: yq is in EPEL 9+, so fall back to enabling epel-release
+        if ! ${elevation_cmd} dnf install -y yq 2>/dev/null; then
+            log_info "yq: not found in base repos, attempting via EPEL..."
+            ${elevation_cmd} dnf install -y epel-release 2>/dev/null || true
+            ${elevation_cmd} dnf install -y yq
+        fi
+    elif command -v yum &>/dev/null; then
+        if ! ${elevation_cmd} yum install -y yq 2>/dev/null; then
+            log_info "yq: not found in base repos, attempting via EPEL..."
+            ${elevation_cmd} yum install -y epel-release 2>/dev/null || true
+            ${elevation_cmd} yum install -y yq
+        fi
+    else
+        log_error "yq: neither dnf nor yum found"; return 1
+    fi
+}
+
+_yq-install-arch() {
+    local elevation_cmd; elevation_cmd="$(get-elevation-command)" || return 1
+    # yq is in the Arch AUR; pacman -S works if the community/extra repo has it,
+    # otherwise yay handles AUR resolution.
+    if command -v yay &>/dev/null; then
+        yay -S --noconfirm yq
+    else
+        ${elevation_cmd} pacman -S --noconfirm yq
+    fi
+}
+
+_yq-install-mac() {
+    command -v brew &>/dev/null || { log_error "brew is required on macOS"; return 1; }
+    if command -v yq &>/dev/null; then brew upgrade yq; else brew install yq; fi
+}
+
+_yq-install-binary() {
+    log_info "yq: installing binary from GitHub releases..."
+    command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
+
+    local api_response ver arch url tmp_dir
+    api_response="$(curl -s https://api.github.com/repos/mikefarah/yq/releases/latest)"
+    ver="$(printf '%s' "${api_response}" | grep '"tag_name":' \
+        | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/' | head -1)"
+    [[ -z "${ver}" ]] && { log_error "yq: could not determine latest version"; return 1; }
+
+    case "$(uname -m)" in
+        x86_64)        arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) log_error "yq: unsupported architecture $(uname -m)"; return 1 ;;
+    esac
+
+    # yq releases a plain binary — no archive to extract
+    url="$(_gh_release_asset_url "${api_response}" "yq_linux_${arch}$")"
+    [[ -z "${url}" ]] \
+        && url="https://github.com/mikefarah/yq/releases/download/v${ver}/yq_linux_${arch}"
+
+    tmp_dir="$(mktemp -d)"
+    _download_file_robust "${url}" "${tmp_dir}/yq" || { rm -rf "${tmp_dir}"; return 1; }
+    mkdir -p "${HOME}/.local/bin"
+    install -m 755 "${tmp_dir}/yq" "${HOME}/.local/bin/yq"
+    rm -rf "${tmp_dir}"
+    log_info "yq ${ver} installed to ~/.local/bin/yq"
+}
+
+install-yq() {
+    log_info "Installing or updating yq..."
+
+    case "${DOTFILES_OS}" in
+        Mac) _yq-install-mac; return $? ;;
+        Linux) ;;
+        *) log_error "Unsupported OS for yq install"; return 1 ;;
+    esac
+
+    local ok=1
+    case "${DOTFILES_DISTRO}" in
+        rhel)   _yq-install-rhel && ok=0 ;;
+        arch)   _yq-install-arch && ok=0 ;;
+        # debian: apt ships yq 3.x (wrong tool) — go straight to binary
+        # suse: only in third-party OBS repo — not worth a repo add, use binary
+        debian|suse|*) log_info "yq: no suitable distro package — using binary install" ;;
+    esac
+    [[ "${ok}" -ne 0 ]] && { _yq-install-binary || return 1; }
+
+    # Verify it's the mikefarah variant, not the Python yq 3.x wrapper
+    if command -v yq &>/dev/null; then
+        local installed_ver
+        installed_ver="$(yq --version 2>/dev/null | head -1)"
+        if printf '%s' "${installed_ver}" | grep -qiE '(https://github.com/mikefarah|mikefarah)'; then
+            log_info "yq installed: ${installed_ver}"
+        else
+            log_warn "yq on PATH appears to be a different implementation: ${installed_ver}"
+            log_warn "The mikefarah binary was installed to ~/.local/bin/yq — check PATH ordering."
+        fi
+    else
+        log_warn "yq not on PATH after install — check ~/.local/bin is in PATH"
+    fi
+}
