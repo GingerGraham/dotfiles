@@ -245,11 +245,21 @@ _register_lazy_stubs() {
 }
 
 for _lazy_file in "${SHELL_CONFIG_DIR}/lazy"/*.sh; do
-    [[ -f "${_lazy_file}" ]] && _register_lazy_stubs "${_lazy_file}"
-done
-unset _lazy_file
-unset -f _register_lazy_stubs
+     [[ -f "${_lazy_file}" ]] && _register_lazy_stubs "${_lazy_file}"
+ done
+ unset _lazy_file
 
+# ── Tier 3: optional lazy stubs — registered only when opted in ──────────────
+# Set DOTFILES_OPTIONAL_INSTALLERS=true in env/90-local.sh to enable.
+# Files in lazy/optional/ follow the same public-function convention as lazy/.
+if [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]]; then
+    for _lazy_file in "${SHELL_CONFIG_DIR}/lazy/optional"/*.sh; do
+        [[ -f "${_lazy_file}" ]] && _register_lazy_stubs "${_lazy_file}"
+    done
+    unset _lazy_file
+fi
+
+ unset -f _register_lazy_stubs
 # Prompt engine — mutually exclusive; priority is:
 #   1. oh-my-posh   (any shell)
 #   2. starship     (any shell) — preserves a pre-existing config (e.g. Omarchy)

@@ -430,10 +430,14 @@ get-functions() {
 
 # ── Introspection: list install-* functions ───────────────────────────────────
 get-installers() {
-    local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
-    _get_functions_in "Install commands (lazy-loaded on first use)" '^install-' \
-        "${_config_dir}"/lazy/installers*.sh
-}
+     local _config_dir="${SHELL_CONFIG_DIR:-${HOME}/.config/shell}"
+     local -a _installer_files=( "${_config_dir}"/lazy/installers*.sh )
+     if [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]]; then
+         _installer_files+=( "${_config_dir}"/lazy/optional/installers*.sh )
+     fi
+     _get_functions_in "Install commands (lazy-loaded on first use)" '^install-' \
+         "${_installer_files[@]}"
+ }
 
 # ── Introspection: list GPG functions and aliases ─────────────────────────────
 get-gpg-functions() {

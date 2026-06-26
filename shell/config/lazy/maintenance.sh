@@ -45,8 +45,6 @@ kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
 oh-my-posh|oh-my-posh|install-oh-my-posh|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
 op|op|install-op-cli|install-op-cli|1Password CLI
-opendeck|opendeck|install-opendeck|install-opendeck|Opendeck
-noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
 snapd|snap|install-snapd|install-snapd|snapd
 starship|command -v|install-starship|install-starship|Prompt engine
@@ -57,6 +55,29 @@ tofu|tofu|_update_tofu|install-tenv|OpenTofu
 trivy|trivy|install-trivy|install-trivy|Trivy
 yq|yq|install-yq|install-yq|yq (YAML processor)
 EOF
+}
+
+# Optional tools registry — consulted only when DOTFILES_OPTIONAL_INSTALLERS=true.
+# Same five-field pipe-delimited format as _managed_tools_registry.
+# Add a row here whenever a new install-* function is added to lazy/optional/.
+_optional_tools_registry() {
+    cat <<'EOF'
+noteshub|noteshub|install-noteshub|install-noteshub|NotesHub
+opendeck|opendeck|install-opendeck|install-opendeck|Opendeck
+EOF
+}
+
+# Active registry — always _managed_tools_registry; additionally
+# _optional_tools_registry when DOTFILES_OPTIONAL_INSTALLERS=true.
+# Rows are sorted alphabetically by tool name so optional tools weave in
+# naturally regardless of declaration order in their source registries.
+# All consumers call this function — never the individual registries directly.
+_active_tools_registry() {
+    if [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]]; then
+        { _managed_tools_registry; _optional_tools_registry; } | sort
+    else
+        _managed_tools_registry | sort
+    fi
 }
 
 # Presence check supporting both `command -v` and `path:<file>` detect tokens.
@@ -83,7 +104,7 @@ _managed_tool_row() {
             printf '%s|%s|%s|%s|%s\n' "${n}" "${d}" "${u}" "${i}" "${l}"
             return 0
         fi
-    done < <(_managed_tools_registry)
+    done < <(_active_tools_registry)
     return 1
 }
 
@@ -200,7 +221,7 @@ update-tools() {
             else
                 printf '%-12s %-10s %s\n' "${n}" "-"   "${l}"
             fi
-        done < <(_managed_tools_registry)
+        done < <(_active_tools_registry)
         return 0
     fi
 
@@ -222,7 +243,7 @@ update-tools() {
         while IFS='|' read -r n d u i l; do
             [[ -z "${n}" ]] && continue
             _update_run_row "${n}" "${d}" "${u}" "${i}" "${l}"
-        done < <(_managed_tools_registry)
+        done < <(_active_tools_registry)
     fi
 
     echo

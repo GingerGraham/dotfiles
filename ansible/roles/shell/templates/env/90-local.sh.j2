@@ -35,6 +35,8 @@ export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name | default(ansible_facts['
 # ── Behaviour Flag Overrides ───────────────────────────────────────────────────
 # Uncomment to print available shell functions at interactive shell startup.
 # DOTFILES_SHOW_FUNCTIONS=true
+# Uncomment to enable optional installers (lazy/optional/installers*.sh) in update-tools.
+# DOTFILES_OPTIONAL_INSTALLERS=true
 
 # ── Editor / pager overrides ──────────────────────────────────────────────────
 # Override the shared EDITOR/VISUAL set in 10-editors.sh if needed.
