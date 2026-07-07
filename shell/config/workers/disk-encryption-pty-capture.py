@@ -17,25 +17,36 @@ stdin-forwarding with nothing live to relay and no way to reach the child.
 
 Called from shell/config/lazy/disk-encryption.sh.
 """
+
 import os
 import pty
 import sys
 
 if len(sys.argv) < 3:
-    print("usage: disk-encryption-pty-capture.py <logfile> <command> [args...]", file=sys.stderr)
+    print(
+        "usage: disk-encryption-pty-capture.py <logfile> <command> [args...]",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 logfile = sys.argv[1]
 argv = sys.argv[2:]
 
-# O_EXCL: refuse to open a pre-existing file at this path — the caller only
-# ever passes a freshly mktemp -u'd (name reserved, not created) path, so
-# this should always be a fresh create. Mode 600 set at creation time rather
-# than via a separate chmod, closing the brief window a chmod-after-create
-# would otherwise leave.
+# Remove anything already at this path first. Ownership doesn't matter here —
+# we're running as root — this just guards against a leftover from an
+# earlier interrupted/failed run occupying the name mktemp -u handed back,
+# which would otherwise make the O_EXCL create below fail with EEXIST.
+try:
+    os.unlink(logfile)
+except FileNotFoundError:
+    pass
+
+# O_EXCL: as a second guard, refuse to open anything that (re-)appears at
+# this path between the unlink above and here.
 fd = os.open(logfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 
 with os.fdopen(fd, "ab") as fh:
+
     def _capture(fd_: int) -> bytes:
         data = os.read(fd_, 1024)
         if data:

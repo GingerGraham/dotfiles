@@ -295,6 +295,13 @@ _tpm_ensure_recovery_key() {
     # distinct tty from the shell the command was originally run from).
     sudo python3 "${SHELL_CONFIG_DIR}/workers/disk-encryption-pty-capture.py" "${transcript_file}" \
         systemd-cryptenroll --recovery-key "${device_path}"
+    local capture_rc=$?
+
+    if [[ ${capture_rc} -ne 0 ]]; then
+        log_error "disk-encryption: recovery key capture failed for ${device_path} (worker exit ${capture_rc})"
+        sudo rm -f "${transcript_file}" 2>/dev/null
+        return 1
+    fi
 
     # Read and remove via sudo too — the file is root-owned. This reuses
     # the same warm sudo timestamp as everything else in this flow, so it
