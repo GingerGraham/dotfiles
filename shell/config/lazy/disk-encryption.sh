@@ -125,7 +125,7 @@ rotate-luks-key() {
 
 _tpm_require_tools() {
     local cmd
-    for cmd in cryptsetup blkid systemd-cryptenroll systemctl; do
+    for cmd in cryptsetup blkid systemd-cryptenroll systemctl script; do
         if ! command -v "${cmd}" &>/dev/null; then
             log_error "disk-encryption: required tool '${cmd}' is not installed"
             return 1
@@ -184,11 +184,29 @@ _tpm_ensure_recovery_key() {
     echo "  key will then be generated and printed below — store it somewhere safe."
     echo
 
-    local recovery_transcript
-    recovery_transcript="$(sudo systemd-cryptenroll --recovery-key "${device_path}" 2>&1 | tee /dev/tty)"
+    # Run through script(1) rather than a bare pipe. Once systemd-cryptenroll's
+    # stdout is a plain pipe (e.g. `| tee`) instead of a real terminal, its
+    # password-prompt handling can behave differently and hang indefinitely.
+    # script(1) gives the child a real pty so it behaves exactly as if run
+    # directly, while still letting us capture a transcript on the side.
+    local temp_dir transcript_file
+    if [[ -d /dev/shm && -w /dev/shm ]]; then
+        temp_dir="/dev/shm"
+    else
+        temp_dir="${TMPDIR:-/tmp}"
+    fi
+    transcript_file="$(mktemp "${temp_dir}/tpm-recovery.XXXXXX")"
+    chmod 600 "${transcript_file}"
 
-    # Verify by re-checking device state rather than trusting a pipeline exit
-    # code (bash $PIPESTATUS and zsh $pipestatus aren't the same mechanism).
+    script --quiet --return --command "sudo systemd-cryptenroll --recovery-key '${device_path}'" "${transcript_file}"
+
+    local recovery_transcript
+    recovery_transcript="$(_tpm_clean_transcript < "${transcript_file}")"
+    shred -u "${transcript_file}" 2>/dev/null || rm -f "${transcript_file}"
+
+    # Verify by re-checking device state rather than trusting script(1)'s own
+    # exit code (bash $PIPESTATUS and zsh $pipestatus aren't the same
+    # mechanism, and --return only reflects the shell script(1) spawned).
     if ! _tpm_has_token_type "${device_path}" "recovery"; then
         log_error "disk-encryption: recovery key enrollment did not succeed for ${device_path}"
         unset recovery_transcript
@@ -197,6 +215,12 @@ _tpm_ensure_recovery_key() {
 
     _tpm_offer_secret_storage "${device_path}" "${recovery_transcript}"
     unset recovery_transcript
+}
+
+# Strips ANSI escape sequences and carriage returns from a script(1)
+# typescript so a captured transcript reads cleanly when stored as a note.
+_tpm_clean_transcript() {
+    sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r'
 }
 
 # Offers to store the just-generated recovery key transcript in whichever of
