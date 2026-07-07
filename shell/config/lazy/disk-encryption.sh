@@ -268,14 +268,23 @@ _tpm_ensure_recovery_key() {
     # pty.fork() gives the child a real controlling terminal, so echo
     # suppression and password-prompt handling behave exactly as if run
     # directly — no bare-pipe weirdness like the previous approach had.
+    #
+    # The transcript path is only *named* here, not created — mktemp -u
+    # reserves a unique name without creating the file. It's created by the
+    # sudo'd python worker below (as root, with O_EXCL), so the file is
+    # root-owned for its entire lifecycle and root never has to open a file
+    # a different user created. (A prior version had bash pre-create the
+    # file before handing off to the root-run worker; on at least some
+    # Fedora setups that cross-ownership open was denied even though the
+    # DAC bits looked fine. Root owning it end-to-end sidesteps that
+    # entirely, whatever the exact mechanism was.)
     local temp_dir transcript_file
-    if [[ -d /dev/shm && -w /dev/shm ]]; then
+    if [[ -d /dev/shm ]]; then
         temp_dir="/dev/shm"
     else
         temp_dir="${TMPDIR:-/tmp}"
     fi
-    transcript_file="$(mktemp "${temp_dir}/tpm-recovery.XXXXXX")"
-    chmod 600 "${transcript_file}"
+    transcript_file="$(mktemp -u "${temp_dir}/tpm-recovery.XXXXXX")"
 
     # sudo wraps the python worker itself, not the inner command. Elevation
     # happens once, in the caller's own tty, reusing the sudo timestamp
@@ -287,9 +296,12 @@ _tpm_ensure_recovery_key() {
     sudo python3 "${SHELL_CONFIG_DIR}/workers/disk-encryption-pty-capture.py" "${transcript_file}" \
         systemd-cryptenroll --recovery-key "${device_path}"
 
+    # Read and remove via sudo too — the file is root-owned. This reuses
+    # the same warm sudo timestamp as everything else in this flow, so it
+    # doesn't reintroduce an extra password prompt.
     local recovery_transcript
-    recovery_transcript="$(_tpm_clean_transcript < "${transcript_file}")"
-    shred -u "${transcript_file}" 2>/dev/null || rm -f "${transcript_file}"
+    recovery_transcript="$(sudo cat "${transcript_file}" 2>/dev/null | _tpm_clean_transcript)"
+    sudo shred -u "${transcript_file}" 2>/dev/null || sudo rm -f "${transcript_file}" 2>/dev/null
 
     # Verify by re-checking device state rather than trusting an exit code
     # (bash $PIPESTATUS and zsh $pipestatus aren't the same mechanism, and
