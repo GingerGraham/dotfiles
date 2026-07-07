@@ -330,6 +330,10 @@ _tpm_clean_transcript() {
     sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g' | tr -d '\r'
 }
 
+_tpm_strip_ansi() {
+    printf '%s' "$1" | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g'
+}
+
 # Offers to store the just-generated recovery key transcript in whichever of
 # Bitwarden/1Password is installed and unlocked. Declines silently if neither
 # is available — the key was already shown above either way. Title uses the
@@ -337,6 +341,7 @@ _tpm_clean_transcript() {
 # devices on the same host stay distinguishable and stable across reboots.
 _tpm_offer_secret_storage() {
     local device_path="$1" transcript="$2"
+    transcript="$(_tpm_strip_ansi "${transcript}")"
     local host label uuid title
     host="$(hostname -s 2>/dev/null || echo unknown)"
     label="$(_tpm_device_label "${device_path}")"
@@ -368,8 +373,14 @@ _tpm_bw_status() {
 }
 
 _tpm_bw_store_recovery() {
-    local title="$1" body="$2" item_json encoded
-    item_json="$(bw get template item 2>/dev/null | python3 -c '
+    local title="$1" body="$2" encoded tmp_json
+
+    tmp_json="$(mktemp)" || {
+        log_error "disk-encryption: failed to create temp file for Bitwarden item"
+        return 1
+    }
+
+    bw get template item 2>/dev/null | python3 -c '
 import json, sys
 tpl = json.load(sys.stdin)
 tpl["type"] = 2
@@ -377,14 +388,22 @@ tpl["name"] = sys.argv[1]
 tpl["secureNote"] = {"type": 0}
 tpl["notes"] = sys.argv[2]
 print(json.dumps(tpl))
-' "${title}" "${body}")"
+' "${title}" "${body}" > "${tmp_json}"
 
-    if [[ -z "${item_json}" ]]; then
+    if [[ ! -s "${tmp_json}" ]]; then
         log_error "disk-encryption: failed to build Bitwarden item"
+        rm -f "${tmp_json}"
         return 1
     fi
 
-    encoded="$(echo "${item_json}" | bw encode)"
+    encoded="$(bw encode < "${tmp_json}")"
+    rm -f "${tmp_json}"
+
+    if [[ -z "${encoded}" ]]; then
+        log_error "disk-encryption: bw encode returned empty output"
+        return 1
+    fi
+
     if bw create item "${encoded}" >/dev/null 2>&1; then
         log_info "disk-encryption: recovery key stored in Bitwarden as '${title}'"
     else
