@@ -200,27 +200,8 @@ _tpm_ensure_recovery_key() {
     transcript_file="$(mktemp "${temp_dir}/tpm-recovery.XXXXXX")"
     chmod 600 "${transcript_file}"
 
-    python3 - "${transcript_file}" sudo systemd-cryptenroll --recovery-key "${device_path}" <<'PYEOF'
-import os
-import pty
-import sys
-
-logfile = sys.argv[1]
-argv = sys.argv[2:]
-fh = open(logfile, "ab")
-
-def _capture(fd):
-    data = os.read(fd, 1024)
-    if data:
-        fh.write(data)
-        fh.flush()
-    return data
-
-try:
-    pty.spawn(argv, _capture)
-finally:
-    fh.close()
-PYEOF
+    python3 "${SHELL_CONFIG_DIR}/workers/disk-encryption-pty-capture.py" "${transcript_file}" \
+        sudo systemd-cryptenroll --recovery-key "${device_path}"
 
     local recovery_transcript
     recovery_transcript="$(_tpm_clean_transcript < "${transcript_file}")"
@@ -250,7 +231,8 @@ _tpm_clean_transcript() {
 # is available — the key was already shown above either way.
 _tpm_offer_secret_storage() {
     local device_path="$1" transcript="$2"
-    local title="LUKS Recovery Key — $(hostname -s 2>/dev/null || echo unknown) — ${device_path}"
+    local title
+    title="LUKS Recovery Key — $(hostname -s 2>/dev/null || echo unknown) — ${device_path}"
     local have_bw=false have_op=false answer
 
     command -v bw &>/dev/null && [[ "$(_tpm_bw_status)" == "unlocked" ]] && have_bw=true
