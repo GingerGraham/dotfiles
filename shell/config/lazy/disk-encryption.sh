@@ -2,25 +2,25 @@
 # lazy/disk-encryption.sh — LUKS2 + TPM2 enrollment and passphrase rotation.
 # Stub registration for this file is platform-gated in loader.sh (Linux +
 # systemd-cryptenroll only) — see the Tier 3 platform-gated block.
-
-# ── LUKS slot convention (see docs/disk-encryption.md) ────────────────────────
-# Slot 0 — primary admin passphrase   (set at OS install; never touched here)
-# Slot 1 — backup admin passphrase    (not managed by this module — reserved)
-# Slot 2 — TPM2 automated unlock      (enroll-luks-tpm2)
-# Slot 3 — emergency recovery key     (enroll-luks-tpm2 / rotate-luks-key, offline)
-# Slots 4-31 — reserved for future use
-readonly _TPM_SLOT_TPM2=2
-readonly _TPM_SLOT_RECOVERY=3
+#
+# Slot numbers are NOT pinned. systemd-cryptenroll has no option to choose
+# where a new enrollment lands — it always uses cryptsetup's lowest-free-slot
+# allocation. The only slot-targeting flag it has, --wipe-slot=, only removes
+# slots (by number or by type). So this module identifies and guards
+# enrollments by TYPE (password/recovery/tpm2), which is what
+# systemd-cryptenroll itself tracks, rather than by slot number. On a
+# freshly provisioned device this typically still lands close to: slot 0 =
+# install-time passphrase, slot 1 = recovery key, slot 2 = TPM2 — but that's
+# an observed outcome of call order, not something enforced.
 
 # ── LUKS + TPM2 enrollment ─────────────────────────────────────────────────────
 
 # enroll-luks-tpm2
 # Discovers LUKS2 partitions and interactively enrolls TPM2 auto-unlock for
-# each, one at a time, into the documented slot (${_TPM_SLOT_TPM2}). Before
-# touching any TPM2 slot, guarantees a recovery key exists on that device —
-# generating one if missing — so a TPM2 wipe can never leave a device with no
-# fallback. TPM2 re-enrollment is scoped to `--wipe-slot=tpm2` only; recovery
-# and password slots are never wiped.
+# each, one at a time. Before touching any TPM2 slot, guarantees a recovery
+# key exists on that device — generating one if missing — so a TPM2 wipe can
+# never leave a device with no fallback. TPM2 re-enrollment is scoped to
+# `--wipe-slot=tpm2` only; recovery and password slots are never wiped.
 #
 # Usage:
 #   enroll-luks-tpm2
@@ -164,34 +164,26 @@ _tpm_find_luks_devices() {
 
 # _tpm_has_token_type <device> <recovery|tpm2|password>
 # True if ANY slot on the device has this type, regardless of slot number.
+# This — not a slot index — is the mechanism systemd-cryptenroll itself uses
+# for idempotency and for --wipe-slot=<type>, so it's what this module keys
+# off of throughout.
 _tpm_has_token_type() {
     local device_path="$1" token_type="$2" listing
     listing="$(sudo systemd-cryptenroll "${device_path}" 2>/dev/null)"
     echo "${listing}" | awk 'NR>1{print $2}' | grep -qx "${token_type}"
 }
 
-# _tpm_slot_type <device> <slot>
-# Prints the enrollment type in a specific numbered slot, or nothing if free.
-_tpm_slot_type() {
-    local device_path="$1" slot="$2"
-    sudo systemd-cryptenroll "${device_path}" 2>/dev/null \
-        | awk -v s="${slot}" 'NR>1 && $1==s {print $2; exit}'
-}
-
-# _tpm_check_slot <device> <slot> <expected_type>
-# Echoes one of: free | match | conflict:<actual_type>
-# Used to enforce the documented slot convention before enrolling anything —
-# refuses to clobber a slot that holds something other than what's expected.
-_tpm_check_slot() {
-    local device_path="$1" slot="$2" expected_type="$3" actual
-    actual="$(_tpm_slot_type "${device_path}" "${slot}")"
-    if [[ -z "${actual}" ]]; then
-        echo "free"
-    elif [[ "${actual}" == "${expected_type}" ]]; then
-        echo "match"
-    else
-        echo "conflict:${actual}"
-    fi
+# _tpm_show_slots <device>
+# Prints the current slot/type table for a device. Informational only —
+# systemd-cryptenroll assigns new enrollments to the lowest free slot
+# automatically and there is no way to pin placement, so this exists purely
+# to make the actual, resulting layout visible after an enrollment.
+_tpm_show_slots() {
+    local device_path="$1"
+    echo
+    log_info "Current slot layout for ${device_path}:"
+    sudo systemd-cryptenroll "${device_path}" 2>/dev/null | sed 's/^/    /'
+    echo
 }
 
 # _tpm_device_uuid <device>
@@ -221,8 +213,7 @@ _tpm_device_label() {
 
 # _tpm_enroll_device <device_path>
 # Single-device TPM2 enrollment body — shared by enroll-luks-tpm2's device
-# loop and rotate-luks-key's post-rotation offer, so both stay in sync and
-# both honour the same slot convention and conflict checks.
+# loop and rotate-luks-key's post-rotation offer, so both stay in sync.
 _tpm_enroll_device() {
     local device_path="$1"
 
@@ -231,17 +222,8 @@ _tpm_enroll_device() {
         return 1
     }
 
-    local slot_status
-    slot_status="$(_tpm_check_slot "${device_path}" "${_TPM_SLOT_TPM2}" "tpm2")"
-    if [[ "${slot_status}" == conflict:* ]]; then
-        log_error "slot ${_TPM_SLOT_TPM2} on ${device_path} is occupied by '${slot_status#conflict:}', not tpm2 — refusing to overwrite it"
-        log_error "See docs/disk-encryption.md for the slot convention this module follows"
-        return 1
-    fi
-
-    # --wipe-slot=tpm2 removes any stray tpm2 enrollment regardless of slot;
-    # --key-slot then pins the fresh one to the documented slot, self-healing
-    # any historical drift on machines enrolled before this convention existed.
+    # Only ever wipe the tpm2 slot type — recovery/password slots are
+    # never touched, no matter what.
     local wipe_flag=()
     if _tpm_has_token_type "${device_path}" "tpm2"; then
         log_info "Existing TPM2 enrollment found for ${device_path} — replacing it"
@@ -252,9 +234,9 @@ _tpm_enroll_device() {
             "${wipe_flag[@]}" \
             --tpm2-device=auto \
             --tpm2-pcrs="0+2+5+7" \
-            --key-slot="${_TPM_SLOT_TPM2}" \
             "${device_path}"; then
-        log_info "Successfully enrolled TPM2 for ${device_path} (slot ${_TPM_SLOT_TPM2})"
+        log_info "Successfully enrolled TPM2 for ${device_path}"
+        _tpm_show_slots "${device_path}"
         return 0
     else
         log_error "Failed to enroll TPM2 for ${device_path}"
@@ -262,31 +244,15 @@ _tpm_enroll_device() {
     fi
 }
 
-# Ensures a recovery key exists on the device, pinned to the documented slot
-# (${_TPM_SLOT_RECOVERY}). Only ever creates one when missing — never wipes or
-# regenerates an existing recovery key. No --wipe-slot is ever used here, so
-# other existing slots are untouched.
+# Ensures a recovery key exists on the device. Only ever creates one when
+# missing — never wipes or regenerates an existing recovery key. No
+# --wipe-slot is ever used here, so other existing slots are untouched.
 _tpm_ensure_recovery_key() {
     local device_path="$1"
 
     if _tpm_has_token_type "${device_path}" "recovery"; then
-        local slot_status
-        slot_status="$(_tpm_check_slot "${device_path}" "${_TPM_SLOT_RECOVERY}" "recovery")"
-        if [[ "${slot_status}" != "match" ]]; then
-            log_warn "disk-encryption: ${device_path} has a recovery key, but not in the documented slot ${_TPM_SLOT_RECOVERY}"
-            log_warn "  It still works — this is a labelling/consistency issue, not a security one."
-            log_warn "  See docs/disk-encryption.md for the one-off migration steps."
-        else
-            log_info "disk-encryption: recovery key already enrolled for ${device_path} (slot ${_TPM_SLOT_RECOVERY})"
-        fi
+        log_info "disk-encryption: recovery key already enrolled for ${device_path}"
         return 0
-    fi
-
-    local slot_status
-    slot_status="$(_tpm_check_slot "${device_path}" "${_TPM_SLOT_RECOVERY}" "recovery")"
-    if [[ "${slot_status}" == conflict:* ]]; then
-        log_error "disk-encryption: slot ${_TPM_SLOT_RECOVERY} on ${device_path} is occupied by '${slot_status#conflict:}', not recovery — refusing to overwrite it"
-        return 1
     fi
 
     log_warn "disk-encryption: no recovery key found for ${device_path} — creating one now"
@@ -319,7 +285,7 @@ _tpm_ensure_recovery_key() {
     # prompt (sudo's per-tty ticket caching treats pty.spawn()'s pty as a
     # distinct tty from the shell the command was originally run from).
     sudo python3 "${SHELL_CONFIG_DIR}/workers/disk-encryption-pty-capture.py" "${transcript_file}" \
-        systemd-cryptenroll --recovery-key --key-slot="${_TPM_SLOT_RECOVERY}" "${device_path}"
+        systemd-cryptenroll --recovery-key "${device_path}"
 
     local recovery_transcript
     recovery_transcript="$(_tpm_clean_transcript < "${transcript_file}")"
@@ -334,6 +300,7 @@ _tpm_ensure_recovery_key() {
         return 1
     fi
 
+    _tpm_show_slots "${device_path}"
     _tpm_offer_secret_storage "${device_path}" "${recovery_transcript}"
     unset recovery_transcript
 }
