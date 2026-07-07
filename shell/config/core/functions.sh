@@ -588,52 +588,6 @@ show-ssh-tunnel() {
     pgrep -f 'ssh[[:space:]]+(-[fNL]+[[:space:]]+)*-?[fNL]+'
 }
 
-register-tpm() {
-    local IFS=$'\n'
-    local luks_devices=() partition_device="" enrolled_count=0
-
-    for cmd in lsblk tpm2 dracut cryptsetup systemd-cryptenroll; do
-        if ! command -v "${cmd}" &>/dev/null; then
-            log_error "register-tpm: required tool '${cmd}' is not installed"
-            return 1
-        fi
-    done
-
-    sudo-test || return 1
-
-    while read -r line; do
-        [[ "${line}" =~ ^NAME ]] && continue
-        if [[ "${line}" =~ p[0-9]+[[:space:]] && ! "${line}" =~ crypt ]]; then
-            partition_device="$(echo "${line}" | awk '{print $1}' | tr -d '└─├─')"
-            read -r next_line
-            if [[ "${next_line}" =~ crypt ]]; then
-                local device_path="/dev/${partition_device}"
-                if sudo cryptsetup isLuks "${device_path}" 2>/dev/null; then
-                    echo "[INFO] Found LUKS partition: ${device_path}"
-                    luks_devices+=("${device_path}")
-                fi
-            fi
-        fi
-    done < <(lsblk)
-
-    for device_path in "${luks_devices[@]}"; do
-        echo "[INFO] Enrolling TPM2 for ${device_path}..."
-        if sudo systemd-cryptenroll \
-                --wipe-slot=tpm2 \
-                --tpm2-device=auto \
-                --tpm2-pcrs="0+2+4+5+7" \
-                "${device_path}"; then
-            log_info "Successfully enrolled TPM2 for ${device_path}"
-            ((enrolled_count++))
-        else
-            log_error "Failed to enroll TPM2 for ${device_path}"
-        fi
-    done
-
-    log_info "TPM2 enrollment complete. Enrolled ${enrolled_count} device(s)."
-    luks_devices=()
-}
-
 # ── Completion cache management ───────────────────────────────────────────────
 refresh-completions() {
     rm -rf "${XDG_CACHE_HOME:-${HOME}/.cache}/dotfiles/completions/"

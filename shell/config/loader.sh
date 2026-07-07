@@ -249,6 +249,14 @@ for _lazy_file in "${SHELL_CONFIG_DIR}/lazy"/*.sh; do
  done
  unset _lazy_file
 
+# ── Tier 3: platform-gated lazy stubs ─────────────────────────────────────────
+# Some lazy files only make sense on certain platforms/toolchains. Gate stub
+# registration itself so the functions don't even appear in get-functions
+# where they can't work.
+if [[ "${DOTFILES_OS}" == "Linux" ]] && command -v systemd-cryptenroll &>/dev/null; then
+    [[ -f "${SHELL_CONFIG_DIR}/lazy/disk-encryption.sh" ]] && _register_lazy_stubs "${SHELL_CONFIG_DIR}/lazy/disk-encryption.sh"
+fi
+
 # ── Tier 3: optional lazy stubs — registered only when opted in ──────────────
 # Set DOTFILES_OPTIONAL_INSTALLERS=true in env/90-local.sh to enable.
 # Files in lazy/optional/ follow the same public-function convention as lazy/.
