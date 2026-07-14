@@ -107,13 +107,17 @@ add a repo later, append an entry to `external_synced_repos` directly in
 `ansible/host_vars/localhost.yml`, then:
 
 - **Public repo:** just re-run `ansible-playbook site.yml --tags sync-external`.
-- **Private repo:** first generate its deploy key and alias by hand
-  (`ssh-keygen -t ed25519 -f ~/.ssh/github-dotfiles-<name>`, then add a
-  `Host github-dotfiles-<name>` block to `~/.ssh/config.d/10-dotfiles.conf`
-  following the format `install.sh` writes — see
-  [Private repo](#private-repo) above), add the public key to the
-  repository as a deploy key, then run
-  `ansible-playbook site.yml --tags sync-external`.
+- **Private repo:** re-run `./install.sh` (host_vars already exists so it
+  won't be regenerated or prompt again). It parses your hand-added entry
+  back out of `external_synced_repos`, generates its deploy key and SSH
+  alias the same way it would during first-run setup, and pauses for you to
+  add the printed public key to the repository as a deploy key — then run
+  `ansible-playbook site.yml --tags sync-external` (or let `install.sh`'s
+  own Ansible phase do it). Use `--skip-ssh` on `install.sh` if you'd rather
+  generate the key and alias by hand
+  (`ssh-keygen -t ed25519 -f ~/.ssh/github-dotfiles-<name>`, then a
+  `Host github-dotfiles-<name>` block in `~/.ssh/config.d/10-dotfiles.conf`
+  following the format in [Private repo](#private-repo) above).
 
 ## Per-repo `sync.conf`
 

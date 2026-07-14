@@ -62,9 +62,11 @@
   when: _clone_dir_stat.stat.exists
 
 - name: "Back up non-git clone_dir before cloning: {{ repo.name }}"
-  ansible.builtin.command: >-
-    mv {{ _clone_dir_absolute }}
-    {{ _clone_dir_absolute }}.bak-{{ ansible_facts['date_time']['date'] }}
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ _clone_dir_absolute }}"
+      - "{{ _clone_dir_absolute }}.bak-{{ ansible_facts['date_time']['date'] }}"
   when:
     - _clone_dir_stat.stat.exists
     - not (_clone_dir_git_stat.stat.exists | default(false))

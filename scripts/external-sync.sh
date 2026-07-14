@@ -204,7 +204,13 @@ deploy_link_file() {
         log "  deployed (link): ${dest} -> ${src}"
     fi
 
-    [[ "${executable}" == "true" ]] && chmod +x "${src}"
+    # Never chmod the source: it lives inside the repo's git clone, and
+    # mutating it would dirty the working tree and trip is_working_tree_clean(),
+    # permanently blocking future pulls. The manifest should commit the
+    # executable bit upstream instead.
+    if [[ "${executable}" == "true" && ! -x "${src}" ]]; then
+        warn "  ${src} is marked executable in the manifest but is not +x in the repo — commit the executable bit upstream"
+    fi
 }
 
 deploy_link() {

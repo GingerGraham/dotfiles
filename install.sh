@@ -470,16 +470,56 @@ _read_yaml_scalar() {
         || true
 }
 
+_read_external_repos_from_host_vars() {
+    # Emits "<name>|<private>" for each entry under external_synced_repos in
+    # an existing host_vars file, in the same shape install.sh itself writes
+    # (see generate_host_vars' "Write file" section below). Used so
+    # setup_ssh_keys() can still generate deploy keys for repos that were
+    # added by hand-editing host_vars after the interactive loop already ran
+    # once (see docs/external-sync.md#adding-a-repo-to-an-already-provisioned-machine).
+    local file="$1"
+    awk '
+        /^external_synced_repos:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^[A-Za-z]/ { in_block = 0 }
+        in_block && /^  - name:/ {
+            if (name != "") print name "|" priv
+            name = $0
+            sub(/^  - name: *"?/, "", name)
+            sub(/"? *$/, "", name)
+            priv = "false"
+            next
+        }
+        in_block && /^    private:/ {
+            priv = $0
+            sub(/^    private: */, "", priv)
+            gsub(/[[:space:]]/, "", priv)
+        }
+        END { if (name != "") print name "|" priv }
+    ' "${file}"
+}
+
 generate_host_vars() {
     local host_vars_file="${REPO_ROOT}/ansible/host_vars/localhost.yml"
 
     if [[ -f "${host_vars_file}" ]]; then
         info "host_vars/localhost.yml already exists — skipping. Delete it to regenerate."
         # Read back the values the Ansible run needs. External repos are a
-        # YAML list, not a bare scalar — not parsed here; the sync-external
-        # role reads it directly.
+        # YAML list, not a bare scalar, so PROFILE/MACHINE_NAME use the
+        # simple scalar reader — the sync-external role reads the list
+        # directly. EXTERNAL_REPO_NAMES/PRIVATE are re-derived from the list
+        # here too, purely so setup_ssh_keys() (below) can still find repos
+        # that were registered by hand-editing this file rather than through
+        # the interactive loop.
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
+
+        local repo_name repo_private
+        while IFS='|' read -r repo_name repo_private; do
+            [[ -z "${repo_name}" ]] && continue
+            EXTERNAL_REPO_NAMES+=("${repo_name}")
+            EXTERNAL_REPO_PRIVATE+=("${repo_private:-false}")
+        done < <(_read_external_repos_from_host_vars "${host_vars_file}")
+
         return 0
     fi
 
@@ -622,7 +662,10 @@ generate_host_vars() {
                         read -r -p "    Repo URL for ${repo_name}: " repo_url < /dev/tty || true
                     done
 
-                    local default_clone_dir="\${HOME}/.local/share/${repo_name}"
+                    # shellcheck disable=SC2088 # intentional: written verbatim into
+                    # host_vars as clone_dir, expanded later by the sync-external
+                    # role's regex_replace('^~', ...) — not by this shell.
+                    local default_clone_dir="~/.local/share/${repo_name}"
                     read -r -p "    Clone directory for ${repo_name} [${default_clone_dir}]: " repo_clone_dir < /dev/tty || true
                     repo_clone_dir="${repo_clone_dir:-${default_clone_dir}}"
 
@@ -766,8 +809,9 @@ ensure_ssh_config_include() {
 
 setup_ssh_keys() {
     # dotfiles is public — no deploy key needed for the sync service (HTTPS).
-    # This phase only runs when at least one repo was registered as private
-    # during the external add-on repo collection loop in generate_host_vars().
+    # This phase only runs when at least one repo is registered as private,
+    # whether from this run's interactive collection loop or (on a re-run)
+    # parsed back out of an existing host_vars file — see generate_host_vars().
     local private_count=0 i
     for ((i = 0; i < ${#EXTERNAL_REPO_NAMES[@]}; i++)); do
         [[ "${EXTERNAL_REPO_PRIVATE[i]}" == "true" ]] && private_count=$((private_count + 1))
