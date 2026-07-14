@@ -39,6 +39,8 @@ See the [docs/](docs/) directory for full documentation.
 | [docs/tool-management.md](docs/tool-management.md) | `update-tools`, installers, and the managed tools registry |
 | [docs/installers.md](docs/installers.md) | Per-tool installer reference (`install-*` functions) |
 | [docs/sync.md](docs/sync.md) | Background sync, DEV_MODE, branch switching |
+| [docs/external-sync.md](docs/external-sync.md) | Generic external add-on repo sync engine — adding repos, cadence, troubleshooting |
+| [docs/sync-manifest-spec.md](docs/sync-manifest-spec.md) | `.dotfiles-sync.yml` manifest contract for add-on repo authors |
 | [docs/gpg.md](docs/gpg.md) | GPG key management, password manager backup, git provider signing setup |
 
 ## Supported platforms
