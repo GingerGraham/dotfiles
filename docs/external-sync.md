@@ -206,6 +206,15 @@ Common causes of a stalled repo:
 - **`pull --ff-only failed`** — local and remote have diverged (e.g. a
   manual commit was made in the clone). Resolve manually in the clone
   directory.
+- **Ansible fails on `Ensure systemd user instance is available (WSL
+  workaround)` with `Failed to connect to bus`** — there is no systemd user
+  session/D-Bus available (common in minimal containers or a fresh WSL
+  instance that hasn't started its systemd user manager yet). This affects
+  every role that manages a systemd user unit, not just `sync-external`.
+  On WSL, ensure `systemd=true` is set in `/etc/wsl.conf` and restart the
+  distro; in a container, either start a user D-Bus session or run without
+  the timer (`dotfiles_sync_enabled: false`) and invoke `external-sync`
+  manually/via an external scheduler instead.
 
 ## Migrating from the old nvim/ai-tools sync
 
