@@ -8,13 +8,13 @@
 # Generated config/deploy.list content must use fully-expanded absolute paths
 # — the sync script never performs tilde expansion at runtime.
 
-- name: "{{ repo.name }}: Resolve clone_dir to an absolute path"
+- name: "Resolve clone_dir to an absolute path: {{ repo.name }}"
   ansible.builtin.set_fact:
     _clone_dir_absolute: "{{ repo.clone_dir | regex_replace('^~', ansible_facts['env']['HOME']) }}"
 
 # ── Step 2: Ensure per-repo config/state directories exist ────────────────────
 
-- name: "{{ repo.name }}: Ensure per-repo config and state directories exist"
+- name: "Ensure per-repo config and state directories exist: {{ repo.name }}"
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -29,7 +29,7 @@
 # URL already in that form passes through unchanged. Public repos are used
 # verbatim — no rewrite, no key, plain HTTPS.
 
-- name: "{{ repo.name }}: Normalise repo URL"
+- name: "Normalise repo URL: {{ repo.name }}"
   ansible.builtin.set_fact:
     _effective_repo_url: >-
       {{
@@ -50,18 +50,18 @@
 # non-git directory is backed up first so the clone task never fails against
 # a dirty target.
 
-- name: "{{ repo.name }}: Stat clone_dir"
+- name: "Stat clone_dir: {{ repo.name }}"
   ansible.builtin.stat:
     path: "{{ _clone_dir_absolute }}"
   register: _clone_dir_stat
 
-- name: "{{ repo.name }}: Stat clone_dir/.git"
+- name: "Stat clone_dir/.git: {{ repo.name }}"
   ansible.builtin.stat:
     path: "{{ _clone_dir_absolute }}/.git"
   register: _clone_dir_git_stat
   when: _clone_dir_stat.stat.exists
 
-- name: "{{ repo.name }}: Back up non-git clone_dir before cloning"
+- name: "Back up non-git clone_dir before cloning: {{ repo.name }}"
   ansible.builtin.command: >-
     mv {{ _clone_dir_absolute }}
     {{ _clone_dir_absolute }}.bak-{{ ansible_facts['date_time']['date'] }}
@@ -70,7 +70,13 @@
     - not (_clone_dir_git_stat.stat.exists | default(false))
   changed_when: true
 
-- name: "{{ repo.name }}: Clone or adopt repository"
+# version is deliberately omitted (not pinned to 'main') so a first clone
+# checks out whatever the remote's actual default branch is — repos whose
+# default branch isn't 'main' would otherwise clone the wrong ref. That
+# makes the result depend on the remote's current HEAD, which is exactly
+# what update: false + the adopt-in-place behaviour above is designed to
+# tolerate (see the role README's "Adopt vs clone" section).
+- name: "Clone or adopt repository: {{ repo.name }}" # noqa: latest[git]
   ansible.builtin.git:
     repo: "{{ _effective_repo_url }}"
     dest: "{{ _clone_dir_absolute }}"
@@ -78,7 +84,7 @@
     force: false
   register: _repo_git_result
 
-- name: "{{ repo.name }}: Report clone/adopt status"
+- name: "Report clone/adopt status: {{ repo.name }}"
   ansible.builtin.debug:
     msg: >-
       {{
@@ -89,22 +95,22 @@
 # ── Step 5: Read the repo's .dotfiles-sync.yml manifest ───────────────────────
 # Absent manifest = clone-only repo (empty deploy map).
 
-- name: "{{ repo.name }}: Stat .dotfiles-sync.yml"
+- name: "Stat .dotfiles-sync.yml: {{ repo.name }}"
   ansible.builtin.stat:
     path: "{{ _clone_dir_absolute }}/.dotfiles-sync.yml"
   register: _manifest_stat
 
-- name: "{{ repo.name }}: Read .dotfiles-sync.yml"
+- name: "Read .dotfiles-sync.yml: {{ repo.name }}"
   ansible.builtin.slurp:
     path: "{{ _clone_dir_absolute }}/.dotfiles-sync.yml"
   register: _manifest_raw
   when: _manifest_stat.stat.exists
 
-- name: "{{ repo.name }}: Parse manifest"
+- name: "Parse manifest: {{ repo.name }}"
   ansible.builtin.set_fact:
     _manifest: "{{ (_manifest_raw.content | b64decode | from_yaml) if _manifest_stat.stat.exists else {} }}"
 
-- name: "{{ repo.name }}: Resolve effective branch"
+- name: "Resolve effective branch: {{ repo.name }}"
   ansible.builtin.set_fact:
     _effective_branch: "{{ _manifest.branch | default('main') }}"
 
@@ -114,14 +120,14 @@
 # sync via the lineinfile task below, for the case where repo_url changes in
 # host_vars (e.g. switching to an SSH alias after enabling a private repo).
 
-- name: "{{ repo.name }}: Create sync.conf if not present"
+- name: "Create sync.conf if not present: {{ repo.name }}"
   ansible.builtin.template:
     src: sync.conf.j2
     dest: "{{ external_sync_conf_dir }}/{{ repo.name }}/sync.conf"
     mode: "0600"
     force: false
 
-- name: "{{ repo.name }}: Ensure sync.conf REPO_URL matches host_vars"
+- name: "Ensure sync.conf REPO_URL matches host_vars: {{ repo.name }}"
   ansible.builtin.lineinfile:
     path: "{{ external_sync_conf_dir }}/{{ repo.name }}/sync.conf"
     regexp: '^REPO_URL='
@@ -132,7 +138,7 @@
 # sync.conf this is pure derived data owned by Ansible — it is regenerated
 # every run so manifest changes upstream are picked up automatically.
 
-- name: "{{ repo.name }}: Render deploy.list"
+- name: "Render deploy.list: {{ repo.name }}"
   ansible.builtin.template:
     src: deploy.list.j2
     dest: "{{ external_sync_conf_dir }}/{{ repo.name }}/deploy.list"
@@ -142,7 +148,7 @@
 # Runs the same script the timer uses — the single source of deploy truth.
 # Ansible never re-implements the deploy loop itself.
 
-- name: "{{ repo.name }}: Run initial sync/deploy"
+- name: "Run initial sync/deploy: {{ repo.name }}"
   ansible.builtin.command: "{{ ansible_facts['env']['HOME'] }}/.local/bin/external-sync {{ repo.name }}"
   register: _repo_initial_sync
   changed_when: >-
