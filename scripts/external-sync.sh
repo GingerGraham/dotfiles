@@ -154,6 +154,10 @@ deploy_copy_file() {
 
 deploy_copy() {
     local src="$1" dest="$2" force="$3" executable="$4"
+    # Strip any trailing slash — deploy.list entries for a directory src
+    # (e.g. from a manifest's "src: claude/") carry one, and a doubled
+    # slash would otherwise break the prefix-strip below.
+    src="${src%/}"
 
     if [[ -d "${src}" ]]; then
         local file rel target
@@ -205,6 +209,9 @@ deploy_link_file() {
 
 deploy_link() {
     local src="$1" dest="$2" force="$3" executable="$4"
+    # See deploy_copy() — strip a trailing slash before using src as a
+    # prefix to strip from each found file's path.
+    src="${src%/}"
 
     if [[ -d "${src}" ]]; then
         local file rel target
