@@ -900,8 +900,7 @@ SSHEOF
         local host
         host=$(_extract_git_host "${EXTERNAL_REPO_URLS[i]}")
         if [[ -z "${host}" ]]; then
-            warn "Could not determine the git host from '${EXTERNAL_REPO_URLS[i]}' for '${repo_name}' — defaulting to github.com. Edit the Host block in ${conf_file} if that's wrong."
-            host="github.com"
+            die "Could not determine the git host for private repo '${repo_name}' from repo_url '${EXTERNAL_REPO_URLS[i]}'. Set repo_url to a normal https://<host>/..., git@<host>:..., or ssh://git@<host>/... form in host_vars (not an already-rewritten dotfiles-<name> alias, which doesn't encode the real host), then re-run. Alternatively, add the Host dotfiles-${repo_name} block to ${conf_file} by hand and re-run with --skip-ssh."
         fi
 
         generate_deploy_key "${key_name}" "${key_name}@${MACHINE_NAME}"

@@ -161,11 +161,11 @@ deploy_copy() {
 
     if [[ -d "${src}" ]]; then
         local file rel target
-        while IFS= read -r file; do
+        while IFS= read -r -d '' file; do
             rel="${file#"${src}"/}"
             target="${dest%/}/${rel}"
             deploy_copy_file "${file}" "${target}" "${force}" "${executable}"
-        done < <(find "${src}" -type f)
+        done < <(find "${src}" -type f -print0)
     elif [[ -e "${src}" ]]; then
         deploy_copy_file "${src}" "${dest}" "${force}" "${executable}"
     else
@@ -221,11 +221,11 @@ deploy_link() {
 
     if [[ -d "${src}" ]]; then
         local file rel target
-        while IFS= read -r file; do
+        while IFS= read -r -d '' file; do
             rel="${file#"${src}"/}"
             target="${dest%/}/${rel}"
             deploy_link_file "${file}" "${target}" "${force}" "${executable}"
-        done < <(find "${src}" -type f)
+        done < <(find "${src}" -type f -print0)
     elif [[ -e "${src}" ]]; then
         deploy_link_file "${src}" "${dest}" "${force}" "${executable}"
     else

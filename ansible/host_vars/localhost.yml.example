@@ -70,7 +70,7 @@ external_synced_repos:
     private: false
 
   - name: ai-config
-    repo_url: "git@dotfiles-ai-config:you/ai-config.git"
+    repo_url: "https://github.com/you/ai-config.git"
     clone_dir: "~/.local/share/ai-config"
     private: true
 

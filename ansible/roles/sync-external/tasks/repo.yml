@@ -135,13 +135,17 @@
 - name: "Validate manifest deploy entries do not escape clone_dir: {{ repo.name }}"
   ansible.builtin.assert:
     that:
+      # Short-circuits in order — item.src is defined must fail first so the
+      # later conditions never call .startswith()/.split() on Undefined.
+      - item.src is defined
+      - item.src | length > 0
       - not item.src.startswith('/')
       - "'..' not in item.src.split('/')"
     fail_msg: >-
       Rejecting {{ repo.name }}'s .dotfiles-sync.yml: deploy[].src
-      '{{ item.src }}' must be a path relative to the repo root, without '..'
-      segments or a leading '/' (src is resolved against clone_dir — see
-      docs/sync-manifest-spec.md).
+      '{{ item.src | default('(missing)') }}' must be a non-empty path
+      relative to the repo root, without '..' segments or a leading '/'
+      (src is resolved against clone_dir — see docs/sync-manifest-spec.md).
     quiet: true
   loop: "{{ _manifest.deploy | default([]) }}"
   loop_control:

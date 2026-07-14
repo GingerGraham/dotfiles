@@ -56,9 +56,14 @@ external_synced_repos:
     private: false            # public → HTTPS, no deploy key
 
   - name: ai-config
-    repo_url: "git@dotfiles-ai-config:you/ai-config.git"
+    repo_url: "https://github.com/you/ai-config.git"  # or git@github.com:you/ai-config.git
     clone_dir: "~/.local/share/ai-config"
-    private: true             # private → deploy key + dotfiles-<name> alias
+    private: true             # private → deploy key + dotfiles-<name> alias;
+                               # Ansible rewrites repo_url to the alias form
+                               # automatically — give the real URL here, not
+                               # an already-rewritten dotfiles-<name> one (the
+                               # alias doesn't encode the real host, so
+                               # install.sh can't derive HostName from it)
 ```
 
 | Field | Required | Purpose |
