@@ -79,7 +79,7 @@
     argv:
       - mv
       - "{{ _clone_dir_absolute }}"
-      - "{{ _clone_dir_absolute }}.bak-{{ ansible_facts['date_time']['date'] }}"
+      - "{{ _clone_dir_absolute }}.bak-{{ now(fmt='%Y-%m-%d') }}"
   when:
     - _clone_dir_stat.stat.exists
     - not (_clone_dir_git_stat.stat.exists | default(false))

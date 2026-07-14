@@ -97,12 +97,12 @@ do_repo_sync() {
     if [[ ! -d "${clone_dir}" ]]; then
         warn "Clone directory ${clone_dir} does not exist — skipping git sync"
         log "Re-run 'ansible-playbook site.yml --tags sync-external' to clone it."
-        return 0
+        return 1
     fi
 
     if ! is_git_repo "${clone_dir}"; then
         warn "${clone_dir} is not a git repository — skipping git sync"
-        return 0
+        return 1
     fi
 
     local local_commit
@@ -134,6 +134,7 @@ do_repo_sync() {
     fi
 
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "${state_dir}/last-sync"
+    return 0
 }
 
 # ── Deploy: copy ──────────────────────────────────────────────────────────────
@@ -300,37 +301,48 @@ sync_one() {
     fi
     trap 'rm -f "'"${lock_file}"'"' EXIT
 
-    do_repo_sync "${CLONE_DIR}" "${GIT_BRANCH}" "${state_dir}"
-    deploy_repo "${name}" "${deploy_list}"
+    if do_repo_sync "${CLONE_DIR}" "${GIT_BRANCH}" "${state_dir}"; then
+        deploy_repo "${name}" "${deploy_list}"
+    else
+        log "[${name}] skipping deploy — clone not ready"
+    fi
 
     log "[${name}] sync complete"
 }
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 # Each repo is synced in its own subshell with set -e enabled, so an
-# unexpected failure in one repo's git/deploy flow cannot abort the others.
+# unexpected failure in one repo's git/deploy flow cannot abort the others —
+# but run_one still reports failure via its own return code, so callers
+# (main's loop, systemd/launchd, Ansible's initial-deploy command) can tell
+# something went wrong instead of every invocation silently exiting 0.
 
 run_one() {
     local name="$1"
     if ! ( set -e; sync_one "${name}" ); then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] sync for '${name}' failed unexpectedly — see its log under ${STATE_ROOT}/${name}/logs/" >&2
+        return 1
     fi
 }
 
 main() {
     mkdir -p "${CONFIG_ROOT}" "${STATE_ROOT}"
 
+    local failures=0
+
     if [[ $# -gt 0 ]]; then
-        run_one "$1"
-        return
+        run_one "$1" || failures=1
+        return "${failures}"
     fi
 
     local dir name
     for dir in "${CONFIG_ROOT}"/*/; do
         [[ -d "${dir}" ]] || continue
         name=$(basename "${dir}")
-        run_one "${name}"
+        run_one "${name}" || failures=1
     done
+
+    return "${failures}"
 }
 
 main "$@"

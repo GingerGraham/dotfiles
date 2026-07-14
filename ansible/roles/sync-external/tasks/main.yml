@@ -30,7 +30,6 @@
   ansible.builtin.file:
     path: "{{ dotfiles_dir }}/scripts/external-sync.sh"
     mode: "0755"
-  failed_when: false
 
 - name: Deploy external-sync wrapper symlink
   ansible.builtin.file:

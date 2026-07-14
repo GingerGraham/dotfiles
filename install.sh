@@ -939,7 +939,7 @@ SSHEOF
     info "automatically at Ansible run time — no further host_vars edits needed."
     echo
 
-    read -r -p "Press Enter once all deploy keys have been added to GitHub..." < /dev/tty || true
+    read -r -p "Press Enter once all deploy keys have been added to their repositories..." < /dev/tty || true
 }
 
 # ── Phase 3b: Sudo / become setup ────────────────────────────────────────────
