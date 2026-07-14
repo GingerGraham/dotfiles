@@ -1,0 +1,151 @@
+# ansible/roles/sync-external/tasks/repo.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Processes a single entry from external_synced_repos. Included via a loop
+# from tasks/main.yml with loop_var: repo.
+# Expects: repo.name, repo.repo_url, repo.clone_dir, repo.private
+
+# ── Step 1: Resolve clone_dir to an absolute path ─────────────────────────────
+# Generated config/deploy.list content must use fully-expanded absolute paths
+# — the sync script never performs tilde expansion at runtime.
+
+- name: "{{ repo.name }}: Resolve clone_dir to an absolute path"
+  ansible.builtin.set_fact:
+    _clone_dir_absolute: "{{ repo.clone_dir | regex_replace('^~', ansible_facts['env']['HOME']) }}"
+
+# ── Step 2: Ensure per-repo config/state directories exist ────────────────────
+
+- name: "{{ repo.name }}: Ensure per-repo config and state directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ external_sync_conf_dir }}/{{ repo.name }}"
+    - "{{ external_sync_state_dir }}/{{ repo.name }}/logs"
+
+# ── Step 3: Normalise the repo URL (public/private aware) ─────────────────────
+# Private repos rewrite an HTTPS GitHub URL to this repo's own SSH alias
+# (github-dotfiles-<name>) so its dedicated deploy key is used; an SSH/alias
+# URL already in that form passes through unchanged. Public repos are used
+# verbatim — no rewrite, no key, plain HTTPS.
+
+- name: "{{ repo.name }}: Normalise repo URL"
+  ansible.builtin.set_fact:
+    _effective_repo_url: >-
+      {{
+        (
+          repo.repo_url
+          | regex_replace('^https://github\.com/(.+?)(?:\.git)?$', 'git@github.com:\1.git')
+          | regex_replace('git@github\.com:', 'git@github-dotfiles-' + repo.name + ':')
+        )
+        if (repo.private | bool)
+        else repo.repo_url
+      }}
+
+# ── Step 4: Adopt-or-clone ─────────────────────────────────────────────────────
+# ansible.builtin.git with update: false is naturally idempotent here: when
+# clone_dir already holds a valid git repo it is adopted in place — no
+# re-clone, no pull. Ongoing pulls belong to the external-sync timer, not to
+# Ansible. When clone_dir is absent it is cloned fresh. A pre-existing
+# non-git directory is backed up first so the clone task never fails against
+# a dirty target.
+
+- name: "{{ repo.name }}: Stat clone_dir"
+  ansible.builtin.stat:
+    path: "{{ _clone_dir_absolute }}"
+  register: _clone_dir_stat
+
+- name: "{{ repo.name }}: Stat clone_dir/.git"
+  ansible.builtin.stat:
+    path: "{{ _clone_dir_absolute }}/.git"
+  register: _clone_dir_git_stat
+  when: _clone_dir_stat.stat.exists
+
+- name: "{{ repo.name }}: Back up non-git clone_dir before cloning"
+  ansible.builtin.command: >-
+    mv {{ _clone_dir_absolute }}
+    {{ _clone_dir_absolute }}.bak-{{ ansible_facts['date_time']['date'] }}
+  when:
+    - _clone_dir_stat.stat.exists
+    - not (_clone_dir_git_stat.stat.exists | default(false))
+  changed_when: true
+
+- name: "{{ repo.name }}: Clone or adopt repository"
+  ansible.builtin.git:
+    repo: "{{ _effective_repo_url }}"
+    dest: "{{ _clone_dir_absolute }}"
+    update: false
+    force: false
+  register: _repo_git_result
+
+- name: "{{ repo.name }}: Report clone/adopt status"
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'cloned fresh' if (_repo_git_result.before | default(none)) is none
+        else 'adopted existing clone (no pull — the external-sync timer owns that)'
+      }}
+
+# ── Step 5: Read the repo's .dotfiles-sync.yml manifest ───────────────────────
+# Absent manifest = clone-only repo (empty deploy map).
+
+- name: "{{ repo.name }}: Stat .dotfiles-sync.yml"
+  ansible.builtin.stat:
+    path: "{{ _clone_dir_absolute }}/.dotfiles-sync.yml"
+  register: _manifest_stat
+
+- name: "{{ repo.name }}: Read .dotfiles-sync.yml"
+  ansible.builtin.slurp:
+    path: "{{ _clone_dir_absolute }}/.dotfiles-sync.yml"
+  register: _manifest_raw
+  when: _manifest_stat.stat.exists
+
+- name: "{{ repo.name }}: Parse manifest"
+  ansible.builtin.set_fact:
+    _manifest: "{{ (_manifest_raw.content | b64decode | from_yaml) if _manifest_stat.stat.exists else {} }}"
+
+- name: "{{ repo.name }}: Resolve effective branch"
+  ansible.builtin.set_fact:
+    _effective_branch: "{{ _manifest.branch | default('main') }}"
+
+# ── Step 6: Render sync.conf (created once, never overwritten) ────────────────
+# DEV_MODE and GIT_BRANCH live here and are mutated at runtime by the user —
+# Ansible must not clobber them on subsequent runs. Only REPO_URL is kept in
+# sync via the lineinfile task below, for the case where repo_url changes in
+# host_vars (e.g. switching to an SSH alias after enabling a private repo).
+
+- name: "{{ repo.name }}: Create sync.conf if not present"
+  ansible.builtin.template:
+    src: sync.conf.j2
+    dest: "{{ external_sync_conf_dir }}/{{ repo.name }}/sync.conf"
+    mode: "0600"
+    force: false
+
+- name: "{{ repo.name }}: Ensure sync.conf REPO_URL matches host_vars"
+  ansible.builtin.lineinfile:
+    path: "{{ external_sync_conf_dir }}/{{ repo.name }}/sync.conf"
+    regexp: '^REPO_URL='
+    line: 'REPO_URL="{{ _effective_repo_url }}"'
+
+# ── Step 7: Render deploy.list from the parsed manifest ───────────────────────
+# Always written (empty when clone-only) so state is explicit. Unlike
+# sync.conf this is pure derived data owned by Ansible — it is regenerated
+# every run so manifest changes upstream are picked up automatically.
+
+- name: "{{ repo.name }}: Render deploy.list"
+  ansible.builtin.template:
+    src: deploy.list.j2
+    dest: "{{ external_sync_conf_dir }}/{{ repo.name }}/deploy.list"
+    mode: "0644"
+
+# ── Step 8: Initial deploy ─────────────────────────────────────────────────────
+# Runs the same script the timer uses — the single source of deploy truth.
+# Ansible never re-implements the deploy loop itself.
+
+- name: "{{ repo.name }}: Run initial sync/deploy"
+  ansible.builtin.command: "{{ ansible_facts['env']['HOME'] }}/.local/bin/external-sync {{ repo.name }}"
+  register: _repo_initial_sync
+  changed_when: >-
+    'deployed (' in _repo_initial_sync.stdout
+    or 'Updated successfully' in _repo_initial_sync.stdout
+    or 'relinked' in _repo_initial_sync.stdout
