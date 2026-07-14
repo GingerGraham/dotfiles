@@ -135,7 +135,6 @@ launchctl unload ~/Library/LaunchAgents/com.dotfiles.sync.plist
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/dotfiles/logs/sync.log` | Main dotfiles sync log |
-| `~/.local/state/nvim-config-sync/logs/sync.log` | nvim-config sync log (if nvim role enabled) |
-| `~/.local/share/ai-config-sync/logs/sync.log` | ai-config sync log (if ai-tools role enabled) |
+| `~/.local/share/external-sync/<name>/logs/sync.log` | Per-repo log for each registered external add-on repo |
 
-Each companion repo has its own independent sync timer and log.
+External add-on repos (nvim-config, ai-config, or any other repo you register) are synced independently by the `sync-external` engine, on its own hourly timer — see [External sync](external-sync.md).

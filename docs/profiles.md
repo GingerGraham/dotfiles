@@ -16,17 +16,17 @@ A profile controls which Ansible roles run on a machine. It is set in `ansible/h
 
 | Profile | Roles activated |
 | --- | --- |
-| `workstation` | common, shell, git, ssh, tmux, vim, nvim\*, ai-tools\*, sync |
-| `server` | common, shell, git, ssh, tmux, vim, sync |
+| `workstation` | common, shell, git, ssh, tmux, vim, sync-external\*, sync |
+| `server` | common, shell, git, ssh, tmux, vim, sync-external\*, sync |
 | `minimal` | common, shell, git, ssh |
 
-\* nvim and ai-tools are workstation-only and are additionally gated by their own enable flags and the presence of a companion repo URL. See [Optional components](optional-components.md).
+\* sync-external runs on both `workstation` and `server`, gated by `dotfiles_sync_enabled`. It deploys/syncs whatever repos are listed in `external_synced_repos` — see [External sync](external-sync.md).
 
 ## Choosing a profile
 
-**workstation** is the default for a personal machine. It deploys the full configuration including Neovim, AI tooling, and the background sync timer.
+**workstation** is the default for a personal machine. It deploys the full configuration including editor/AI tooling (via registered external add-on repos) and the background sync timers.
 
-**server** is for remote machines where you want a consistent shell and git setup but not a full editor config or AI tooling. It uses a separate playbook (`server.yml`), selected with `--playbook server`.
+**server** is for remote machines where you want a consistent shell and git setup, plus the same external add-on repo sync engine, without the interactive editor roles (`tmux`, `vim` still run; there is no separate editor-config role). It uses a separate playbook (`server.yml`), selected with `--playbook server`.
 
 **minimal** is for containers, CI environments, or any context where you want only the base shell environment.
 
@@ -61,21 +61,18 @@ Then re-run:
 ./install.sh
 ```
 
-Ansible is idempotent — roles that are no longer active for the new profile are simply not applied; they do not remove previously deployed files. If you switch from `workstation` to `server`, the Neovim config directory at `~/.config/nvim/` remains in place.
+Ansible is idempotent — roles that are no longer active for the new profile are simply not applied; they do not remove previously deployed files. If you switch from `workstation` to `server`, an add-on repo cloned to `~/.config/nvim/` remains in place — `sync-external` still runs under `server` and keeps it synced.
 
 ## Fine-grained overrides
 
-Within the `workstation` profile you can disable individual optional roles without changing the profile:
+You can disable the sync timers without changing the profile:
 
 ```yaml
 # ansible/host_vars/localhost.yml
-dotfiles_profile: workstation
-dotfiles_nvim_enabled: false      # skip nvim role on this machine
-dotfiles_ai_tools_enabled: false  # skip ai-tools role on this machine
-dotfiles_sync_enabled: false      # skip background sync timer
+dotfiles_sync_enabled: false      # skip both the dotfiles self-sync and sync-external
 ```
 
-These flags default to `true` within the workstation profile. Setting them here avoids having to pass `--skip-roles` on every re-run.
+To stop syncing a single external repo without disabling the whole engine, remove its entry from `external_synced_repos` — see [External sync](external-sync.md).
 
 ## Extra roles
 

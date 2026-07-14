@@ -71,8 +71,7 @@ On a machine where `ansible/host_vars/localhost.yml` does not yet exist, `instal
 3. **Projects base directory** — root of your project tree
 4. **Git global identity** — name, default email, optional GPG signing key
 5. **Git project contexts** — one or more context/provider/email tuples (e.g. Personal/GitHub, Personal/GitLab, Acme/AzureDevOps); press Enter to finish; add more later with `git-add-project`
-6. **nvim role** — whether to enable it and the SSH URL for your `nvim-config` repo (workstation profile only)
-7. **ai-tools role** — whether to enable it and the SSH URL for your `ai-config` repo (workstation profile only)
+6. **External add-on repos** — any number of repos synced/deployed by `sync-external` (e.g. `nvim-config`, `ai-config`); for each, a name, repo URL, clone directory, and an explicit public/private choice (workstation and server profiles only). See [External sync](external-sync.md).
 
 `host_vars/localhost.yml` is gitignored and **never overwritten** by subsequent Ansible runs. Re-running `install.sh` after it exists goes straight to Ansible.
 
@@ -130,7 +129,7 @@ See [docs/tool-management.md](tool-management.md) for the complete tool list, tr
 | `--machine-name <name>` | Skip machine name prompt |
 | `--playbook <site\|server>` | Ansible playbook to run (default: `site`). Use `server` with `--profile server` for server deployments |
 | `--projects-base <path>` | Skip projects base prompt. Tilde expansion handled (`~/Projects` is valid). Passed automatically by `bootstrap.sh` |
-| `--skip-roles <role[,role,...]>` | Skip one or more roles; also suppresses related prompts. `common` cannot be skipped |
+| `--skip-roles <role[,role,...]>` | Skip one or more roles. `common` cannot be skipped |
 | `--only-roles <role[,role,...]>` | Run only the named roles. `common` is always prepended |
 | `--check` | Ansible dry-run (`--check --diff`) — previews changes without applying |
 | `--skip-ssh` | Skip SSH deploy key generation. Use when your personal SSH key already has access to all required repos |
@@ -159,31 +158,25 @@ See [docs/tool-management.md](tool-management.md) for the complete tool list, tr
 # Run only the shell and git roles (common is always included)
 ./install.sh --only-roles shell,git
 
-# Skip ai-tools on this machine
-./install.sh --skip-roles ai-tools
+# Skip the external add-on repo sync engine on this machine
+./install.sh --skip-roles sync-external
 ```
 
 ## SSH deploy keys
 
 The `dotfiles` repo itself is public — no deploy key is needed for it. The background sync uses HTTPS.
 
-Deploy keys are generated for **private companion repos only**:
-
-| Key | Repo |
-| --- | --- |
-| `~/.ssh/dotfiles_nvim` | nvim-config |
-| `~/.ssh/dotfiles_ai` | ai-config |
-
-SSH host aliases are written to `~/.ssh/config.d/10-dotfiles.conf`. Use these aliases in your `host_vars` repo URLs:
+Deploy keys are generated for **external add-on repos registered as private only**, one per repo:
 
 ```text
-git@github-dotfiles-nvim:you/nvim-config.git
-git@github-dotfiles-ai:you/ai-config.git
+~/.ssh/github-dotfiles-<name>
 ```
 
-After `install.sh` generates the keys, add each public key as a read-only deploy key in the corresponding repository (Settings → Deploy keys → Add deploy key; write access: **no**). This applies regardless of which provider hosts the companion repo — GitHub, GitLab, and most other providers expose an equivalent deploy key setting.
+SSH host aliases are written to `~/.ssh/config.d/10-dotfiles.conf`, one `Host github-dotfiles-<name>` block per private repo. The `sync-external` Ansible role rewrites each private repo's URL to its alias form automatically — you never need to hand-edit `host_vars` with the alias URL yourself.
 
-If neither companion repo URL is provided, the SSH phase is skipped entirely. Pass `--skip-ssh` to bypass it explicitly when your personal key already has access.
+After `install.sh` generates the keys, add each public key as a read-only deploy key in the corresponding repository (Settings → Deploy keys → Add deploy key; write access: **no**). This applies regardless of which provider hosts the repo — GitHub, GitLab, and most other providers expose an equivalent deploy key setting.
+
+If no repo is registered as private, the SSH phase is skipped entirely. Pass `--skip-ssh` to bypass it explicitly when your personal key already has access. See [External sync](external-sync.md) for the full walkthrough.
 
 ## host_vars reference
 
@@ -195,11 +188,8 @@ Key variables:
 | --- | --- |
 | `dotfiles_profile` | Controls which roles run (`workstation` / `server` / `minimal`) |
 | `machine_name` | Friendly name used in git config and prompt |
-| `nvim_config_repo_url` | SSH URL for nvim-config repo (leave empty to skip) |
-| `ai_config_repo_url` | SSH URL for ai-config repo (leave empty to skip) |
-| `dotfiles_nvim_enabled` | Fine-grained override: disable nvim role within workstation profile |
-| `dotfiles_ai_tools_enabled` | Fine-grained override: disable ai-tools role within workstation profile |
-| `dotfiles_sync_enabled` | Disable background sync timer |
+| `external_synced_repos` | List of external add-on repos for `sync-external` to clone/adopt and deploy — see [External sync](external-sync.md) |
+| `dotfiles_sync_enabled` | Disable both the dotfiles self-sync and `sync-external` |
 | `dotfiles_extra_roles` | List of additional role names to run on this machine |
 | `git_name` | Git global user name |
 | `git_default_email` | Git global default email |
