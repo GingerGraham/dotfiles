@@ -156,12 +156,14 @@ SSH DEPLOY KEYS
   Deploy keys are only generated for external add-on repos registered as
   private during the interactive prompt:
 
-    ~/.ssh/github-dotfiles-<name>    One key per private repo
+    ~/.ssh/dotfiles-<name>    One key per private repo (any git host)
 
   SSH host aliases are written to ~/.ssh/config.d/10-dotfiles.conf, one
-  'Host github-dotfiles-<name>' block per private repo. The sync-external
-  Ansible role rewrites each private repo's URL to its alias form
-  automatically — you never need to hand-edit host_vars with the alias URL.
+  'Host dotfiles-<name>' block per private repo, with HostName set to the
+  repo's actual host (GitHub, GitLab, self-hosted, etc.) extracted from its
+  repo_url. The sync-external Ansible role rewrites each private repo's URL
+  to its alias form automatically — you never need to hand-edit host_vars
+  with the alias URL.
 
   Each key needs to be added to its repository as a read-only deploy key
   (repo Settings → Deploy keys → Add deploy key → allow write access: NO).
@@ -471,31 +473,66 @@ _read_yaml_scalar() {
 }
 
 _read_external_repos_from_host_vars() {
-    # Emits "<name>|<private>" for each entry under external_synced_repos in
-    # an existing host_vars file, in the same shape install.sh itself writes
-    # (see generate_host_vars' "Write file" section below). Used so
-    # setup_ssh_keys() can still generate deploy keys for repos that were
-    # added by hand-editing host_vars after the interactive loop already ran
-    # once (see docs/external-sync.md#adding-a-repo-to-an-already-provisioned-machine).
+    # Emits "<name>|<private>|<repo_url>" for each entry under
+    # external_synced_repos in an existing host_vars file, in the same shape
+    # install.sh itself writes (see generate_host_vars' "Write file" section
+    # below). Used so setup_ssh_keys() can still generate deploy keys (and
+    # derive the correct git host — see _extract_git_host) for repos that
+    # were added by hand-editing host_vars after the interactive loop already
+    # ran once (see docs/external-sync.md#adding-a-repo-to-an-already-provisioned-machine).
     local file="$1"
     awk '
+        function clean(s) {
+            sub(/[[:space:]]+#.*$/, "", s)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            gsub(/^"|"$/, "", s)
+            gsub(/^'"'"'|'"'"'$/, "", s)
+            return s
+        }
         /^external_synced_repos:[[:space:]]*$/ { in_block = 1; next }
         in_block && /^[A-Za-z]/ { in_block = 0 }
         in_block && /^  - name:/ {
-            if (name != "") print name "|" priv
-            name = $0
-            sub(/^  - name: *"?/, "", name)
-            sub(/"? *$/, "", name)
+            if (name != "") print name "|" priv "|" url
+            line = $0
+            sub(/^  - name: */, "", line)
+            name = clean(line)
             priv = "false"
+            url = ""
             next
         }
-        in_block && /^    private:/ {
-            priv = $0
-            sub(/^    private: */, "", priv)
-            gsub(/[[:space:]]/, "", priv)
+        in_block && /^    repo_url:/ {
+            line = $0
+            sub(/^    repo_url: */, "", line)
+            url = clean(line)
         }
-        END { if (name != "") print name "|" priv }
+        in_block && /^    private:/ {
+            line = $0
+            sub(/^    private: */, "", line)
+            priv = clean(line)
+        }
+        END { if (name != "") print name "|" priv "|" url }
     ' "${file}"
+}
+
+_extract_git_host() {
+    # Derives the real git host from a repo_url in any of the forms
+    # install.sh/sync-external accept: https://host/path, git@host:path, or
+    # ssh://git@host/path. Falls back to empty on no match — callers decide
+    # the fallback (e.g. warn and default to github.com).
+    local url="$1" host=""
+    if [[ "${url}" =~ ^https://([^/]+)/ ]]; then
+        host="${BASH_REMATCH[1]}"
+    elif [[ "${url}" =~ ^ssh://git@([^/]+)/ ]]; then
+        host="${BASH_REMATCH[1]}"
+    elif [[ "${url}" =~ ^git@([^:]+): ]]; then
+        host="${BASH_REMATCH[1]}"
+    fi
+    # A "host" that is itself a dotfiles-<name> alias means repo_url was
+    # already in rewritten alias form (e.g. hand-copied from a rendered
+    # sync.conf) — the real host isn't recoverable from it, so treat as
+    # unresolved rather than writing a self-referential HostName.
+    [[ "${host}" =~ ^dotfiles- ]] && host=""
+    printf '%s' "${host}"
 }
 
 generate_host_vars() {
@@ -506,18 +543,19 @@ generate_host_vars() {
         # Read back the values the Ansible run needs. External repos are a
         # YAML list, not a bare scalar, so PROFILE/MACHINE_NAME use the
         # simple scalar reader — the sync-external role reads the list
-        # directly. EXTERNAL_REPO_NAMES/PRIVATE are re-derived from the list
-        # here too, purely so setup_ssh_keys() (below) can still find repos
-        # that were registered by hand-editing this file rather than through
-        # the interactive loop.
+        # directly. EXTERNAL_REPO_NAMES/PRIVATE/URLS are re-derived from the
+        # list here too, purely so setup_ssh_keys() (below) can still find
+        # repos that were registered by hand-editing this file rather than
+        # through the interactive loop.
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
 
-        local repo_name repo_private
-        while IFS='|' read -r repo_name repo_private; do
+        local repo_name repo_private repo_url
+        while IFS='|' read -r repo_name repo_private repo_url; do
             [[ -z "${repo_name}" ]] && continue
             EXTERNAL_REPO_NAMES+=("${repo_name}")
             EXTERNAL_REPO_PRIVATE+=("${repo_private:-false}")
+            EXTERNAL_REPO_URLS+=("${repo_url}")
         done < <(_read_external_repos_from_host_vars "${host_vars_file}")
 
         return 0
@@ -770,11 +808,12 @@ _write_ssh_host_entry() {
     local alias="$1"
     local key_name="$2"
     local conf_file="$3"
+    local host="$4"
 
     cat >> "${conf_file}" << EOF
 
 Host ${alias}
-    HostName github.com
+    HostName ${host}
     User git
     IdentityFile ${HOME}/.ssh/${key_name}
     IdentitiesOnly yes
@@ -838,7 +877,9 @@ setup_ssh_keys() {
 # One Host alias per private repository. IdentitiesOnly yes prevents SSH from
 # falling back to other loaded keys, ensuring the right key is always used.
 #
-# SSH alias format: github-dotfiles-<name>
+# SSH alias format: dotfiles-<name> (works for any git host — GitHub,
+# GitLab, self-hosted, etc.; HostName is set per-alias to the repo's actual
+# host, extracted from its repo_url).
 # The sync-external Ansible role rewrites each private repo's URL to this
 # alias form automatically — you never need to hand-edit host_vars for it.
 #
@@ -853,8 +894,15 @@ SSHEOF
         [[ "${EXTERNAL_REPO_PRIVATE[i]}" == "true" ]] || continue
 
         local repo_name="${EXTERNAL_REPO_NAMES[i]}"
-        local key_name="github-dotfiles-${repo_name}"
-        local alias="github-dotfiles-${repo_name}"
+        local key_name="dotfiles-${repo_name}"
+        local alias="dotfiles-${repo_name}"
+
+        local host
+        host=$(_extract_git_host "${EXTERNAL_REPO_URLS[i]}")
+        if [[ -z "${host}" ]]; then
+            warn "Could not determine the git host from '${EXTERNAL_REPO_URLS[i]}' for '${repo_name}' — defaulting to github.com. Edit the Host block in ${conf_file} if that's wrong."
+            host="github.com"
+        fi
 
         generate_deploy_key "${key_name}" "${key_name}@${MACHINE_NAME}"
 
@@ -863,7 +911,7 @@ SSHEOF
         if grep -qx "Host ${alias}" "${conf_file}" 2>/dev/null; then
             info "SSH alias '${alias}' already present in ${conf_file} — skipping."
         else
-            _write_ssh_host_entry "${alias}" "${key_name}" "${conf_file}"
+            _write_ssh_host_entry "${alias}" "${key_name}" "${conf_file}" "${host}"
         fi
 
         display_names+=("${repo_name}")
@@ -871,16 +919,16 @@ SSHEOF
 
     ensure_ssh_config_include
 
-    # ── Display public keys for GitHub ────────────────────────────────────────
+    # ── Display public keys ─────────────────────────────────────────────────
     echo
-    echo "${_BOLD}${_YELLOW}ACTION REQUIRED — Add the following keys to GitHub before continuing${_RESET}"
+    echo "${_BOLD}${_YELLOW}ACTION REQUIRED — Add the following keys to each repository before continuing${_RESET}"
     echo
     echo "For each key: go to the repository → Settings → Deploy keys → Add deploy key"
     echo "Allow write access: NO (read-only is sufficient for sync)"
     echo
 
     for repo_name in "${display_names[@]}"; do
-        local pub_file="${HOME}/.ssh/github-dotfiles-${repo_name}.pub"
+        local pub_file="${HOME}/.ssh/dotfiles-${repo_name}.pub"
         if [[ -f "${pub_file}" ]]; then
             echo "${_BOLD}${repo_name}${_RESET}"
             cat "${pub_file}"

@@ -49,10 +49,10 @@ dotfiles_extra_roles: []
 #   name       Unique — used for the config/state directory, the SSH alias
 #              (private repos only), and as the sync-script argument.
 #              Lowercase letters, digits, and hyphens only.
-#   repo_url   HTTPS URL for public repos. For private repos, HTTPS is
-#              rewritten to the repo's own SSH alias automatically at
-#              Ansible run time — you never need to hand-edit this to an
-#              alias form yourself.
+#   repo_url   HTTPS/SSH URL, any git host, for public repos. For private
+#              repos, it's rewritten to the repo's own SSH alias
+#              automatically at Ansible run time — you never need to
+#              hand-edit this to an alias form yourself.
 #   clone_dir  Where the repo is cloned. May use ~.
 #   private    true | false — controls the URL rewrite and whether a deploy
 #              key is expected (see docs/external-sync.md for the deploy-key
@@ -70,7 +70,7 @@ external_synced_repos:
     private: false
 
   - name: ai-config
-    repo_url: "git@github-dotfiles-ai-config:you/ai-config.git"
+    repo_url: "git@dotfiles-ai-config:you/ai-config.git"
     clone_dir: "~/.local/share/ai-config"
     private: true
 

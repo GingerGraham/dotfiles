@@ -6,8 +6,9 @@ Requires=external-sync.service
 # Fire shortly after login so the first shell of a new session gets fresh
 # add-on repo config
 OnBootSec=3min
-# Hourly — add-on repos are pulled far more often than the dotfiles repo
-# itself since they can hold fast-moving config (AI tool prompts, etc.)
+# Hourly — a longer interval than the dotfiles repo's own 30-minute
+# self-sync (roles/sync), since add-on repos are lower-priority background
+# config rather than the machine's core setup.
 OnUnitActiveSec=1h
 # Catch up if the machine was off during a scheduled run
 Persistent=true

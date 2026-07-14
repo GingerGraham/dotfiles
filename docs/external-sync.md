@@ -34,10 +34,15 @@ declares.
 | Config | `~/.config/dotfiles/sync.conf` | `~/.config/external-sync/<name>/sync.conf`, one per repo |
 | Runs on | `workstation` and `server` | `workstation` and `server` |
 
-They are independent, unrelated services — disabling one does not affect
-the other. Both are gated by the same `dotfiles_sync_enabled` flag, so
-turning that off in `host_vars` disables both timers together. See
-[docs/sync.md](sync.md) for the self-sync mechanism.
+They are independent, unrelated services at runtime — separate timers,
+separate config/state directories, separate failure domains; a stalled
+`sync-external` repo never blocks or affects dotfiles self-sync, or vice
+versa. Where they're **not** independent is provisioning: both are gated by
+the single `dotfiles_sync_enabled` flag in `host_vars`, so turning that off
+disables both timers together. To disable only one, skip its role/tag
+instead of the shared flag — e.g. `ansible-playbook site.yml --skip-tags
+sync-external` (or `--skip-roles sync-external` on `install.sh`) leaves
+self-sync running. See [docs/sync.md](sync.md) for the self-sync mechanism.
 
 ## The `external_synced_repos` shape
 
@@ -51,15 +56,15 @@ external_synced_repos:
     private: false            # public → HTTPS, no deploy key
 
   - name: ai-config
-    repo_url: "git@github-dotfiles-ai-config:you/ai-config.git"
+    repo_url: "git@dotfiles-ai-config:you/ai-config.git"
     clone_dir: "~/.local/share/ai-config"
-    private: true             # private → deploy key + github-dotfiles-<name> alias
+    private: true             # private → deploy key + dotfiles-<name> alias
 ```
 
 | Field | Required | Purpose |
 | --- | --- | --- |
 | `name` | yes | Unique. Used for the config/state directory, the SSH alias (private repos), and as the `external-sync` script argument. Lowercase letters, digits, hyphens only. |
-| `repo_url` | yes | HTTPS URL (public), or HTTPS/SSH/alias URL (private — rewritten to the alias form automatically by Ansible). |
+| `repo_url` | yes | HTTPS, SSH, or alias URL — any git host (public), or same forms for private (rewritten to the alias form automatically by Ansible; the real host is extracted from whatever form you give and doesn't need to be GitHub). |
 | `clone_dir` | yes | Where the repo is cloned. May use `~`. |
 | `private` | yes | `true`/`false` — controls the URL rewrite and whether a deploy key is expected. |
 
@@ -81,22 +86,23 @@ cloned over HTTPS on the next Ansible run.
 
 Same flow, but answer "y" at the private prompt. `install.sh` then:
 
-1. Generates a dedicated deploy key at `~/.ssh/github-dotfiles-<name>`
-   (skipped if it already exists).
-2. Writes an SSH host alias block (`Host github-dotfiles-<name>`) to
-   `~/.ssh/config.d/10-dotfiles.conf`.
+1. Extracts the real host (GitHub, GitLab, self-hosted, etc.) from the
+   URL you gave and generates a dedicated deploy key at
+   `~/.ssh/dotfiles-<name>` (skipped if it already exists).
+2. Writes an SSH host alias block (`Host dotfiles-<name>`, `HostName
+   <the extracted host>`) to `~/.ssh/config.d/10-dotfiles.conf`.
 3. Prints the public key and pauses for you to add it to the repository as
    a **read-only** deploy key (repo Settings → Deploy keys → Add deploy
    key; allow write access: **no**).
 
 You do **not** need to hand-edit `host_vars` with the alias URL — the
-`sync-external` role rewrites `repo_url` to `git@github-dotfiles-<name>:owner/repo.git`
+`sync-external` role rewrites `repo_url` to `git@dotfiles-<name>:owner/repo.git`
 automatically at Ansible run time, based on `private: true`.
 
 Verify access once the key is added:
 
 ```bash
-ssh -T git@github-dotfiles-<name>
+ssh -T git@dotfiles-<name>
 ```
 
 ### Adding a repo to an already-provisioned machine
@@ -115,8 +121,8 @@ add a repo later, append an entry to `external_synced_repos` directly in
   `ansible-playbook site.yml --tags sync-external` (or let `install.sh`'s
   own Ansible phase do it). Use `--skip-ssh` on `install.sh` if you'd rather
   generate the key and alias by hand
-  (`ssh-keygen -t ed25519 -f ~/.ssh/github-dotfiles-<name>`, then a
-  `Host github-dotfiles-<name>` block in `~/.ssh/config.d/10-dotfiles.conf`
+  (`ssh-keygen -t ed25519 -f ~/.ssh/dotfiles-<name>`, then a
+  `Host dotfiles-<name>` block in `~/.ssh/config.d/10-dotfiles.conf`
   following the format in [Private repo](#private-repo) above).
 
 ## Per-repo `sync.conf`
@@ -126,7 +132,7 @@ Rendered once by Ansible at `~/.config/external-sync/<name>/sync.conf` and
 sync automatically if `repo_url` changes in `host_vars`.
 
 ```bash
-REPO_URL="git@github-dotfiles-ai-config:you/ai-config.git"
+REPO_URL="git@dotfiles-ai-config:you/ai-config.git"
 GIT_BRANCH="main"
 CLONE_DIR="/home/you/.local/share/ai-config"
 DEV_MODE="false"

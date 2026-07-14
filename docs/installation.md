@@ -166,13 +166,13 @@ See [docs/tool-management.md](tool-management.md) for the complete tool list, tr
 
 The `dotfiles` repo itself is public — no deploy key is needed for it. The background sync uses HTTPS.
 
-Deploy keys are generated for **external add-on repos registered as private only**, one per repo:
+Deploy keys are generated for **external add-on repos registered as private only**, one per repo, regardless of which provider hosts it:
 
 ```text
-~/.ssh/github-dotfiles-<name>
+~/.ssh/dotfiles-<name>
 ```
 
-SSH host aliases are written to `~/.ssh/config.d/10-dotfiles.conf`, one `Host github-dotfiles-<name>` block per private repo. The `sync-external` Ansible role rewrites each private repo's URL to its alias form automatically — you never need to hand-edit `host_vars` with the alias URL yourself.
+SSH host aliases are written to `~/.ssh/config.d/10-dotfiles.conf`, one `Host dotfiles-<name>` block per private repo, with `HostName` set to that repo's actual host — extracted from the `repo_url` you gave (GitHub, GitLab, self-hosted, etc.), not assumed. The `sync-external` Ansible role rewrites each private repo's URL to its alias form automatically — you never need to hand-edit `host_vars` with the alias URL yourself.
 
 After `install.sh` generates the keys, add each public key as a read-only deploy key in the corresponding repository (Settings → Deploy keys → Add deploy key; write access: **no**). This applies regardless of which provider hosts the repo — GitHub, GitLab, and most other providers expose an equivalent deploy key setting.
 

@@ -24,20 +24,33 @@
     - "{{ external_sync_state_dir }}/{{ repo.name }}/logs"
 
 # ── Step 3: Normalise the repo URL (public/private aware) ─────────────────────
-# Private repos rewrite an HTTPS GitHub URL to this repo's own SSH alias
-# (github-dotfiles-<name>) so its dedicated deploy key is used; an SSH/alias
-# URL already in that form passes through unchanged. Public repos are used
-# verbatim — no rewrite, no key, plain HTTPS.
+# Private repos rewrite the URL to this repo's own SSH alias
+# (dotfiles-<name>, any git host — see install.sh's _extract_git_host) so its
+# dedicated deploy key is used. The host itself is never inspected here: the
+# owner/repo(.git) path is extracted from whatever form repo_url is in
+# (https://host/path, git@host:path, ssh://git@host/path, or an
+# already-rewritten git@dotfiles-<name>:path alias) and rebuilt against the
+# alias, which keeps this idempotent across re-runs regardless of the
+# original host. Public repos are used verbatim — no rewrite, no key.
+
+- name: "Extract owner/repo path from repo URL: {{ repo.name }}"
+  ansible.builtin.set_fact:
+    _repo_url_path: >-
+      {{
+        (
+          repo.repo_url
+          | regex_replace('^https://[^/]+/', '')
+          | regex_replace('^ssh://git@[^/]+/', '')
+          | regex_replace('^git@[^:]+:', '')
+          | regex_replace('\.git$', '')
+        ) + '.git'
+      }}
 
 - name: "Normalise repo URL: {{ repo.name }}"
   ansible.builtin.set_fact:
     _effective_repo_url: >-
       {{
-        (
-          repo.repo_url
-          | regex_replace('^https://github\.com/(.+?)(?:\.git)?$', 'git@github.com:\1.git')
-          | regex_replace('git@github\.com:', 'git@github-dotfiles-' + repo.name + ':')
-        )
+        ('git@dotfiles-' + repo.name + ':' + _repo_url_path)
         if (repo.private | bool)
         else repo.repo_url
       }}
@@ -111,6 +124,28 @@
 - name: "Parse manifest: {{ repo.name }}"
   ansible.builtin.set_fact:
     _manifest: "{{ (_manifest_raw.content | b64decode | from_yaml) if _manifest_stat.stat.exists else {} }}"
+
+# .dotfiles-sync.yml is authored by whoever owns the external repo, not by
+# this dotfiles repo — deploy.list is built by concatenating clone_dir with
+# entry.src verbatim (see deploy.list.j2), so an unvalidated src of e.g.
+# '../.ssh/id_rsa' would let a malicious/compromised add-on repo read and
+# deploy files from outside its own clone. src must stay a relative path
+# within the clone (see docs/sync-manifest-spec.md's "Path resolution" note).
+
+- name: "Validate manifest deploy entries do not escape clone_dir: {{ repo.name }}"
+  ansible.builtin.assert:
+    that:
+      - not item.src.startswith('/')
+      - "'..' not in item.src.split('/')"
+    fail_msg: >-
+      Rejecting {{ repo.name }}'s .dotfiles-sync.yml: deploy[].src
+      '{{ item.src }}' must be a path relative to the repo root, without '..'
+      segments or a leading '/' (src is resolved against clone_dir — see
+      docs/sync-manifest-spec.md).
+    quiet: true
+  loop: "{{ _manifest.deploy | default([]) }}"
+  loop_control:
+    label: "{{ item.src | default('(missing src)') }}"
 
 - name: "Resolve effective branch: {{ repo.name }}"
   ansible.builtin.set_fact:
