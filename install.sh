@@ -7,8 +7,9 @@
 #
 # On first run:
 #   1. Checks and optionally installs prerequisites (git, python3, ansible-core)
-#   2. Generates ansible/host_vars/localhost.yml interactively
-#   3. Generates per-repo SSH deploy keys for private companion repos (nvim-config, ai-config)
+#   2. Generates ansible/host_vars/localhost.yml interactively, including any
+#      number of external add-on repos (synced/deployed by sync-external)
+#   3. Generates per-repo SSH deploy keys for repos registered as private
 #   4. Runs ansible-playbook to deploy configuration
 #
 # On subsequent runs:
@@ -32,7 +33,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.1"
+VERSION="2.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -61,8 +62,15 @@ PROJECTS_BASE=""
 GIT_NAME=""
 GIT_DEFAULT_EMAIL=""
 GIT_DEFAULT_SIGNING_KEY=""
-NVIM_REPO_URL=""
-AI_REPO_URL=""
+
+# Populated by generate_host_vars() during the external add-on repo
+# collection loop; consumed by setup_ssh_keys() to know which repos need a
+# deploy key + SSH alias. Parallel arrays, indexed together — bash 3.2 has
+# no associative arrays.
+EXTERNAL_REPO_NAMES=()
+EXTERNAL_REPO_URLS=()
+EXTERNAL_REPO_CLONE_DIRS=()
+EXTERNAL_REPO_PRIVATE=()
 
 # ── Colour output ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]] && command -v tput &>/dev/null; then
@@ -111,8 +119,6 @@ OPTIONS
 
   --skip-roles <role[,role,...]>
       Skip one or more named roles. Passed as --skip-tags to ansible-playbook.
-      Also suppresses related prompts (e.g. --skip-roles ai-tools skips the
-      ai-config repo URL prompt and disables the role in host_vars).
       'common' cannot be skipped and is silently removed if included.
 
   --only-roles <role[,role,...]>
@@ -136,32 +142,32 @@ OPTIONS
       Show this help.
 
 PROFILES
-  workstation   Full setup: common, shell, git, ssh, nvim, ai-tools, sync
-  server        Common, shell, git, ssh, sync
+  workstation   Full setup: common, shell, git, ssh, tmux, vim, sync-external, sync
+  server        Common, shell, git, ssh, sync-external, sync
   minimal       Common and shell only
 
-  Note: nvim-config and ai-config repo URLs are not prompted for 'server' or
-  'minimal' profiles because those roles do not run under those profiles.
-  This is intentional — see ansible/roles/shell/README.md.
+  Note: external add-on repos are not prompted for the 'minimal' profile
+  because the sync-external role does not run under it.
 
 SSH DEPLOY KEYS
   The dotfiles repo is public — no deploy key is needed for it. The sync
   service pulls via HTTPS.
 
-  Deploy keys are only generated for private companion repos:
+  Deploy keys are only generated for external add-on repos registered as
+  private during the interactive prompt:
 
-    ~/.ssh/dotfiles_nvim    For nvim-config (if URL provided)
-    ~/.ssh/dotfiles_ai      For ai-config (if URL provided)
+    ~/.ssh/github-dotfiles-<name>    One key per private repo
 
-  SSH host aliases are written to ~/.ssh/config.d/10-dotfiles.conf.
-  Use these aliases in your host_vars repo URLs, e.g.:
-    git@github-dotfiles-nvim:user/nvim-config.git
+  SSH host aliases are written to ~/.ssh/config.d/10-dotfiles.conf, one
+  'Host github-dotfiles-<name>' block per private repo. The sync-external
+  Ansible role rewrites each private repo's URL to its alias form
+  automatically — you never need to hand-edit host_vars with the alias URL.
 
   Each key needs to be added to its repository as a read-only deploy key
   (repo Settings → Deploy keys → Add deploy key → allow write access: NO).
 
-  If neither nvim-config nor ai-config URLs are provided, the SSH phase is
-  skipped entirely. --skip-ssh is still available to bypass it explicitly.
+  If no private repos are registered, the SSH phase is skipped entirely.
+  --skip-ssh is still available to bypass it explicitly.
 
 EXAMPLES
   ./install.sh                                    Interactive first run
@@ -169,7 +175,7 @@ EXAMPLES
   ./install.sh --profile workstation              Skip profile prompt
   ./install.sh --profile server --playbook server Server deployment
   ./install.sh --no-prereqs --skip-ssh            Re-run Ansible only
-  ./install.sh --skip-roles ai-tools              Skip ai-tools role and prompts
+  ./install.sh --skip-roles sync-external         Skip sync-external role
   ./install.sh --only-roles shell,git             Run common + shell + git only
 EOF
 }
@@ -444,17 +450,13 @@ check_prereqs() {
 }
 
 # ── Phase 2: host_vars generation ────────────────────────────────────────────
-# Reads existing host_vars if present (populates URL variables for SSH phase).
-# Otherwise, prompts interactively and writes the file.
+# Reads existing host_vars if present (populates the values the SSH and
+# Ansible phases need). Otherwise, prompts interactively and writes the file.
 #
-# Prompt suppression: --skip-roles and --only-roles are consulted via
-# _role_is_suppressed(). Suppressed roles skip their companion repo URL
-# prompts and their enable-flag prompts, and are written as disabled in the
-# generated host_vars file.
-#
-# Profile note: nvim_config_repo_url and ai_config_repo_url are only prompted
-# for the 'workstation' profile. Server and minimal profiles do not run the
-# nvim or ai-tools roles, so collecting these values would be misleading.
+# The external add-on repo collection loop (and the rest of this interactive
+# flow) only runs on first-time generation, same as the git_projects loop
+# below — add more repos later by editing external_synced_repos directly in
+# host_vars/localhost.yml (see docs/external-sync.md#adding-a-repo).
 
 _read_yaml_scalar() {
     # Reads a bare scalar value from a simple YAML file (no yq dependency).
@@ -468,84 +470,16 @@ _read_yaml_scalar() {
         || true
 }
 
-# ── Backfill a companion repo URL into an existing host_vars file ─────────────
-# Called when host_vars already exists but a role is being explicitly targeted
-# via --only-roles and its URL is currently empty.
-#
-# Args:
-#   $1  role name          (e.g. "nvim")
-#   $2  url_key            (e.g. "nvim_config_repo_url")
-#   $3  enabled_key        (e.g. "dotfiles_nvim_enabled")
-#   $4  prompt label       (e.g. "nvim-config repo SSH URL")
-#   $5  host_vars_file     path to the YAML file
-#
-# Side effects:
-#   - Prompts the user if the conditions are met
-#   - Patches $url_key and $enabled_key in the file via sed
-#   - Updates the NVIM_REPO_URL / AI_REPO_URL global as appropriate
-_backfill_role_url() {
-    local role="$1" url_key="$2" enabled_key="$3" label="$4" file="$5"
-    local current_url
-
-    # Only act when this role is explicitly being targeted and not suppressed
-    ! _role_is_suppressed "${role}" || return 0
-    [[ -n "${ARG_ONLY_ROLES}" ]] || return 0
-    echo "${ARG_ONLY_ROLES}" | tr ',' '\n' | grep -qx "${role}" || return 0
-
-    current_url=$(_read_yaml_scalar "${url_key}" "${file}")
-    [[ -z "${current_url}" ]] || return 0   # Already set — nothing to do
-
-    header "Backfilling ${role} configuration"
-    warn "${role} was skipped on the original run — its repo URL is empty in host_vars."
-    info "Provide the URL now to enable it, or press Enter to leave it disabled."
-    echo
-
-    local new_url=""
-    read -r -p "  ${label} (leave blank to skip): " new_url || true
-
-    if [[ -z "${new_url}" ]]; then
-        info "No URL provided — ${role} will remain disabled."
-        return 0
-    fi
-
-    # Patch the URL key in the file
-    sed -i "s|^${url_key}:.*|${url_key}: \"${new_url}\"|" "${file}"
-    # Flip the enabled flag to true
-    sed -i "s|^${enabled_key}:.*|${enabled_key}: true|" "${file}"
-
-    info "Updated ${url_key} in host_vars."
-
-    # Update the global variable for the SSH phase
-    case "${role}" in
-        nvim)     NVIM_REPO_URL="${new_url}" ;;
-        ai-tools) AI_REPO_URL="${new_url}"   ;;
-    esac
-}
-
 generate_host_vars() {
     local host_vars_file="${REPO_ROOT}/ansible/host_vars/localhost.yml"
 
     if [[ -f "${host_vars_file}" ]]; then
         info "host_vars/localhost.yml already exists — skipping. Delete it to regenerate."
-        # Read back the values the SSH phase and Ansible run need.
-        NVIM_REPO_URL=$(_read_yaml_scalar "nvim_config_repo_url" "${host_vars_file}")
-        AI_REPO_URL=$(_read_yaml_scalar   "ai_config_repo_url"   "${host_vars_file}")
+        # Read back the values the Ansible run needs. External repos are a
+        # YAML list, not a bare scalar — not parsed here; the sync-external
+        # role reads it directly.
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
-        # Honour CLI suppression — don't hand suppressed role URLs to the SSH phase.
-        _role_is_suppressed "nvim"     && NVIM_REPO_URL=""
-        _role_is_suppressed "ai-tools" && AI_REPO_URL=""
-
-        # ── Backfill empty URLs for roles being explicitly re-run ─────────────
-        # If --only-roles targets a role whose URL was left empty on the first
-        # run (e.g. the user answered N then, but now wants to add the role),
-        # prompt for just those values and patch them into the existing file.
-        # This avoids forcing the user to delete host_vars and start over.
-        _backfill_role_url "nvim"     "nvim_config_repo_url" "dotfiles_nvim_enabled" \
-            "nvim-config repo SSH URL" "${host_vars_file}"
-        _backfill_role_url "ai-tools" "ai_config_repo_url"   "dotfiles_ai_tools_enabled" \
-            "ai-config repo SSH URL"  "${host_vars_file}"
-
         return 0
     fi
 
@@ -558,8 +492,8 @@ generate_host_vars() {
     PROFILE="${ARG_PROFILE}"
     if [[ -z "${PROFILE}" ]]; then
         echo "Select a profile:"
-        echo "  1) workstation  Full setup — shell, git, ssh, nvim, ai-tools, sync"
-        echo "  2) server       Common, shell, git, ssh, sync"
+        echo "  1) workstation  Full setup — shell, git, ssh, tmux, vim, sync-external, sync"
+        echo "  2) server       Common, shell, git, ssh, sync-external, sync"
         echo "  3) minimal      Common and shell only"
         echo
         local choice
@@ -644,58 +578,79 @@ generate_host_vars() {
         done
     fi
 
-    # ── Companion repo URLs and role enable flags ─────────────────────────────
-    # Declared here at function scope so the write block below can always
-    # reference them, regardless of which branch of the if/else is taken.
-    local nvim_enabled="true"
-    local ai_enabled="true"
+    # ── External add-on repos ─────────────────────────────────────────────────
+    # Any number of repos, each synced/deployed by the sync-external engine
+    # per its own .dotfiles-sync.yml (see docs/sync-manifest-spec.md). Only
+    # offered for profiles that actually run the sync-external role.
+    local external_repos_yaml=""
 
-    if [[ "${PROFILE}" == "workstation" ]]; then
-        echo
-        info "Optional roles — answer N to disable, or provide a repo URL to enable:"
-        echo
-
-        # nvim ─────────────────────────────────────────────────────────────────
-        if _role_is_suppressed "nvim"; then
-            nvim_enabled="false"
-            NVIM_REPO_URL=""
-            info "  nvim role: disabled (suppressed by CLI flags)"
+    if [[ "${PROFILE}" == "workstation" || "${PROFILE}" == "server" ]]; then
+        if _role_is_suppressed "sync-external"; then
+            info "sync-external role: disabled (suppressed by CLI flags) — skipping add-on repo prompts."
         else
-            local nvim_prompt_answer
-            read -r -p "  Enable nvim role? [Y/n]: " nvim_prompt_answer || true
-            if [[ "${nvim_prompt_answer,,}" == "n" ]]; then
-                nvim_enabled="false"
-                NVIM_REPO_URL=""
-            else
-                nvim_enabled="true"
-                read -r -p "  nvim-config repo SSH URL (leave blank to skip cloning): " NVIM_REPO_URL || true
-            fi
-        fi
+            echo
+            info "External add-on repos — synced and deployed by the sync-external engine"
+            info "(e.g. nvim-config, ai-config). Add more later by editing"
+            info "external_synced_repos in host_vars/localhost.yml — see docs/external-sync.md."
+            echo
 
-        echo
+            local add_more_answer=""
+            read -r -p "  Add an external add-on repo? [y/N]: " add_more_answer < /dev/tty || true
 
-        # ai-tools ─────────────────────────────────────────────────────────────
-        if _role_is_suppressed "ai-tools"; then
-            ai_enabled="false"
-            AI_REPO_URL=""
-            info "  ai-tools role: disabled (suppressed by CLI flags)"
-        else
-            local ai_prompt_answer
-            read -r -p "  Enable ai-tools role? [Y/n]: " ai_prompt_answer || true
-            if [[ "${ai_prompt_answer,,}" == "n" ]]; then
-                ai_enabled="false"
-                AI_REPO_URL=""
-            else
-                ai_enabled="true"
-                read -r -p "  ai-config repo SSH URL (leave blank to skip cloning):   " AI_REPO_URL || true
-            fi
+            while [[ "${add_more_answer}" == "y" || "${add_more_answer}" == "Y" ]]; do
+                local repo_name="" repo_url="" repo_clone_dir="" repo_private_answer="" repo_private="false"
+                local dup_found="false" i
+
+                while [[ -z "${repo_name}" ]]; do
+                    read -r -p "    Repo name (lowercase letters, digits, hyphens): " repo_name < /dev/tty || true
+                    if [[ -n "${repo_name}" ]] && ! [[ "${repo_name}" =~ ^[a-z0-9-]+$ ]]; then
+                        warn "    Invalid name '${repo_name}' — use lowercase letters, digits, and hyphens only."
+                        repo_name=""
+                    fi
+                done
+
+                for ((i = 0; i < ${#EXTERNAL_REPO_NAMES[@]}; i++)); do
+                    if [[ "${EXTERNAL_REPO_NAMES[i]}" == "${repo_name}" ]]; then
+                        dup_found="true"
+                        break
+                    fi
+                done
+                if [[ "${dup_found}" == "true" ]]; then
+                    warn "  '${repo_name}' is already registered — skipping duplicate."
+                else
+                    while [[ -z "${repo_url}" ]]; do
+                        read -r -p "    Repo URL for ${repo_name}: " repo_url < /dev/tty || true
+                    done
+
+                    local default_clone_dir="\${HOME}/.local/share/${repo_name}"
+                    read -r -p "    Clone directory for ${repo_name} [${default_clone_dir}]: " repo_clone_dir < /dev/tty || true
+                    repo_clone_dir="${repo_clone_dir:-${default_clone_dir}}"
+
+                    read -r -p "    Is ${repo_name} private? [y/N]: " repo_private_answer < /dev/tty || true
+                    if [[ "${repo_private_answer}" == "y" || "${repo_private_answer}" == "Y" ]]; then
+                        repo_private="true"
+                    fi
+
+                    EXTERNAL_REPO_NAMES+=("${repo_name}")
+                    EXTERNAL_REPO_URLS+=("${repo_url}")
+                    EXTERNAL_REPO_CLONE_DIRS+=("${repo_clone_dir}")
+                    EXTERNAL_REPO_PRIVATE+=("${repo_private}")
+
+                    external_repos_yaml+="  - name: \"${repo_name}\"\n"
+                    external_repos_yaml+="    repo_url: \"${repo_url}\"\n"
+                    external_repos_yaml+="    clone_dir: \"${repo_clone_dir}\"\n"
+                    external_repos_yaml+="    private: ${repo_private}\n"
+
+                    info "  Registered ${repo_name} ($( [[ "${repo_private}" == "true" ]] && echo private || echo public ))"
+                fi
+
+                echo
+                add_more_answer=""
+                read -r -p "  Add another external add-on repo? [y/N]: " add_more_answer < /dev/tty || true
+            done
         fi
     else
-        NVIM_REPO_URL=""
-        AI_REPO_URL=""
-        nvim_enabled="false"
-        ai_enabled="false"
-        info "Skipping nvim/ai-config repo URLs — not applicable for '${PROFILE}' profile."
+        info "Skipping external add-on repo prompts — not applicable for '${PROFILE}' profile."
     fi
 
     # ── Write file ────────────────────────────────────────────────────────────
@@ -711,15 +666,9 @@ generate_host_vars() {
 dotfiles_profile: ${PROFILE}
 machine_name: "${MACHINE_NAME}"
 
-# ── Companion repos ────────────────────────────────────────────────────────
-nvim_config_repo_url: "${NVIM_REPO_URL}"
-ai_config_repo_url:   "${AI_REPO_URL}"
-
 # ── Role feature flags ─────────────────────────────────────────────────────
 # common is always required and cannot be disabled.
-dotfiles_nvim_enabled:     ${nvim_enabled}
-dotfiles_ai_tools_enabled: ${ai_enabled}
-dotfiles_sync_enabled:     true
+dotfiles_sync_enabled: true
 
 # ── Git global identity ────────────────────────────────────────────────────
 projects_base: ${PROJECTS_BASE}
@@ -741,6 +690,17 @@ EOF
         else
             echo "git_projects: []"
             echo "# Add projects later with: git-add-project <context> <provider> <email>"
+        fi
+
+        # External add-on repos — empty list if none were registered
+        echo ""
+        echo "# ── External add-on repos ────────────────────────────────────────────────"
+        if [[ -n "${external_repos_yaml}" ]]; then
+            echo "external_synced_repos:"
+            printf '%b' "${external_repos_yaml}"
+        else
+            echo "external_synced_repos: []"
+            echo "# Add repos later by editing this list — see docs/external-sync.md#adding-a-repo"
         fi
 
     } > "${host_vars_file}"
@@ -806,9 +766,15 @@ ensure_ssh_config_include() {
 
 setup_ssh_keys() {
     # dotfiles is public — no deploy key needed for the sync service (HTTPS).
-    # This phase only runs when at least one private companion repo URL was provided.
-    if [[ -z "${NVIM_REPO_URL}" ]] && [[ -z "${AI_REPO_URL}" ]]; then
-        info "No companion repo URLs provided — skipping SSH key generation."
+    # This phase only runs when at least one repo was registered as private
+    # during the external add-on repo collection loop in generate_host_vars().
+    local private_count=0 i
+    for ((i = 0; i < ${#EXTERNAL_REPO_NAMES[@]}; i++)); do
+        [[ "${EXTERNAL_REPO_PRIVATE[i]}" == "true" ]] && private_count=$((private_count + 1))
+    done
+
+    if [[ "${private_count}" -eq 0 ]]; then
+        info "No private add-on repos registered — skipping SSH key generation."
         return 0
     fi
 
@@ -824,30 +790,40 @@ setup_ssh_keys() {
     # broader config.d structure.
     if [[ ! -f "${conf_file}" ]]; then
         cat > "${conf_file}" << 'SSHEOF'
-# dotfiles companion repo deploy keys — generated by install.sh
+# dotfiles external add-on repo deploy keys — generated by install.sh
 # One Host alias per private repository. IdentitiesOnly yes prevents SSH from
 # falling back to other loaded keys, ensuring the right key is always used.
 #
-# SSH alias format: github-dotfiles-<repo>
-# Use these aliases as the hostname in your repo SSH clone URLs, e.g.:
-#   git@github-dotfiles-nvim:user/nvim-config.git
+# SSH alias format: github-dotfiles-<name>
+# The sync-external Ansible role rewrites each private repo's URL to this
+# alias form automatically — you never need to hand-edit host_vars for it.
 #
 # Note: the dotfiles repo itself is public and uses HTTPS — no entry here.
 SSHEOF
         chmod 600 "${conf_file}"
     fi
 
-    # dotfiles_nvim — only if a nvim-config URL was provided
-    if [[ -n "${NVIM_REPO_URL}" ]]; then
-        generate_deploy_key "dotfiles_nvim" "dotfiles-nvim@${MACHINE_NAME}"
-        _write_ssh_host_entry "github-dotfiles-nvim" "dotfiles_nvim" "${conf_file}"
-    fi
+    local -a display_names=()
 
-    # dotfiles_ai — only if an ai-config URL was provided
-    if [[ -n "${AI_REPO_URL}" ]]; then
-        generate_deploy_key "dotfiles_ai" "dotfiles-ai@${MACHINE_NAME}"
-        _write_ssh_host_entry "github-dotfiles-ai" "dotfiles_ai" "${conf_file}"
-    fi
+    for ((i = 0; i < ${#EXTERNAL_REPO_NAMES[@]}; i++)); do
+        [[ "${EXTERNAL_REPO_PRIVATE[i]}" == "true" ]] || continue
+
+        local repo_name="${EXTERNAL_REPO_NAMES[i]}"
+        local key_name="github-dotfiles-${repo_name}"
+        local alias="github-dotfiles-${repo_name}"
+
+        generate_deploy_key "${key_name}" "${key_name}@${MACHINE_NAME}"
+
+        # Idempotent — skip if this alias's Host block is already present so
+        # re-running install.sh never duplicates it.
+        if grep -qx "Host ${alias}" "${conf_file}" 2>/dev/null; then
+            info "SSH alias '${alias}' already present in ${conf_file} — skipping."
+        else
+            _write_ssh_host_entry "${alias}" "${key_name}" "${conf_file}"
+        fi
+
+        display_names+=("${repo_name}")
+    done
 
     ensure_ssh_config_include
 
@@ -859,31 +835,20 @@ SSHEOF
     echo "Allow write access: NO (read-only is sufficient for sync)"
     echo
 
-    local -a display_keys=()
-    [[ -n "${NVIM_REPO_URL}" ]] && display_keys+=("dotfiles_nvim:nvim-config repo")
-    [[ -n "${AI_REPO_URL}"   ]] && display_keys+=("dotfiles_ai:ai-config repo")
-
-    for entry in "${display_keys[@]}"; do
-        local key_name="${entry%%:*}"
-        local label="${entry##*:}"
-        local pub_file="${HOME}/.ssh/${key_name}.pub"
+    for repo_name in "${display_names[@]}"; do
+        local pub_file="${HOME}/.ssh/github-dotfiles-${repo_name}.pub"
         if [[ -f "${pub_file}" ]]; then
-            echo "${_BOLD}${label}${_RESET}"
+            echo "${_BOLD}${repo_name}${_RESET}"
             cat "${pub_file}"
             echo
         fi
     done
 
-    # ── SSH alias reminder ────────────────────────────────────────────────────
-    echo "${_BOLD}SSH alias URLs for host_vars/localhost.yml:${_RESET}"
-    [[ -n "${NVIM_REPO_URL}" ]] && echo "  nvim_config_repo_url: \"git@github-dotfiles-nvim:${NVIM_REPO_URL##*:}\""
-    [[ -n "${AI_REPO_URL}"   ]] && echo "  ai_config_repo_url:   \"git@github-dotfiles-ai:${AI_REPO_URL##*:}\""
-    echo
-    info "Update ansible/host_vars/localhost.yml with the alias URLs above."
-    info "The alias form ensures the correct deploy key is used for each repo."
+    info "The sync-external role rewrites each repo's URL to its alias form"
+    info "automatically at Ansible run time — no further host_vars edits needed."
     echo
 
-    read -r -p "Press Enter once all deploy keys have been added to GitHub..." || true
+    read -r -p "Press Enter once all deploy keys have been added to GitHub..." < /dev/tty || true
 }
 
 # ── Phase 3b: Sudo / become setup ────────────────────────────────────────────
@@ -1014,11 +979,12 @@ post_run() {
     echo "    source ~/.zshrc     # zsh"
     echo "  Or simply open a new terminal."
 
-    if [[ -n "${NVIM_REPO_URL}" ]] || [[ -n "${AI_REPO_URL}" ]]; then
+    if [[ ${#EXTERNAL_REPO_NAMES[@]} -gt 0 ]]; then
         echo
-        echo "  Next step — update host_vars with SSH alias URLs, then re-run:"
-        echo "    ./install.sh --no-prereqs --skip-ssh"
-        echo "  This triggers the nvim/ai-tools roles to clone their repos."
+        echo "  Registered add-on repos were cloned/adopted and deployed by sync-external."
+        echo "  Check status any time with:"
+        echo "    external-sync"
+        echo "    cat ~/.local/share/external-sync/<name>/last-sync"
     fi
 
     echo
