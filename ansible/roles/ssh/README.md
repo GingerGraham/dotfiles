@@ -66,7 +66,7 @@ considered.
 Fill it in by hand when a machine runs more than one SSH agent and
 different hosts need different keys — for example, routing personal/work
 logins through a password-manager agent (Bitwarden, 1Password) while
-deploy keys added via `ssh-add` (`github-dotfiles-*`) stay on the desktop
+deploy keys added via `ssh-add` (`dotfiles-*`) stay on the desktop
 session's own agent (gnome-keyring, KDE Wallet, etc.).
 
 If a machine only ever runs one agent, leave this file empty — SSH will

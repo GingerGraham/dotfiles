@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.external-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ ansible_facts['env']['HOME'] }}/.local/bin/external-sync</string>
+    </array>
+
+    <!-- Hourly, in seconds, to match the systemd timer cadence -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- Fire once on load so a fresh install picks up all registered repos
+         immediately rather than waiting up to an hour -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{ external_sync_state_dir }}/launchd.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{ external_sync_state_dir }}/launchd-error.log</string>
+
+    <!-- Throttle restarts on repeated failure — don't hammer origins if SSH
+         or network is broken -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

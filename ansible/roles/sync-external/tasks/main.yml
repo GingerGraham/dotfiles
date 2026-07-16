@@ -1,0 +1,140 @@
+# ansible/roles/sync-external/tasks/main.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic external add-on repo sync engine. Loops external_synced_repos,
+# clones/adopts each, renders its runtime config from .dotfiles-sync.yml, runs
+# an initial deploy, then installs one hourly timer/service (Linux) or
+# launchd agent (macOS) that drives scripts/external-sync.sh going forward.
+
+# ============================================================================
+# Section 0 — Base directories and the external-sync script symlink
+# ============================================================================
+# The script must be in place before the per-repo initial deploy step below
+# (repo.yml, step 8) invokes it.
+
+- name: Ensure ~/.local/bin exists
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+- name: Ensure external-sync base config and state directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ external_sync_conf_dir }}"
+    - "{{ external_sync_state_dir }}"
+
+- name: Make external-sync.sh executable
+  ansible.builtin.file:
+    path: "{{ dotfiles_dir }}/scripts/external-sync.sh"
+    mode: "0755"
+
+- name: Deploy external-sync wrapper symlink
+  ansible.builtin.file:
+    src: "{{ dotfiles_dir }}/scripts/external-sync.sh"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/external-sync"
+    state: link
+    force: true
+
+# ============================================================================
+# Section 1 — Per-repo clone/adopt, manifest read, config render, initial deploy
+# ============================================================================
+
+# Computed once for the whole play (not per repo, in repo.yml) since it only
+# depends on $HOME and the role's own defaults — see DF-4 in repo.yml's dest
+# validation for how these are used.
+- name: "Resolve dest denylist to absolute paths and a search pattern"
+  ansible.builtin.set_fact:
+    _dest_denylist_dirs_absolute: "{{ sync_external_dest_denylist_dirs | map('regex_replace', '^~', ansible_facts['env']['HOME']) | list }}"
+    _dest_denylist_files_absolute: "{{ sync_external_dest_denylist_files | map('regex_replace', '^~', ansible_facts['env']['HOME']) | list }}"
+    _dest_denylist_dirs_pattern: >-
+      {{
+        '^(' + (sync_external_dest_denylist_dirs
+          | map('regex_replace', '^~', ansible_facts['env']['HOME'])
+          | map('regex_escape') | list | join('|')) + ')'
+      }}
+
+- name: Process each registered external repo
+  ansible.builtin.include_tasks: repo.yml
+  loop: "{{ external_synced_repos }}"
+  loop_control:
+    loop_var: repo
+    label: "{{ repo.name }}"
+
+# ============================================================================
+# Section 2 — Timer and service units (hourly, syncs all repos in one run)
+# ============================================================================
+
+# ── Linux: systemd user timer ─────────────────────────────────────────────────
+
+- name: Ensure systemd user unit directory exists (Linux)
+  ansible.builtin.file:
+    path: "{{ xdg_config_home }}/systemd/user"
+    state: directory
+    mode: "0755"
+  when: ansible_facts['system'] == 'Linux'
+
+- name: Deploy external-sync systemd user units
+  ansible.builtin.template:
+    src: "systemd/{{ item }}.j2"
+    dest: "{{ xdg_config_home }}/systemd/user/{{ item }}"
+    mode: "0644"
+  loop:
+    - external-sync.service
+    - external-sync.timer
+  when: ansible_facts['system'] == 'Linux'
+
+- name: Ensure systemd user instance is available (WSL workaround)
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  when: ansible_facts['system'] == 'Linux'
+
+# enabled: must be an unconditional standalone task — a handler only fires on
+# changed, which would skip enablement on an idempotent re-run where the unit
+# files already match and nothing changed.
+- name: Enable and start the external-sync timer (Linux)
+  ansible.builtin.systemd:
+    name: external-sync.timer
+    enabled: true
+    state: started
+    scope: user
+    daemon_reload: true
+  when: ansible_facts['system'] == 'Linux'
+
+# ── macOS: launchd agent ──────────────────────────────────────────────────────
+
+- name: Ensure LaunchAgents directory exists (macOS)
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents"
+    state: directory
+    mode: "0755"
+  when: ansible_facts['system'] == 'Darwin'
+
+- name: Deploy external-sync launchd agent plist (macOS)
+  ansible.builtin.template:
+    src: launchd/com.external-sync.plist.j2
+    dest: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.external-sync.plist"
+    mode: "0644"
+  when: ansible_facts['system'] == 'Darwin'
+
+# Query actual launchd state rather than relying on a handler tied to the
+# plist's changed status — the agent must end up loaded on every run, not
+# only the run that happened to rewrite the plist file.
+- name: Check whether external-sync launchd agent is already loaded (macOS)
+  ansible.builtin.command: launchctl list com.external-sync
+  register: _external_sync_launchctl_check
+  changed_when: false
+  failed_when: false
+  when: ansible_facts['system'] == 'Darwin'
+
+- name: Load external-sync launchd agent (macOS)
+  ansible.builtin.command: >-
+    launchctl load -w
+    {{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/com.external-sync.plist
+  changed_when: true
+  when:
+    - ansible_facts['system'] == 'Darwin'
+    - _external_sync_launchctl_check.rc != 0

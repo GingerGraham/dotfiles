@@ -15,12 +15,6 @@ dotfiles_profile: workstation    # workstation | server | minimal
 machine_name: ""                 # Friendly name used in git config and prompt.
                                  # Defaults to system hostname if left empty.
 
-# ── Companion repos ───────────────────────────────────────────────────────────
-# SSH URLs for private companion repos. Leave empty to skip cloning.
-# Roles that depend on these will no-op cleanly when empty.
-nvim_config_repo_url: ""         # e.g. git@github.com:you/nvim-config.git
-ai_config_repo_url:   ""         # e.g. git@github.com:you/ai-config.git
-
 # ── Role feature flags ────────────────────────────────────────────────────────
 # Fine-grained control within a profile. Defaults are set in group_vars/all.yml
 # and reflect sensible behaviour for the chosen profile. Override here to opt
@@ -28,9 +22,8 @@ ai_config_repo_url:   ""         # e.g. git@github.com:you/ai-config.git
 #
 # common is always required and cannot be disabled.
 #
-dotfiles_nvim_enabled:     true  # Requires nvim_config_repo_url and workstation profile
-dotfiles_ai_tools_enabled: true  # Requires ai_config_repo_url and workstation profile
-dotfiles_sync_enabled:     true  # systemd user timer (Linux) or launchd agent (macOS)
+dotfiles_sync_enabled: true  # Gates roles/sync (dotfiles self-sync) and roles/sync-external.
+                             # systemd user timer (Linux) or launchd agent (macOS).
 
 # ── Extra roles ───────────────────────────────────────────────────────────────
 # Optional roles that are not part of any profile. Each entry must correspond
@@ -46,6 +39,50 @@ dotfiles_sync_enabled:     true  # systemd user timer (Linux) or launchd agent (
 #     - 1password
 #
 dotfiles_extra_roles: []
+
+# ── External add-on repos ───────────────────────────────────────────────────────
+# Repos synced/deployed by roles/sync-external. Not applicable to the
+# 'minimal' profile. install.sh collects these interactively; add more later
+# by editing this list directly (see docs/external-sync.md#adding-a-repo).
+#
+# Fields:
+#   name       Unique — used for the config/state directory, the SSH alias
+#              (private repos only), and as the sync-script argument.
+#              Lowercase letters, digits, and hyphens only.
+#   repo_url   HTTPS/SSH URL, any git host, for public repos. For private
+#              repos, it's rewritten to the repo's own SSH alias
+#              automatically at Ansible run time — you never need to
+#              hand-edit this to an alias form yourself.
+#   clone_dir    Where the repo is cloned. May use ~ — see
+#                docs/external-sync.md#choosing-a-clone-directory for which
+#                pattern (deployed-elsewhere vs. clone-only-fixed-location)
+#                fits a given repo.
+#   private      true | false — controls the URL rewrite and whether a
+#                deploy key is expected (see docs/external-sync.md for the
+#                deploy-key walkthrough).
+#   allow_hooks  true | false, default false — whether this repo's declared
+#                post_deploy hook (if its .dotfiles-sync.yml has one) is
+#                allowed to run on this machine. A hook is arbitrary code
+#                from that repo, run unattended on a timer — opt-in only.
+#                See docs/sync-manifest-spec.md#hook-contract.
+#
+# What each repo actually deploys (if anything), and whether it declares a
+# hook, is described by its own .dotfiles-sync.yml manifest at its repo
+# root — see docs/sync-manifest-spec.md. This file only says *which* repos
+# to sync and *whether hooks are permitted*, never what they deploy or do.
+#
+external_synced_repos:
+  - name: nvim-config
+    repo_url: "https://github.com/you/nvim-config.git"
+    clone_dir: "~/.config/nvim"
+    private: false
+    allow_hooks: false
+
+  - name: ai-config
+    repo_url: "https://github.com/you/ai-config.git"
+    clone_dir: "~/.local/share/ai-config"
+    private: true
+    allow_hooks: false
 
 # ── Git: global identity ──────────────────────────────────────────────────────
 # Used as the default when no project-specific profile matches the working directory.
