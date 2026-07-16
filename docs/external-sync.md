@@ -12,9 +12,11 @@ declares.
 
 - [How this differs from the dotfiles self-sync](#how-this-differs-from-the-dotfiles-self-sync)
 - [The `external_synced_repos` shape](#the-external_synced_repos-shape)
+- [Choosing a clone directory](#choosing-a-clone-directory)
 - [Adding a repo](#adding-a-repo)
   - [Public repo](#public-repo)
   - [Private repo](#private-repo)
+  - [Enabling hooks](#enabling-hooks)
 - [Per-repo `sync.conf`](#per-repo-syncconf)
   - [DEV_MODE](#dev_mode)
   - [Branch handling](#branch-handling)
@@ -44,6 +46,16 @@ instead of the shared flag — e.g. `ansible-playbook site.yml --skip-tags
 sync-external` (or `--skip-roles sync-external` on `install.sh`) leaves
 self-sync running. See [docs/sync.md](sync.md) for the self-sync mechanism.
 
+One more asymmetry worth knowing up front: self-sync has no deploy step, so
+a `git pull` is the entire sync cycle for the dotfiles repo itself.
+`sync-external` does have a deploy step, and that step is driven by
+Ansible-rendered files (`deploy.list`, `hooks.list`), not by re-parsing each
+repo's manifest on every pull — a manifest change needs an Ansible re-run to
+take effect, not just a pull. See
+[docs/sync-manifest-spec.md's "How to make your repo compatible"](sync-manifest-spec.md#how-to-make-your-repo-compatible)
+for exactly where that line falls, and `external-sync --status` for how to
+tell when a repo is waiting on that re-run.
+
 ## The `external_synced_repos` shape
 
 Registered in `ansible/host_vars/localhost.yml`:
@@ -64,18 +76,58 @@ external_synced_repos:
                                # an already-rewritten dotfiles-<name> one (the
                                # alias doesn't encode the real host, so
                                # install.sh can't derive HostName from it)
+    allow_hooks: false        # optional, default false — see "Enabling hooks" below
 ```
 
 | Field | Required | Purpose |
 | --- | --- | --- |
 | `name` | yes | Unique. Used for the config/state directory, the SSH alias (private repos), and as the `external-sync` script argument. Lowercase letters, digits, hyphens only. |
 | `repo_url` | yes | HTTPS, SSH, or alias URL — any git host (public), or same forms for private (rewritten to the alias form automatically by Ansible; the real host is extracted from whatever form you give and doesn't need to be GitHub). |
-| `clone_dir` | yes | Where the repo is cloned. May use `~`. |
+| `clone_dir` | yes | Where the repo is cloned. May use `~`. See [Choosing a clone directory](#choosing-a-clone-directory). |
 | `private` | yes | `true`/`false` — controls the URL rewrite and whether a deploy key is expected. |
+| `allow_hooks` | no | `true`/`false`, default `false` — whether this repo's declared post-deploy hook (if any) is allowed to run on this machine. See [Enabling hooks](#enabling-hooks) and [the spec's hook contract](sync-manifest-spec.md#hook-contract). |
 
 Cadence and deploy rules are **not** set here — cadence is fixed by the
-engine (hourly), and deploy rules come from the repo's own
+engine (hourly), and deploy rules (and any hook) come from the repo's own
 `.dotfiles-sync.yml` (see [Authoring a compatible repo](#authoring-a-compatible-repo)).
+
+## Choosing a clone directory
+
+`clone_dir` has two legitimate patterns, and picking the wrong one for a
+given repo is a common (and confusing) mistake — `install.sh` suggests
+`~/.local/share/<name>` by default, which is correct for one pattern and
+silently wrong for the other:
+
+- **Deployed elsewhere via a manifest.** The repo's content is copied or
+  symlinked out to its real destinations by `deploy:` entries in its
+  `.dotfiles-sync.yml` — the clone directory itself is just working storage,
+  nobody reads it directly. `~/.local/share/<name>` (the suggested default)
+  is fine here, and so is anywhere else — it doesn't matter, since nothing
+  reads the clone path itself.
+- **Clone-only, read directly by the tool.** The repo *is* the config a tool
+  reads from a fixed location — e.g. an editor that always reads
+  `~/.config/<tool>`, with no `deploy:` block (or none at all) in its
+  manifest. Here `clone_dir` **must be that fixed location** — accepting the
+  generic `~/.local/share/<name>` default would clone the repo somewhere the
+  tool never looks, syncing perfectly while deploying to nowhere. See
+  [Archetype 1: Clone-only](sync-manifest-spec.md#1-clone-only) in the spec.
+
+`install.sh`'s clone-directory prompt explains both patterns before asking,
+precisely so you pick correctly the first time — it never special-cases a
+repo by name to guess for you.
+
+**A note on tools that rewrite their own tracked state.** If `clone_dir`
+points at a location the tool itself writes back into — a lockfile, a cache
+index, anything the tool re-generates and the repo also tracks in git — that
+write dirties the working tree exactly the same way any other uncommitted
+change would. The next sync sees `Working tree has uncommitted changes —
+skipping pull` and stops updating that repo until you commit the file (or
+add it to `.gitignore` if it shouldn't be tracked at all). This is often the
+*correct* behaviour — the file probably should be committed so other
+machines pick up the same state — but it needs to be a deliberate choice on
+your part, not a mystery you discover from a silently stalled timer.
+`external-sync --status` surfaces this immediately (see [Status and
+troubleshooting](#status-and-troubleshooting)).
 
 ## Adding a repo
 
@@ -83,8 +135,12 @@ engine (hourly), and deploy rules come from the repo's own
 
 During `install.sh`'s interactive setup (`workstation` or `server`
 profile), answer "y" to "Add an external add-on repo?", give it a name and
-URL, accept or override the suggested clone directory, and answer "N" (or
-Enter) at "Is `<name>` private?". Nothing further is needed — the repo is
+URL, accept or override the suggested clone directory (see [Choosing a
+clone directory](#choosing-a-clone-directory) — the prompt explains both
+patterns before asking), and answer "N" (or Enter) at "Is `<name>`
+private?". You're then asked whether to allow post-deploy hooks for this
+repo — see [Enabling hooks](#enabling-hooks); answer "N" (the default)
+unless you specifically need one. Nothing further is needed — the repo is
 cloned over HTTPS on the next Ansible run.
 
 ### Private repo
@@ -110,6 +166,33 @@ Verify access once the key is added:
 ssh -T git@dotfiles-<name>
 ```
 
+### Enabling hooks
+
+If a repo's `.dotfiles-sync.yml` declares a `hooks.post_deploy` (see [the
+spec's hook contract](sync-manifest-spec.md#hook-contract)), it does **not**
+run anywhere by default. `install.sh` asks "Allow post-deploy hooks for
+`<name>`? [y/N]" for every registered repo, with a one-line reminder that a
+hook is arbitrary code from that repo, run unattended on a timer — answer
+"y" only for repos whose hook you specifically want.
+
+If you answer "N" (or the repo's manifest adds a hook later, after you
+registered it), Ansible still succeeds — it renders an empty `hooks.list`
+for that repo and prints a one-line reminder in the run's output naming the
+exact fix:
+
+```yaml
+external_synced_repos:
+  - name: nvim-config
+    repo_url: "https://github.com/you/nvim-config.git"
+    clone_dir: "~/.config/nvim"
+    private: false
+    allow_hooks: true    # set this, then re-run ansible-playbook site.yml --tags sync-external
+```
+
+There's no separate "add a hook" flow beyond this — the hook itself lives
+entirely in the add-on repo's own manifest; `host_vars` only ever grants or
+withholds permission to run whatever that repo currently declares.
+
 ### Adding a repo to an already-provisioned machine
 
 The interactive collection loop only runs the first time `install.sh`
@@ -129,6 +212,10 @@ add a repo later, append an entry to `external_synced_repos` directly in
   (`ssh-keygen -t ed25519 -f ~/.ssh/dotfiles-<name>`, then a
   `Host dotfiles-<name>` block in `~/.ssh/config.d/10-dotfiles.conf`
   following the format in [Private repo](#private-repo) above).
+- **Enabling hooks on an already-registered repo:** add `allow_hooks: true`
+  to that repo's existing entry by hand, then re-run
+  `ansible-playbook site.yml --tags sync-external` — see [Enabling
+  hooks](#enabling-hooks).
 
 ## Per-repo `sync.conf`
 
@@ -170,6 +257,14 @@ Sync a single repo:
 external-sync <name>
 ```
 
+Re-run a repo's post-deploy hook regardless of its `run_on` policy — the
+affordance for "I fixed the hook, run it again now" without waiting for the
+next `changed`/`always` firing:
+
+```bash
+external-sync <name> --force-hooks
+```
+
 Or bypass the engine entirely and just pull the clone directly — it's a
 normal git repo:
 
@@ -188,6 +283,20 @@ when several repos are registered. If you want changes sooner, it's just
 git — see [Manual sync](#manual-sync) above.
 
 ## Status and troubleshooting
+
+Start here — a per-repo status table, no git fetch/pull performed and no
+sync lock taken, so it's always safe to run even while a sync is in
+progress:
+
+```bash
+external-sync --status
+```
+
+Reports each repo's branch, clone location (flagged if missing or not a git
+repo), `DEV_MODE`, last sync time, deploy entry count, **manifest** state
+(`ok`, or `**drift**` — see below), and **hook** state (`none`, `ok`, or
+`failed (<rc>)`). Exits non-zero if anything needs attention, so it's usable
+as a health check.
 
 ```bash
 # Linux / WSL2
@@ -216,11 +325,25 @@ Common causes of a stalled repo:
   `~/.ssh/config.d/10-dotfiles.conf` doesn't match `sync.conf`'s
   `REPO_URL`.
 - **`Working tree has uncommitted changes — skipping pull`** — you have
-  local edits in the clone directory. Commit, stash, or discard them, or
-  set `DEV_MODE=true` to suppress the warning while you work.
+  local edits in the clone directory (including a tool rewriting its own
+  tracked state — see [Choosing a clone directory](#choosing-a-clone-directory)).
+  Commit, stash, or discard them, or set `DEV_MODE=true` to suppress the
+  warning while you work.
 - **`pull --ff-only failed`** — local and remote have diverged (e.g. a
   manual commit was made in the clone). Resolve manually in the clone
   directory.
+- **`external-sync --status` shows `Manifest: **drift**`** — the repo's
+  `.dotfiles-sync.yml` in the clone has changed since Ansible last rendered
+  `deploy.list`/`hooks.list` from it. Expected whenever you edit the
+  manifest upstream — a plain `git pull` is not enough to apply a manifest
+  change, only an Ansible re-run is (see
+  [docs/sync-manifest-spec.md](sync-manifest-spec.md#how-to-make-your-repo-compatible)).
+  Run `ansible-playbook site.yml --tags sync-external` to clear it.
+- **`external-sync --status` shows `Hook: failed (<rc>)`** — the repo's
+  post-deploy hook exited non-zero (`124` means it was killed for exceeding
+  its `timeout`). Check `logs/sync.log` for the hook's own output, fix the
+  underlying issue, then `external-sync <name> --force-hooks` to re-run it
+  without waiting for the next `changed`/`always` firing.
 - **Ansible fails on `Ensure systemd user instance is available (WSL
   workaround)` with `Failed to connect to bus`** — there is no systemd user
   session/D-Bus available (common in minimal containers or a fresh WSL

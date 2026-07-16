@@ -53,26 +53,36 @@ dotfiles_extra_roles: []
 #              repos, it's rewritten to the repo's own SSH alias
 #              automatically at Ansible run time — you never need to
 #              hand-edit this to an alias form yourself.
-#   clone_dir  Where the repo is cloned. May use ~.
-#   private    true | false — controls the URL rewrite and whether a deploy
-#              key is expected (see docs/external-sync.md for the deploy-key
-#              walkthrough).
+#   clone_dir    Where the repo is cloned. May use ~ — see
+#                docs/external-sync.md#choosing-a-clone-directory for which
+#                pattern (deployed-elsewhere vs. clone-only-fixed-location)
+#                fits a given repo.
+#   private      true | false — controls the URL rewrite and whether a
+#                deploy key is expected (see docs/external-sync.md for the
+#                deploy-key walkthrough).
+#   allow_hooks  true | false, default false — whether this repo's declared
+#                post_deploy hook (if its .dotfiles-sync.yml has one) is
+#                allowed to run on this machine. A hook is arbitrary code
+#                from that repo, run unattended on a timer — opt-in only.
+#                See docs/sync-manifest-spec.md#hook-contract.
 #
-# What each repo actually deploys (if anything) is described by its own
-# .dotfiles-sync.yml manifest at its repo root — see
-# docs/sync-manifest-spec.md. This file only says *which* repos to sync,
-# never *what* they contain.
+# What each repo actually deploys (if anything), and whether it declares a
+# hook, is described by its own .dotfiles-sync.yml manifest at its repo
+# root — see docs/sync-manifest-spec.md. This file only says *which* repos
+# to sync and *whether hooks are permitted*, never what they deploy or do.
 #
 external_synced_repos:
   - name: nvim-config
     repo_url: "https://github.com/you/nvim-config.git"
     clone_dir: "~/.config/nvim"
     private: false
+    allow_hooks: false
 
   - name: ai-config
     repo_url: "https://github.com/you/ai-config.git"
     clone_dir: "~/.local/share/ai-config"
     private: true
+    allow_hooks: false
 
 # ── Git: global identity ──────────────────────────────────────────────────────
 # Used as the default when no project-specific profile matches the working directory.

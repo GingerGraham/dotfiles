@@ -71,6 +71,7 @@ EXTERNAL_REPO_NAMES=()
 EXTERNAL_REPO_URLS=()
 EXTERNAL_REPO_CLONE_DIRS=()
 EXTERNAL_REPO_PRIVATE=()
+EXTERNAL_REPO_ALLOW_HOOKS=()
 
 # ── Colour output ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]] && command -v tput &>/dev/null; then
@@ -473,13 +474,16 @@ _read_yaml_scalar() {
 }
 
 _read_external_repos_from_host_vars() {
-    # Emits "<name>|<private>|<repo_url>" for each entry under
+    # Emits "<name>|<private>|<repo_url>|<allow_hooks>" for each entry under
     # external_synced_repos in an existing host_vars file, in the same shape
     # install.sh itself writes (see generate_host_vars' "Write file" section
     # below). Used so setup_ssh_keys() can still generate deploy keys (and
     # derive the correct git host — see _extract_git_host) for repos that
     # were added by hand-editing host_vars after the interactive loop already
     # ran once (see docs/external-sync.md#adding-a-repo-to-an-already-provisioned-machine).
+    # allow_hooks is round-tripped here purely for symmetry with the other
+    # fields — nothing in install.sh currently re-reads it back out, since
+    # the value only ever needs to reach Ansible via the file itself.
     local file="$1"
     awk '
         function clean(s) {
@@ -492,12 +496,13 @@ _read_external_repos_from_host_vars() {
         /^external_synced_repos:[[:space:]]*$/ { in_block = 1; next }
         in_block && /^[A-Za-z]/ { in_block = 0 }
         in_block && /^  - name:/ {
-            if (name != "") print name "|" priv "|" url
+            if (name != "") print name "|" priv "|" url "|" hooks
             line = $0
             sub(/^  - name: */, "", line)
             name = clean(line)
             priv = "false"
             url = ""
+            hooks = "false"
             next
         }
         in_block && /^    repo_url:/ {
@@ -510,7 +515,12 @@ _read_external_repos_from_host_vars() {
             sub(/^    private: */, "", line)
             priv = clean(line)
         }
-        END { if (name != "") print name "|" priv "|" url }
+        in_block && /^    allow_hooks:/ {
+            line = $0
+            sub(/^    allow_hooks: */, "", line)
+            hooks = clean(line)
+        }
+        END { if (name != "") print name "|" priv "|" url "|" hooks }
     ' "${file}"
 }
 
@@ -550,12 +560,13 @@ generate_host_vars() {
         PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
         MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
 
-        local repo_name repo_private repo_url
-        while IFS='|' read -r repo_name repo_private repo_url; do
+        local repo_name repo_private repo_url repo_allow_hooks
+        while IFS='|' read -r repo_name repo_private repo_url repo_allow_hooks; do
             [[ -z "${repo_name}" ]] && continue
             EXTERNAL_REPO_NAMES+=("${repo_name}")
             EXTERNAL_REPO_PRIVATE+=("${repo_private:-false}")
             EXTERNAL_REPO_URLS+=("${repo_url}")
+            EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks:-false}")
         done < <(_read_external_repos_from_host_vars "${host_vars_file}")
 
         return 0
@@ -677,6 +688,7 @@ generate_host_vars() {
 
             while [[ "${add_more_answer}" == "y" || "${add_more_answer}" == "Y" ]]; do
                 local repo_name="" repo_url="" repo_clone_dir="" repo_private_answer="" repo_private="false"
+                local repo_allow_hooks_answer="" repo_allow_hooks="false"
                 local dup_found="false" i
 
                 while [[ -z "${repo_name}" ]]; do
@@ -700,6 +712,16 @@ generate_host_vars() {
                         read -r -p "    Repo URL for ${repo_name}: " repo_url < /dev/tty || true
                     done
 
+                    # Two legitimate clone_dir patterns — see docs/external-sync.md
+                    # #choosing-a-clone-directory for the full explanation. Never
+                    # special-cased by repo name here: the engine is generic, so
+                    # the guidance is generic too and the operator decides.
+                    info "    A repo whose files are deployed elsewhere via its own"
+                    info "    .dotfiles-sync.yml manifest can use the default below —"
+                    info "    the clone directory itself is just working storage."
+                    info "    A repo whose tool reads its config from a fixed location"
+                    info "    (e.g. an editor reading ~/.config/<tool> directly, with no"
+                    info "    deploy: block) must be cloned to that exact location instead."
                     # shellcheck disable=SC2088 # intentional: written verbatim into
                     # host_vars as clone_dir, expanded later by the sync-external
                     # role's regex_replace('^~', ...) — not by this shell.
@@ -712,15 +734,24 @@ generate_host_vars() {
                         repo_private="true"
                     fi
 
+                    info "    A post-deploy hook, if this repo's manifest declares one, is"
+                    info "    arbitrary code from that repo, run unattended on a timer."
+                    read -r -p "    Allow post-deploy hooks for ${repo_name}? [y/N]: " repo_allow_hooks_answer < /dev/tty || true
+                    if [[ "${repo_allow_hooks_answer}" == "y" || "${repo_allow_hooks_answer}" == "Y" ]]; then
+                        repo_allow_hooks="true"
+                    fi
+
                     EXTERNAL_REPO_NAMES+=("${repo_name}")
                     EXTERNAL_REPO_URLS+=("${repo_url}")
                     EXTERNAL_REPO_CLONE_DIRS+=("${repo_clone_dir}")
                     EXTERNAL_REPO_PRIVATE+=("${repo_private}")
+                    EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks}")
 
                     external_repos_yaml+="  - name: \"${repo_name}\"\n"
                     external_repos_yaml+="    repo_url: \"${repo_url}\"\n"
                     external_repos_yaml+="    clone_dir: \"${repo_clone_dir}\"\n"
                     external_repos_yaml+="    private: ${repo_private}\n"
+                    external_repos_yaml+="    allow_hooks: ${repo_allow_hooks}\n"
 
                     info "  Registered ${repo_name} ($( [[ "${repo_private}" == "true" ]] && echo private || echo public ))"
                 fi

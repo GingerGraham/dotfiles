@@ -42,6 +42,20 @@
 # Section 1 — Per-repo clone/adopt, manifest read, config render, initial deploy
 # ============================================================================
 
+# Computed once for the whole play (not per repo, in repo.yml) since it only
+# depends on $HOME and the role's own defaults — see DF-4 in repo.yml's dest
+# validation for how these are used.
+- name: "Resolve dest denylist to absolute paths and a search pattern"
+  ansible.builtin.set_fact:
+    _dest_denylist_dirs_absolute: "{{ sync_external_dest_denylist_dirs | map('regex_replace', '^~', ansible_facts['env']['HOME']) | list }}"
+    _dest_denylist_files_absolute: "{{ sync_external_dest_denylist_files | map('regex_replace', '^~', ansible_facts['env']['HOME']) | list }}"
+    _dest_denylist_dirs_pattern: >-
+      {{
+        '^(' + (sync_external_dest_denylist_dirs
+          | map('regex_replace', '^~', ansible_facts['env']['HOME'])
+          | map('regex_escape') | list | join('|')) + ')'
+      }}
+
 - name: Process each registered external repo
   ansible.builtin.include_tasks: repo.yml
   loop: "{{ external_synced_repos }}"
