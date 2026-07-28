@@ -34,14 +34,18 @@ Then, per entry in `external_synced_repos` (see
 [docs/external-sync.md](../../../docs/external-sync.md) for the full field
 reference):
 
-1. Resolves `clone_dir` to an absolute path.
+1. Computes the clone path — always
+   `{{ external_sync_state_dir }}/{{ repo.name }}/repo`, never read from
+   `host_vars` (see [On-disk layout](#on-disk-layout)).
 2. Ensures the repo's config/state directories exist.
 3. **Normalises the repo URL** — public/private aware (see below).
 4. **Adopts or clones** the repo (see below).
 5. Reads `.dotfiles-sync.yml` from the clone, if present, and:
-   - validates every `deploy[].src` stays within `clone_dir`;
+   - validates every `deploy[].src` stays within the clone;
    - validates every `deploy[].dest`/`dest_macos` resolves under `$HOME` and
      isn't on the [dest denylist](#dest-validation);
+   - validates every `deploy[].mode` is `copy`, `link`, or `link_tree`, and
+     that `link_tree` entries have `src: '.'`;
    - validates `hooks.post_deploy.command[0]`, if the manifest declares a
      hook, the same way `src` is validated.
 6. Renders `sync.conf` (created once, never overwritten by Ansible).
@@ -120,20 +124,25 @@ string `absent` when there is none) so `scripts/external-sync.sh` can detect
 when the manifest in the clone has moved on from what was last rendered, and
 warn — in the repo's log and in `external-sync --status` — rather than
 silently doing nothing with an upstream manifest change. Only this role
-writes `manifest-hash`; the script only ever reads it.
+writes `manifest-hash`; the script only ever reads it. The literal `absent`
+value doubles as the no-manifest signal the script reads to decide whether
+to emit its persistent "no `.dotfiles-sync.yml`" warning — one state file,
+two things the script derives from it, kept in sync for free since both are
+read from the same Ansible-written value.
 
 ## Adopt vs clone
 
 `ansible.builtin.git` is called with `update: false`, which makes the
-following naturally idempotent:
+following naturally idempotent, against the computed clone path (see [On-disk
+layout](#on-disk-layout) — never a `host_vars` value):
 
-- `clone_dir` doesn't exist → cloned fresh.
-- `clone_dir` exists and is a valid git repo → **adopted in place**: no
+- Clone path doesn't exist → cloned fresh.
+- Clone path exists and is a valid git repo → **adopted in place**: no
   re-clone, no pull. Ongoing pulls are the `external-sync` timer's job, not
   Ansible's — this role only ever touches a repo's working tree on first
   contact.
-- `clone_dir` exists and is **not** a git repo (e.g. a config directory that
-  predates this system) → backed up to `<clone_dir>.bak-YYYY-MM-DD`, then
+- Clone path exists and is **not** a git repo (e.g. left over from an ad-hoc
+  clone predating this system) → backed up to `<path>.bak-YYYY-MM-DD`, then
   cloned fresh. Nothing is deleted.
 
 ## Variables
@@ -150,20 +159,24 @@ following naturally idempotent:
 | --- | --- | --- |
 | `name` | yes | Unique identifier — used for the config/state directory, the SSH alias (private repos), and as the sync-script argument. |
 | `repo_url` | yes | HTTPS URL (public) or HTTPS/SSH/alias URL (private — rewritten to the alias form automatically). |
-| `clone_dir` | yes | Where the repo is cloned. May use `~`. |
 | `private` | yes | `true`/`false` — controls the URL rewrite and whether a deploy key is expected. |
 | `allow_hooks` | no | `true`/`false`, default `false` — whether this repo's declared `hooks.post_deploy` (if any) is allowed to run. See [Hooks](#hooks). |
 
-Cadence (hourly) and deploy rules are **not** configured here — cadence is
-the engine's fixed decision, deploy rules come from the repo's own
-`.dotfiles-sync.yml`.
+There is no `clone_dir` field — the clone path is always engine-computed
+(see [On-disk layout](#on-disk-layout)). Cadence (hourly) and deploy rules
+are **not** configured here either — cadence is the engine's fixed
+decision, deploy rules come from the repo's own `.dotfiles-sync.yml`.
 
 ## On-disk layout
 
+Two **parallel** trees per repo — the clone is not a sibling of
+`deploy.list`, it lives under the data root:
+
 ```
 ~/.config/external-sync/<name>/sync.conf     # REPO_URL, CLONE_DIR, GIT_BRANCH, DEV_MODE
-~/.config/external-sync/<name>/deploy.list   # src|dest|mode|force|executable (empty = clone-only)
+~/.config/external-sync/<name>/deploy.list   # src|dest|mode|force (empty = clone-only)
 ~/.config/external-sync/<name>/hooks.list    # event|run_on|timeout|argv... (empty = no hooks / gated off)
+~/.local/share/external-sync/<name>/repo/    # THE CLONE — always here, computed, never in host_vars
 ~/.local/share/external-sync/<name>/last-sync
 ~/.local/share/external-sync/<name>/manifest-hash     # written by this role only — see Manifest drift detection
 ~/.local/share/external-sync/<name>/hook-ran          # run_on: initial sentinel — written by the script only
@@ -174,6 +187,12 @@ the engine's fixed decision, deploy rules come from the repo's own
 ~/.config/systemd/user/external-sync.timer   # Linux only
 ~/Library/LaunchAgents/com.external-sync.plist  # macOS only
 ```
+
+The clone lives at `.../repo/` (not directly at `.../<name>/`) so it never
+collides with the state files alongside it. A `copy`-mode deploy also drops
+a rewritten-every-deploy `.external-sync-info` marker into each of its own
+destination directories (outside this tree entirely, at wherever `dest`
+points) — see the spec's [deploy semantics](../../../docs/sync-manifest-spec.md#deploy-semantics).
 
 The running timer discovers repos from `~/.config/external-sync/*/` at
 runtime, not from `host_vars` — this decouples the timer from Ansible.

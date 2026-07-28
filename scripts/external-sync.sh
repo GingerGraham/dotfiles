@@ -21,12 +21,18 @@
 # Per repo, runtime config lives at:
 #   ~/.config/external-sync/<name>/sync.conf    REPO_URL, CLONE_DIR,
 #                                                GIT_BRANCH, DEV_MODE
-#   ~/.config/external-sync/<name>/deploy.list  src|dest|mode|force|executable
-#                                                one line per deploy entry;
+#   ~/.config/external-sync/<name>/deploy.list  src|dest|mode|force
+#                                                one line per deploy entry,
+#                                                paths pre-expanded absolute;
+#                                                mode: copy|link|link_tree;
 #                                                empty or absent = clone-only
 #   ~/.config/external-sync/<name>/hooks.list   event|run_on|timeout|argv...
 #                                                one line per hook; empty or
 #                                                absent = no hooks
+#
+# CLONE_DIR is engine-computed (${XDG_DATA_HOME}/external-sync/<name>/repo)
+# and written into sync.conf by Ansible — never a host_vars field. See
+# docs/sync-manifest-spec.md's "On-disk layout".
 #
 # sync.conf is written once by the sync-external Ansible role and never
 # overwritten — DEV_MODE and GIT_BRANCH are yours to edit at runtime. Set
@@ -131,6 +137,46 @@ get_local_commit() {
     git -C "$1" rev-parse --short HEAD 2>/dev/null || echo "unknown"
 }
 
+get_current_branch() {
+    git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+
+# Switches the clone onto ${branch} when it isn't already checked out there
+# (DF-7 — GIT_BRANCH previously did nothing). Only ever switches on a clean
+# working tree — a dirty tree is warned and left untouched, same "never
+# discard in-progress work" stance as the pull path below. Fetches first so
+# a local tracking branch can be created from origin/${branch} even when it
+# has never been checked out on this machine before. Returns 1 (and leaves
+# the clone on its current branch) when the switch itself fails — e.g.
+# ${branch} doesn't exist on the remote, most likely a sync.conf typo — so
+# the caller can skip the subsequent pull rather than merge the wrong ref.
+ensure_branch() {
+    local clone_dir="$1" branch="$2"
+
+    local current
+    current=$(get_current_branch "${clone_dir}")
+    [[ "${current}" == "${branch}" ]] && return 0
+
+    if ! is_working_tree_clean "${clone_dir}"; then
+        warn "Working tree has uncommitted changes — not switching from '${current}' to '${branch}' (GIT_BRANCH in sync.conf)"
+        return 1
+    fi
+
+    git -C "${clone_dir}" fetch origin "${branch}" >>"${LOG_FILE}" 2>&1 || true
+
+    log "Switching branch: ${current} -> ${branch}"
+    if git -C "${clone_dir}" switch "${branch}" >>"${LOG_FILE}" 2>&1; then
+        return 0
+    fi
+
+    if git -C "${clone_dir}" switch -c "${branch}" --track "origin/${branch}" >>"${LOG_FILE}" 2>&1; then
+        return 0
+    fi
+
+    warn "Could not switch from '${current}' to '${branch}' — '${branch}' does not appear to exist on the remote (check GIT_BRANCH in sync.conf for a typo)"
+    return 1
+}
+
 # ── Git sync ──────────────────────────────────────────────────────────────────
 # Fetch/pull failures are logged and treated as non-fatal — the next scheduled
 # run will retry. A dirty working tree is never clobbered.
@@ -154,6 +200,13 @@ do_repo_sync() {
 
     if ! is_git_repo "${clone_dir}"; then
         warn "${clone_dir} is not a git repository — skipping git sync"
+        return 1
+    fi
+
+    if ! ensure_branch "${clone_dir}" "${branch}"; then
+        # warn() already explained why (dirty tree, or branch missing on the
+        # remote) — do not fall through to a pull, which would merge the
+        # wrong ref onto whatever branch the clone is still on.
         return 1
     fi
 
@@ -220,10 +273,53 @@ check_manifest_drift() {
     fi
 }
 
+# ── No-manifest warning (D11) ────────────────────────────────────────────────
+# manifest-hash is written by Ansible on every run — the literal string
+# "absent" when the repo has no .dotfiles-sync.yml, a real git blob hash
+# otherwise (see repo.yml step 7c). Reused here rather than a second marker
+# file: it's already the single Ansible-owned record of "did the manifest
+# exist as of the last Ansible run", refreshed every run, so it self-heals
+# for free the moment a manifest is added and Ansible re-runs — no extra
+# state to keep in sync. Persistent (not once) by design: a clone-only
+# mirror with no manifest is a valid end state (D11), but it's easy to
+# forget a manifest was never added, so this nags every sync rather than
+# once.
+check_manifest_presence() {
+    local name="$1" state_dir="$2"
+
+    local recorded_hash=""
+    [[ -r "${state_dir}/manifest-hash" ]] && recorded_hash=$(cat "${state_dir}/manifest-hash" 2>/dev/null || echo "")
+
+    if [[ "${recorded_hash}" == "absent" ]]; then
+        warn "[${name}] no .dotfiles-sync.yml — clone-only mirror, deploying nothing"
+        warn "[${name}] add a manifest to the repo root to deploy files (see docs/sync-manifest-spec.md)"
+    fi
+}
+
+# ── .external-sync-info marker (§4.3) ────────────────────────────────────────
+# Dropped only into `copy` destinations — never link/link_tree, where writing
+# into the dest would mean writing into the clone itself (or a per-file
+# symlink target) and dirtying the working tree, tripping
+# is_working_tree_clean() and permanently blocking pulls (same footgun noted
+# on deploy_link_file()'s chmod refusal, Part 2 item 8). Rewritten on every
+# deploy — disposable, carries no state, safe to delete (next sync restores
+# it).
+
+write_copy_marker() {
+    local marker_dir="$1" name="$2" repo_url="$3"
+
+    mkdir -p "${marker_dir}"
+    cat > "${marker_dir}/.external-sync-info" << EOF
+# Managed by dotfiles external-sync — do not treat as source.
+# Content here is deployed (copy) from: ${name}  (${repo_url})
+# Local edits stay local and are NOT pushed. To change: edit the source repo and open a PR.
+EOF
+}
+
 # ── Deploy: copy ──────────────────────────────────────────────────────────────
 
 deploy_copy_file() {
-    local src="$1" dest="$2" force="$3" executable="$4"
+    local src="$1" dest="$2" force="$3"
 
     mkdir -p "$(dirname "${dest}")"
 
@@ -232,7 +328,6 @@ deploy_copy_file() {
     fi
 
     cp -f "${src}" "${dest}"
-    [[ "${executable}" == "true" ]] && chmod +x "${dest}"
     log "  deployed (copy): ${dest}"
     # See do_repo_sync()'s comment on dynamic scoping — _deploy_changes is
     # declared local in sync_one() and incremented here without re-declaring.
@@ -240,7 +335,7 @@ deploy_copy_file() {
 }
 
 deploy_copy() {
-    local src="$1" dest="$2" force="$3" executable="$4"
+    local src="$1" dest="$2" force="$3" name="$4" repo_url="$5"
     # Strip any trailing slash — deploy.list entries for a directory src
     # (e.g. from a manifest's "src: claude/") carry one, and a doubled
     # slash would otherwise break the prefix-strip below.
@@ -257,10 +352,12 @@ deploy_copy() {
         while IFS= read -r -d '' file; do
             rel="${file#"${src}"/}"
             target="${dest%/}/${rel}"
-            deploy_copy_file "${file}" "${target}" "${force}" "${executable}"
+            deploy_copy_file "${file}" "${target}" "${force}"
         done < <(find "${src}" -name .git -prune -o -type f -print0)
+        write_copy_marker "${dest%/}" "${name}" "${repo_url}"
     elif [[ -e "${src}" ]]; then
-        deploy_copy_file "${src}" "${dest}" "${force}" "${executable}"
+        deploy_copy_file "${src}" "${dest}" "${force}"
+        write_copy_marker "$(dirname "${dest}")" "${name}" "${repo_url}"
     else
         warn "deploy: source not found: ${src}"
     fi
@@ -272,7 +369,7 @@ deploy_copy() {
 # pre-existing non-symlink is only replaced when force is true.
 
 deploy_link_file() {
-    local src="$1" dest="$2" force="$3" executable="$4"
+    local src="$1" dest="$2" force="$3"
 
     mkdir -p "$(dirname "${dest}")"
 
@@ -299,18 +396,10 @@ deploy_link_file() {
         log "  deployed (link): ${dest} -> ${src}"
         _deploy_changes=$((_deploy_changes + 1))
     fi
-
-    # Never chmod the source: it lives inside the repo's git clone, and
-    # mutating it would dirty the working tree and trip is_working_tree_clean(),
-    # permanently blocking future pulls. The manifest should commit the
-    # executable bit upstream instead.
-    if [[ "${executable}" == "true" && ! -x "${src}" ]]; then
-        warn "  ${src} is marked executable in the manifest but is not +x in the repo — commit the executable bit upstream"
-    fi
 }
 
 deploy_link() {
-    local src="$1" dest="$2" force="$3" executable="$4"
+    local src="$1" dest="$2" force="$3"
     # See deploy_copy() — strip a trailing slash before using src as a
     # prefix to strip from each found file's path.
     src="${src%/}"
@@ -321,13 +410,56 @@ deploy_link() {
         while IFS= read -r -d '' file; do
             rel="${file#"${src}"/}"
             target="${dest%/}/${rel}"
-            deploy_link_file "${file}" "${target}" "${force}" "${executable}"
+            deploy_link_file "${file}" "${target}" "${force}"
         done < <(find "${src}" -name .git -prune -o -type f -print0)
     elif [[ -e "${src}" ]]; then
-        deploy_link_file "${src}" "${dest}" "${force}" "${executable}"
+        deploy_link_file "${src}" "${dest}" "${force}"
     else
         warn "deploy: source not found: ${src}"
     fi
+}
+
+# ── Deploy: link_tree ─────────────────────────────────────────────────────────
+# Single whole-directory symlink: dest -> src (the clone itself; manifest
+# validation in repo.yml/validate-sync-manifest.sh enforces src: '.'). No
+# find, no per-file work — .git lives inside the symlinked directory, which
+# is correct: `cd <dest> && git status` works because dest *is* a working
+# clone (§3.2). Never deletes a real (non-symlink) directory — that would be
+# a background timer destroying a possibly-uncommitted git clone based on
+# manifest content, exactly what D10 forbids. Warn and refuse instead; the
+# migration path is manual (docs/external-sync.md).
+
+deploy_link_tree() {
+    local src="$1" dest="$2" force="$3"
+    src="${src%/.}"
+    src="${src%/}"
+    dest="${dest%/}"
+
+    if [[ -L "${dest}" ]]; then
+        local current_target
+        current_target=$(readlink "${dest}")
+        if [[ "${current_target}" != "${src}" ]]; then
+            if [[ "${force}" == "true" ]]; then
+                rm -f "${dest}"
+                ln -s "${src}" "${dest}"
+                log "  relinked (link_tree): ${dest} -> ${src}"
+                _deploy_changes=$((_deploy_changes + 1))
+            else
+                warn "  ${dest} is a symlink to ${current_target}, not ${src} — leaving it (set force: true to repoint)"
+            fi
+        fi
+        return 0
+    fi
+
+    if [[ -e "${dest}" ]]; then
+        warn "  ${dest} is a real directory, not a symlink — link_tree refuses to replace it (see docs/external-sync.md's migration steps)"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${dest}")"
+    ln -s "${src}" "${dest}"
+    log "  deployed (link_tree): ${dest} -> ${src}"
+    _deploy_changes=$((_deploy_changes + 1))
 }
 
 # ── Deploy loop ───────────────────────────────────────────────────────────────
@@ -335,7 +467,7 @@ deploy_link() {
 # spaces — e.g. macOS's "Application Support" — is handled safely.
 
 deploy_repo() {
-    local name="$1" deploy_list="$2"
+    local name="$1" deploy_list="$2" repo_url="$3"
 
     if [[ ! -s "${deploy_list}" ]]; then
         log "[${name}] clone-only — no deploy entries"
@@ -344,12 +476,13 @@ deploy_repo() {
 
     log "[${name}] deploying from ${deploy_list}"
 
-    local src dest mode force executable
-    while IFS='|' read -r src dest mode force executable; do
+    local src dest mode force
+    while IFS='|' read -r src dest mode force; do
         [[ -z "${src}" ]] && continue
         case "${mode}" in
-            link) deploy_link "${src}" "${dest}" "${force}" "${executable}" ;;
-            *)    deploy_copy "${src}" "${dest}" "${force}" "${executable}" ;;
+            link)      deploy_link "${src}" "${dest}" "${force}" ;;
+            link_tree) deploy_link_tree "${src}" "${dest}" "${force}" ;;
+            *)         deploy_copy "${src}" "${dest}" "${force}" "${name}" "${repo_url}" ;;
         esac
     done < "${deploy_list}"
 }
@@ -587,11 +720,12 @@ sync_one() {
     trap 'rm -f "'"${lock_file}"'"' EXIT
 
     if do_repo_sync "${CLONE_DIR}" "${GIT_BRANCH}" "${state_dir}"; then
+        check_manifest_presence "${name}" "${state_dir}"
         check_manifest_drift "${name}" "${CLONE_DIR}" "${state_dir}"
-        deploy_repo "${name}" "${deploy_list}"
+        deploy_repo "${name}" "${deploy_list}" "${REPO_URL}"
         run_post_deploy_hooks "${name}" "${hooks_list}" "${CLONE_DIR}" "${GIT_BRANCH}" "${state_dir}" "${invocation_mode}" "${force_hooks}"
     else
-        log "[${name}] skipping deploy — clone not ready"
+        log "[${name}] skipping deploy — clone not ready or not on the expected branch (see warnings above)"
     fi
 
     log "[${name}] sync complete"
@@ -616,6 +750,46 @@ run_one() {
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] sync for '${name}' failed unexpectedly — see its log under ${STATE_ROOT}/${name}/logs/" >&2
         return 1
     fi
+}
+
+# ── Copy divergence (§Phase 2.3, feeds --status's Diverged column) ────────────
+# For each `copy` entry in deploy.list, compares the deployed dest against
+# its clone src and counts files that differ — the visibility half of D5's
+# "copy is a detached one-way publish; divergence must be visible, not
+# lost". Read-only (cmp -s), no git ops — safe for --status's no-lock
+# contract. A missing dest counts as diverged too (deployed content that's
+# since been deleted is exactly the kind of drift this column exists to
+# surface).
+
+count_copy_divergence() {
+    local deploy_list="$1"
+    local count=0
+
+    [[ -s "${deploy_list}" ]] || { echo 0; return 0; }
+
+    local src dest mode force
+    while IFS='|' read -r src dest mode force; do
+        [[ -z "${src}" ]] && continue
+        [[ "${mode}" == "copy" ]] || continue
+
+        local trimmed_src="${src%/}"
+        if [[ -d "${trimmed_src}" ]]; then
+            local file rel target
+            while IFS= read -r -d '' file; do
+                rel="${file#"${trimmed_src}"/}"
+                target="${dest%/}/${rel}"
+                if [[ ! -e "${target}" ]] || ! cmp -s "${file}" "${target}"; then
+                    count=$((count + 1))
+                fi
+            done < <(find "${trimmed_src}" -name .git -prune -o -type f -print0)
+        elif [[ -e "${trimmed_src}" ]]; then
+            if [[ ! -e "${dest}" ]] || ! cmp -s "${trimmed_src}" "${dest}"; then
+                count=$((count + 1))
+            fi
+        fi
+    done < "${deploy_list}"
+
+    echo "${count}"
 }
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -664,8 +838,16 @@ cmd_status() {
         local last_sync="never"
         [[ -f "${state_dir}/last-sync" ]] && last_sync=$(cat "${state_dir}/last-sync")
 
+        local recorded_hash=""
+        [[ -r "${state_dir}/manifest-hash" ]] && recorded_hash=$(cat "${state_dir}/manifest-hash" 2>/dev/null || echo "")
+        local no_manifest="false"
+        [[ "${recorded_hash}" == "absent" ]] && no_manifest="true"
+
         local deploy_summary="clone-only"
-        if [[ -s "${deploy_list}" ]]; then
+        if [[ "${no_manifest}" == "true" ]]; then
+            deploy_summary="**no manifest**"
+            any_issue="true"
+        elif [[ -s "${deploy_list}" ]]; then
             local n
             n=$(grep -c . "${deploy_list}" 2>/dev/null || echo 0)
             deploy_summary="${n} entry"
@@ -673,14 +855,20 @@ cmd_status() {
         fi
 
         local manifest_state="ok"
-        if [[ "${clone_dir}" != "unknown" && -e "${clone_dir}/.dotfiles-sync.yml" && -r "${state_dir}/manifest-hash" ]]; then
-            local recorded current
-            recorded=$(cat "${state_dir}/manifest-hash" 2>/dev/null || echo "")
+        if [[ "${no_manifest}" != "true" && "${clone_dir}" != "unknown" && -e "${clone_dir}/.dotfiles-sync.yml" && -n "${recorded_hash}" ]]; then
+            local current
             current=$(git -C "${clone_dir}" hash-object .dotfiles-sync.yml 2>/dev/null || echo "unknown")
-            if [[ -n "${recorded}" && "${current}" != "${recorded}" ]]; then
+            if [[ "${current}" != "${recorded_hash}" ]]; then
                 manifest_state="**drift**"
                 any_issue="true"
             fi
+        fi
+
+        local diverged=""
+        if [[ -s "${deploy_list}" ]] && grep -q '|copy|' "${deploy_list}" 2>/dev/null; then
+            local n_diverged
+            n_diverged=$(count_copy_divergence "${deploy_list}")
+            [[ "${n_diverged}" -gt 0 ]] && diverged="${n_diverged}" && any_issue="true"
         fi
 
         local hook_state="none"
@@ -705,6 +893,7 @@ cmd_status() {
         printf "    %-11s %s\n"  "Last sync:" "${last_sync}"
         printf "    %-11s %s\n"  "Deploy:"    "${deploy_summary}"
         printf "    %-11s %s\n"  "Manifest:"  "${manifest_state}"
+        printf "    %-11s %s\n"  "Diverged:"  "${diverged}"
         printf "    %-11s %s\n"  "Hook:"      "${hook_state}"
     done
 
@@ -716,8 +905,10 @@ cmd_status() {
     echo ""
 
     if [[ "${any_issue}" == "true" ]]; then
-        echo "  *** one or more repos need attention — see Manifest/Hook above ***"
+        echo "  *** one or more repos need attention — see Deploy/Manifest/Diverged/Hook above ***"
+        echo "  No manifest:    add .dotfiles-sync.yml to the repo, then ansible-playbook site.yml --tags sync-external"
         echo "  Manifest drift: ansible-playbook site.yml --tags sync-external"
+        echo "  Diverged files: local edits to a 'copy'-deployed file — promote via the source repo (PR), or accept the fork"
         echo "  Failed hook:    fix the hook, then external-sync <name> --force-hooks"
         echo ""
         return 1

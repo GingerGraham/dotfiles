@@ -4,6 +4,6 @@
 {% if current_os in platforms -%}
 {% set dest_raw = entry.dest_macos if (ansible_facts['system'] == 'Darwin' and entry.dest_macos is defined) else entry.dest -%}
 {% set dest_abs = dest_raw | regex_replace('^~', ansible_facts['env']['HOME']) -%}
-{{ _clone_dir_absolute }}/{{ entry.src }}|{{ dest_abs }}|{{ entry.mode | default('copy') }}|{{ entry.force | default(false) | string | lower }}|{{ entry.executable | default(false) | string | lower }}
+{{ _clone_dir_absolute }}/{{ entry.src }}|{{ dest_abs }}|{{ entry.mode | default('copy') }}|{{ entry.force | default(false) | string | lower }}
 {% endif -%}
 {% endfor -%}

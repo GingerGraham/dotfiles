@@ -11,8 +11,8 @@ declares.
 ## Table of Contents
 
 - [How this differs from the dotfiles self-sync](#how-this-differs-from-the-dotfiles-self-sync)
+- [On-disk layout](#on-disk-layout)
 - [The `external_synced_repos` shape](#the-external_synced_repos-shape)
-- [Choosing a clone directory](#choosing-a-clone-directory)
 - [Adding a repo](#adding-a-repo)
   - [Public repo](#public-repo)
   - [Private repo](#private-repo)
@@ -23,6 +23,8 @@ declares.
 - [Manual sync](#manual-sync)
 - [Cadence](#cadence)
 - [Status and troubleshooting](#status-and-troubleshooting)
+- [Renaming or removing a destination](#renaming-or-removing-a-destination)
+- [Migrating an existing clone to link_tree](#migrating-an-existing-clone-to-link_tree)
 - [Migrating from the old nvim/ai-tools sync](#migrating-from-the-old-nvimai-tools-sync)
 - [Authoring a compatible repo](#authoring-a-compatible-repo)
 
@@ -56,6 +58,37 @@ take effect, not just a pull. See
 for exactly where that line falls, and `external-sync --status` for how to
 tell when a repo is waiting on that re-run.
 
+## On-disk layout
+
+For a repo named `<name>`, two **parallel** trees — the clone is not a
+sibling of `deploy.list`, it lives under the data root:
+
+```
+${XDG_CONFIG_HOME}/external-sync/<name>/          # config root — human-facing, mostly force:false
+    ├── sync.conf                                 # runtime state: GIT_BRANCH, DEV_MODE (never clobbered)
+    ├── deploy.list                                # Ansible-rendered every run; the placement answer
+    └── hooks.list                                 # Ansible-rendered every run; empty unless hooks
+
+${XDG_DATA_HOME}/external-sync/<name>/            # data root — engine-owned
+    ├── repo/                                      # THE CLONE — always here, never a host_vars choice
+    ├── logs/sync.log
+    ├── last-sync
+    ├── manifest-hash                              # Ansible-written; drift detection
+    ├── hook-ran                                   # run_on: initial sentinel
+    └── last-hook-status
+```
+
+The clone location is **engine-computed** — always
+`${XDG_DATA_HOME}/external-sync/<name>/repo/`, never a per-repo choice in
+`host_vars`. `ls ~/.local/share/external-sync/` enumerates the whole managed
+fleet; nothing scatters elsewhere under `~/.local/share/`. Where a repo's
+*content* ends up (if anywhere) is a separate question, answered entirely by
+that repo's own `.dotfiles-sync.yml` — see
+[deploy.list becomes the universal answer to "where did this repo's content
+go?"](sync-manifest-spec.md#deploy-semantics): it lists every deployed
+file's real destination, pre-expanded to an absolute path, for every repo,
+uniformly.
+
 ## The `external_synced_repos` shape
 
 Registered in `ansible/host_vars/localhost.yml`:
@@ -64,12 +97,10 @@ Registered in `ansible/host_vars/localhost.yml`:
 external_synced_repos:
   - name: nvim-config
     repo_url: "https://github.com/you/nvim-config.git"
-    clone_dir: "~/.config/nvim"
     private: false            # public → HTTPS, no deploy key
 
   - name: ai-config
     repo_url: "https://github.com/you/ai-config.git"  # or git@github.com:you/ai-config.git
-    clone_dir: "~/.local/share/ai-config"
     private: true             # private → deploy key + dotfiles-<name> alias;
                                # Ansible rewrites repo_url to the alias form
                                # automatically — give the real URL here, not
@@ -83,51 +114,18 @@ external_synced_repos:
 | --- | --- | --- |
 | `name` | yes | Unique. Used for the config/state directory, the SSH alias (private repos), and as the `external-sync` script argument. Lowercase letters, digits, hyphens only. |
 | `repo_url` | yes | HTTPS, SSH, or alias URL — any git host (public), or same forms for private (rewritten to the alias form automatically by Ansible; the real host is extracted from whatever form you give and doesn't need to be GitHub). |
-| `clone_dir` | yes | Where the repo is cloned. May use `~`. See [Choosing a clone directory](#choosing-a-clone-directory). |
 | `private` | yes | `true`/`false` — controls the URL rewrite and whether a deploy key is expected. |
 | `allow_hooks` | no | `true`/`false`, default `false` — whether this repo's declared post-deploy hook (if any) is allowed to run on this machine. See [Enabling hooks](#enabling-hooks) and [the spec's hook contract](sync-manifest-spec.md#hook-contract). |
 
-Cadence and deploy rules are **not** set here — cadence is fixed by the
-engine (hourly), and deploy rules (and any hook) come from the repo's own
-`.dotfiles-sync.yml` (see [Authoring a compatible repo](#authoring-a-compatible-repo)).
-
-## Choosing a clone directory
-
-`clone_dir` has two legitimate patterns, and picking the wrong one for a
-given repo is a common (and confusing) mistake — `install.sh` suggests
-`~/.local/share/<name>` by default, which is correct for one pattern and
-silently wrong for the other:
-
-- **Deployed elsewhere via a manifest.** The repo's content is copied or
-  symlinked out to its real destinations by `deploy:` entries in its
-  `.dotfiles-sync.yml` — the clone directory itself is just working storage,
-  nobody reads it directly. `~/.local/share/<name>` (the suggested default)
-  is fine here, and so is anywhere else — it doesn't matter, since nothing
-  reads the clone path itself.
-- **Clone-only, read directly by the tool.** The repo *is* the config a tool
-  reads from a fixed location — e.g. an editor that always reads
-  `~/.config/<tool>`, with no `deploy:` block (or none at all) in its
-  manifest. Here `clone_dir` **must be that fixed location** — accepting the
-  generic `~/.local/share/<name>` default would clone the repo somewhere the
-  tool never looks, syncing perfectly while deploying to nowhere. See
-  [Archetype 1: Clone-only](sync-manifest-spec.md#1-clone-only) in the spec.
-
-`install.sh`'s clone-directory prompt explains both patterns before asking,
-precisely so you pick correctly the first time — it never special-cases a
-repo by name to guess for you.
-
-**A note on tools that rewrite their own tracked state.** If `clone_dir`
-points at a location the tool itself writes back into — a lockfile, a cache
-index, anything the tool re-generates and the repo also tracks in git — that
-write dirties the working tree exactly the same way any other uncommitted
-change would. The next sync sees `Working tree has uncommitted changes —
-skipping pull` and stops updating that repo until you commit the file (or
-add it to `.gitignore` if it shouldn't be tracked at all). This is often the
-*correct* behaviour — the file probably should be committed so other
-machines pick up the same state — but it needs to be a deliberate choice on
-your part, not a mystery you discover from a silently stalled timer.
-`external-sync --status` surfaces this immediately (see [Status and
-troubleshooting](#status-and-troubleshooting)).
+There is no `clone_dir` field — see [On-disk layout](#on-disk-layout) above.
+Cadence and deploy rules are **not** set here either — cadence is fixed by
+the engine (hourly), and deploy rules (and any hook) come from the repo's
+own `.dotfiles-sync.yml` (see [Authoring a compatible
+repo](#authoring-a-compatible-repo)). A repo registered here with no
+manifest at all is still valid — it's cloned and kept pulled, deploying
+nothing (see [the spec's clone-only archetype](sync-manifest-spec.md#1-clone-only))
+— but the engine warns about it on every sync, and `external-sync --status`
+shows `**no manifest**`, until a manifest is added.
 
 ## Adding a repo
 
@@ -135,13 +133,12 @@ troubleshooting](#status-and-troubleshooting)).
 
 During `install.sh`'s interactive setup (`workstation` or `server`
 profile), answer "y" to "Add an external add-on repo?", give it a name and
-URL, accept or override the suggested clone directory (see [Choosing a
-clone directory](#choosing-a-clone-directory) — the prompt explains both
-patterns before asking), and answer "N" (or Enter) at "Is `<name>`
-private?". You're then asked whether to allow post-deploy hooks for this
-repo — see [Enabling hooks](#enabling-hooks); answer "N" (the default)
-unless you specifically need one. Nothing further is needed — the repo is
-cloned over HTTPS on the next Ansible run.
+URL, and answer "N" (or Enter) at "Is `<name>` private?". You're then asked
+whether to allow post-deploy hooks for this repo — see [Enabling
+hooks](#enabling-hooks); answer "N" (the default) unless you specifically
+need one. Nothing further is needed — the repo is cloned over HTTPS to
+`~/.local/share/external-sync/<name>/repo` on the next Ansible run, and
+deployed according to its own manifest (if it has one).
 
 ### Private repo
 
@@ -184,7 +181,6 @@ exact fix:
 external_synced_repos:
   - name: nvim-config
     repo_url: "https://github.com/you/nvim-config.git"
-    clone_dir: "~/.config/nvim"
     private: false
     allow_hooks: true    # set this, then re-run ansible-playbook site.yml --tags sync-external
 ```
@@ -226,9 +222,14 @@ sync automatically if `repo_url` changes in `host_vars`.
 ```bash
 REPO_URL="git@dotfiles-ai-config:you/ai-config.git"
 GIT_BRANCH="main"
-CLONE_DIR="/home/you/.local/share/ai-config"
+CLONE_DIR="/home/you/.local/share/external-sync/ai-config/repo"
 DEV_MODE="false"
 ```
+
+`CLONE_DIR` is always the engine-computed path — see [On-disk
+layout](#on-disk-layout). It's written here for the sync script to read, not
+because it's configurable; editing it by hand just makes the script look in
+the wrong place.
 
 ### DEV_MODE
 
@@ -240,8 +241,19 @@ Useful while actively developing the add-on repo itself on this machine.
 
 `GIT_BRANCH` defaults to the repo's `.dotfiles-sync.yml` `branch` field (or
 `main` if it has none) at the time `sync.conf` is first created. Edit it
-directly to track a different branch temporarily — Ansible will not
-overwrite your change on subsequent runs.
+directly to track a different branch temporarily — the engine switches the
+clone onto it (fetching first, refusing on a dirty working tree or a branch
+absent on the remote — see the troubleshooting entries below), and Ansible
+will not overwrite your change on subsequent runs.
+
+**Bootstrap constraint.** The manifest itself is only ever read from the
+clone of the remote's *default* branch — the first clone deliberately omits
+a pinned `version:`, so it follows the remote's actual default, and that's
+the checkout Ansible parses `.dotfiles-sync.yml` from. A `branch:` value (or
+a hand-edited `GIT_BRANCH`) redirects tracking *after* that initial clone;
+it cannot make Ansible discover a manifest that exists only on a feature
+branch. If a repo's manifest doesn't seem to be taking effect, check it's
+committed on the remote's default branch.
 
 ## Manual sync
 
@@ -269,8 +281,11 @@ Or bypass the engine entirely and just pull the clone directly — it's a
 normal git repo:
 
 ```bash
-cd ~/.local/share/ai-config && git pull
+cd ~/.local/share/external-sync/ai-config/repo && git pull
 ```
+
+(For a `link_tree` repo, its deployed `dest` — e.g. `~/.config/nvim` — *is*
+the clone, so `cd`-ing there works identically and is usually more natural.)
 
 ## Cadence
 
@@ -293,10 +308,14 @@ external-sync --status
 ```
 
 Reports each repo's branch, clone location (flagged if missing or not a git
-repo), `DEV_MODE`, last sync time, deploy entry count, **manifest** state
-(`ok`, or `**drift**` — see below), and **hook** state (`none`, `ok`, or
-`failed (<rc>)`). Exits non-zero if anything needs attention, so it's usable
-as a health check.
+repo), `DEV_MODE`, last sync time, **deploy** state (an entry count,
+`clone-only`, or `**no manifest**` — see below), **manifest** state (`ok`,
+or `**drift**` — see below), **diverged** count (`copy`-deployed files that
+differ from their source — blank when none or the repo has no `copy`
+entries), and **hook** state (`none`, `ok`, or `failed (<rc>)`). Exits
+non-zero if anything needs attention, so it's usable as a health check. It
+does **not** detect orphaned old destinations — see [Renaming or removing a
+destination](#renaming-or-removing-a-destination).
 
 ```bash
 # Linux / WSL2
@@ -325,13 +344,25 @@ Common causes of a stalled repo:
   `~/.ssh/config.d/10-dotfiles.conf` doesn't match `sync.conf`'s
   `REPO_URL`.
 - **`Working tree has uncommitted changes — skipping pull`** — you have
-  local edits in the clone directory (including a tool rewriting its own
-  tracked state — see [Choosing a clone directory](#choosing-a-clone-directory)).
-  Commit, stash, or discard them, or set `DEV_MODE=true` to suppress the
-  warning while you work.
+  local edits in the clone (including a tool rewriting its own tracked
+  state — e.g. a lockfile the repo tracks and also regenerates). Commit,
+  stash, or discard them, or set `DEV_MODE=true` to suppress the warning
+  while you work. The same message, worded around a branch switch instead
+  of a pull, appears when `GIT_BRANCH` was changed but the tree is dirty —
+  the engine will not discard in-progress work to switch branches either.
 - **`pull --ff-only failed`** — local and remote have diverged (e.g. a
   manual commit was made in the clone). Resolve manually in the clone
-  directory.
+  directory (`~/.local/share/external-sync/<name>/repo`, or the `link_tree`
+  `dest` if this repo uses that mode).
+- **`Could not switch from '<a>' to '<b>' — '<b>' does not appear to exist
+  on the remote`** — `GIT_BRANCH` in `sync.conf` (or `branch:` in the
+  manifest) names a branch that isn't on the remote, most likely a typo.
+  The clone is left exactly where it was; fix the branch name and re-run.
+- **`external-sync --status` shows `Deploy: **no manifest**`** — this repo
+  has no `.dotfiles-sync.yml` at all. Valid if deliberate (see [the spec's
+  clone-only archetype](sync-manifest-spec.md#1-clone-only)); otherwise add
+  one and run `ansible-playbook site.yml --tags sync-external` — it
+  self-heals on the next Ansible run, no other action needed.
 - **`external-sync --status` shows `Manifest: **drift**`** — the repo's
   `.dotfiles-sync.yml` in the clone has changed since Ansible last rendered
   `deploy.list`/`hooks.list` from it. Expected whenever you edit the
@@ -339,6 +370,13 @@ Common causes of a stalled repo:
   change, only an Ansible re-run is (see
   [docs/sync-manifest-spec.md](sync-manifest-spec.md#how-to-make-your-repo-compatible)).
   Run `ansible-playbook site.yml --tags sync-external` to clear it.
+- **`external-sync --status` shows a `Diverged` count** — one or more
+  `copy`-deployed files no longer match their source in the clone, because
+  they (or the source) were edited locally after deployment. This is
+  expected under `copy`'s detached, one-way-publish model (see [the spec's
+  deploy semantics](sync-manifest-spec.md#deploy-semantics)) — not an
+  error, just visibility. Promote a local edit by making the same change in
+  the source repo and opening a PR, or accept the fork.
 - **`external-sync --status` shows `Hook: failed (<rc>)`** — the repo's
   post-deploy hook exited non-zero (`124` means it was killed for exceeding
   its `timeout`). Check `logs/sync.log` for the hook's own output, fix the
@@ -354,6 +392,52 @@ Common causes of a stalled repo:
   the timer (`dotfiles_sync_enabled: false`) and invoke `external-sync`
   manually/via an external scheduler instead.
 
+## Renaming or removing a destination
+
+The engine heals forward, never backward. Adding a manifest, or a `deploy`
+entry, deploys it. **Changing** a `dest` (renaming it upstream, or removing
+the entry) deploys the new location but does **not** remove the old one —
+there is no record of the previous placement to diff against, and by
+deliberate design a background timer executing repo-authored instructions
+is never given the power to delete files based on those instructions
+changing. The old location is left as an orphan for you to remove by hand.
+`external-sync --status` will not flag it; it reports only state it can
+verify locally.
+
+This is the same shape as two other manual-cleanup cases in this doc: the
+`link_tree` migration below (an old real clone directory left over once
+you've verified the new symlinked one), and any leftover clone directory
+from a repo's clone location changing (e.g. after adopting the
+`external-sync` engine, an old ad-hoc clone at a different path). In every
+case: the engine adds and repoints, you remove, once you've verified the
+new state is correct.
+
+## Migrating an existing clone to link_tree
+
+If a repo already has a real (non-symlink) directory at the location its
+manifest now declares as a `mode: link_tree` destination — most likely
+because you cloned it there by hand before registering it, or before its
+manifest existed — the engine will **refuse** to replace it (see [the
+spec's `link_tree` archetype](sync-manifest-spec.md#4-symlink-the-whole-repo-link_tree)).
+This is deliberate: a background process must never delete a git clone.
+Convert it by hand, once, per machine:
+
+1. Confirm the existing clone is clean: `cd <dest> && git status` — commit
+   or stash anything outstanding (a lockfile especially — see [Branch
+   handling](#branch-handling) for why a dirty tree matters here). Note the
+   branch and remote so you can verify afterwards.
+2. Remove the old directory: `rm -rf <dest>` — safe once `git status` is
+   clean, since nothing unique is lost; it's a clone of a pushed repo.
+3. Run `ansible-playbook site.yml --tags sync-external`. The role clones to
+   `~/.local/share/external-sync/<name>/repo` and `link_tree` symlinks
+   `<dest>` to it.
+4. Verify: `readlink <dest>` points into `~/.local/share/external-sync/`,
+   and the consuming tool starts clean.
+5. If an *older* clone-only attempt left a leftover directory elsewhere
+   (e.g. under the old ad-hoc clone-dir pattern), remove that too once
+   you've verified the new symlink is correct — see [Renaming or removing a
+   destination](#renaming-or-removing-a-destination) above.
+
 ## Migrating from the old nvim/ai-tools sync
 
 If this machine previously ran the retired `nvim` / `ai-tools` Ansible
@@ -366,8 +450,8 @@ scripts/migrate-legacy-sync.sh
 This disables and removes the legacy `nvim-config-sync` / `ai-config-sync`
 timers (or launchd agents), their sync scripts, and their runtime state.
 It does **not** touch `~/.config/nvim` or `~/.local/share/ai-config` — those
-clones are left exactly as they are so `sync-external` can adopt them in
-place without re-cloning.
+clones are left exactly as they are; the legacy teardown has no opinion
+about them.
 
 Then register the two repos as external add-on repos — either re-run
 `./install.sh` (it will prompt for them, same as [Adding a repo](#adding-a-repo)
@@ -378,13 +462,32 @@ above) or hand-edit `external_synced_repos` in
 ansible-playbook site.yml --tags sync-external
 ```
 
-A subsequent run adopts both clone directories in place with no re-clone
-and no data loss.
+**The clone location has changed since this workflow was first written.**
+`sync-external` always clones to `~/.local/share/external-sync/<name>/repo`
+now (see [On-disk layout](#on-disk-layout)) — it does not adopt an old
+`~/.config/nvim` or `~/.local/share/ai-config` clone in place. What happens
+next depends on the repo's own manifest:
+
+- **A repo whose manifest uses `mode: link_tree`** (nvim-config's shape —
+  its `dest` *is* the clone) needs the manual conversion in [Migrating an
+  existing clone to link_tree](#migrating-an-existing-clone-to-link_tree)
+  above: the old real directory at `~/.config/nvim` must be removed by hand
+  once verified clean, then the Ansible run creates the new clone and
+  symlinks `~/.config/nvim` to it.
+- **A repo whose manifest uses `copy`/`link` entries** (ai-config's shape —
+  content is published *out* to `~/.claude/` etc.) just clones fresh to the
+  new location and deploys as normal; the old `~/.local/share/ai-config`
+  clone becomes an orphan. Verify it's clean (nothing uncommitted you still
+  need), then remove it — see [Renaming or removing a
+  destination](#renaming-or-removing-a-destination) above.
 
 ## Authoring a compatible repo
 
 What an add-on repo deploys (if anything) is entirely up to its own
 `.dotfiles-sync.yml` manifest — see
 [docs/sync-manifest-spec.md](sync-manifest-spec.md) for the full field
-reference, the three deploy archetypes (clone-only, copy never-overwrite,
-symlink auto-updating), and a copy-paste starting template.
+reference, the five deploy archetypes (clone-only, copy never-overwrite,
+symlink auto-updating, symlink the whole repo, clone-only with a hook), and
+a copy-paste starting template. Run
+[`scripts/validate-sync-manifest.sh`](sync-manifest-spec.md#validating-your-manifest)
+against a manifest before pushing it.

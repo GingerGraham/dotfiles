@@ -41,7 +41,8 @@ against your manifest before committing it.
   - [1. Clone-only](#1-clone-only)
   - [2. Copy, never-overwrite](#2-copy-never-overwrite)
   - [3. Symlink, auto-updating](#3-symlink-auto-updating)
-  - [4. Clone-only with a post-deploy hook](#4-clone-only-with-a-post-deploy-hook)
+  - [4. Symlink the whole repo (link_tree)](#4-symlink-the-whole-repo-link_tree)
+  - [5. Clone-only with a post-deploy hook](#5-clone-only-with-a-post-deploy-hook)
 - [Deploy semantics](#deploy-semantics)
   - [dest validation](#dest-validation)
 - [Hook contract](#hook-contract)
@@ -79,6 +80,16 @@ parses YAML** — by the time your manifest reaches the sync script it has
 already been flattened. This has one consequence worth understanding up
 front — see [How to make your repo compatible](#how-to-make-your-repo-compatible).
 
+**The manifest is the single placement contract.** A repo's destinations —
+where its files end up on disk — live only in its `.dotfiles-sync.yml`,
+never in the machine's `host_vars`. `host_vars` only ever says "sync this
+repo" and "trust its hooks." The clone location itself is not something you
+choose either: the engine always clones to
+`${XDG_DATA_HOME}/external-sync/<name>/repo/` — a fact worth knowing if
+you're debugging, but not something this file (or you) configures. See
+[docs/external-sync.md's "On-disk layout"](external-sync.md#on-disk-layout)
+for the full picture of what lives where.
+
 ## Schema version 1
 
 ```yaml
@@ -89,9 +100,8 @@ branch: main            # optional; default tracking branch. host_vars/sync.conf
 deploy:                 # optional. Omit entirely for clone-only repos.
   - src: claude/                 # required; path within the repo (file or dir), relative to repo root
     dest: ~/.claude/             # required; destination on Linux/WSL (and macOS unless dest_macos given)
-    mode: copy                   # optional; copy (default) | link
-    force: false                 # optional; copy mode only; overwrite existing? default false
-    executable: false            # optional; chmod +x deployed files. default false
+    mode: copy                   # optional; copy (default) | link | link_tree
+    force: false                 # optional; overwrite/repoint an existing destination? default false
     dest_macos: "~/Library/..."  # optional; per-OS destination override for Darwin
     platforms: [linux, macos]    # optional; restrict deployment. default: all
 
@@ -107,30 +117,41 @@ hooks:                  # optional. Omit entirely for a repo with no hooks — s
 | Field | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `version` | yes | — | Manifest schema version. Only `1` exists today. |
-| `branch` | no | `main` | Branch the engine tracks for this repo. A `GIT_BRANCH` already set at runtime in the repo's `sync.conf` (e.g. via manual edit) takes precedence over this value on subsequent runs — see [Deploy semantics](#deploy-semantics). |
-| `deploy` | no | omitted = clone-only | List of deploy entries. Omit the key entirely for a clone-only repo. |
+| `branch` | no | `main` | Tracking branch. **Only takes effect if committed on the remote's default branch** — see the [bootstrap constraint](#deploy-semantics) below. A `GIT_BRANCH` already set at runtime in the repo's `sync.conf` (e.g. via manual edit) takes precedence over this value on subsequent runs. |
+| `deploy` | no | omitted = clone-only | List of deploy entries. Omit the key entirely for a clone-only repo — see [D11](#1-clone-only). |
 | `deploy[].src` | yes (per entry) | — | Path to a file or directory, relative to the repo root. No leading `/`, no `..` segments — see [Deploy semantics](#deploy-semantics). |
-| `deploy[].dest` | yes (per entry) | — | Destination path. May use `~`; the engine expands it to an absolute path before writing `deploy.list`. Used on Linux/WSL and on macOS unless `dest_macos` is also given. Must resolve under `$HOME` — see [dest validation](#dest-validation). |
-| `deploy[].mode` | no | `copy` | `copy` or `link`. See [Deploy semantics](#deploy-semantics). |
-| `deploy[].force` | no | `false` | `copy` mode only. Whether to overwrite an existing destination file. |
-| `deploy[].executable` | no | `false` | `chmod +x` each deployed file. |
+| `deploy[].dest` | yes (per entry) | — | Destination path. Leading `~` is the **only** expansion performed — `${XDG_*}` and other variables are taken literally, not expanded. Used on Linux/WSL and on macOS unless `dest_macos` is also given. Must resolve under `$HOME` — see [dest validation](#dest-validation). |
+| `deploy[].mode` | no | `copy` | `copy` \| `link` \| `link_tree`. See [Deploy semantics](#deploy-semantics). |
+| `deploy[].force` | no | `false` | `copy`: overwrite an existing file. `link`/`link_tree`: repoint an existing symlink pointing elsewhere. **Never** deletes a non-symlink destination, regardless of mode. |
 | `deploy[].dest_macos` | no | — | Destination override used instead of `dest` when the engine is running on Darwin. Same validation rules as `dest`. |
 | `deploy[].platforms` | no | all | List restricting which OSes this entry deploys on. Values: `linux`, `macos`. |
 | `hooks` | no | absent | Omit entirely for a repo with no hooks. See [Hook contract](#hook-contract). |
 | `hooks.post_deploy` | no | — | The only event in schema v1. Reserved as `hooks.<event>` so a future event can be added without a schema bump. |
+
+Unknown top-level keys, and unknown keys under `deploy[]` and `hooks.<event>`,
+are ignored, not fatal — forward compatibility for a repo synced by an older
+dotfiles checkout, and for committing a `hooks:` block before the machine's
+dotfiles branch has the code to act on it (it simply stays inert until then;
+see [How to make your repo compatible](#how-to-make-your-repo-compatible)).
 
 ## Archetypes
 
 ### 1. Clone-only
 
 No `.dotfiles-sync.yml` at all, or one with no `deploy:` block. The engine
-clones and keeps the repo pulled; the consuming tool reads the clone
-directory directly. This is the right shape whenever your tool reads a fixed
-config location — e.g. an editor that always reads `~/.config/<tool>` —
-there is nothing to "deploy" elsewhere. See
-[docs/external-sync.md's "Choosing a clone directory"](external-sync.md#choosing-a-clone-directory)
-for how the *operator* registers a repo this way; nothing in this file
-changes based on that choice.
+clones to `${XDG_DATA_HOME}/external-sync/<name>/repo/` and keeps it pulled,
+but deploys nothing. This is a valid, deliberate end state — a repo you just
+want mirrored locally, with nothing to place anywhere else.
+
+The engine will not let this be *accidentally* silent, though: with no
+manifest at all, it warns on every sync ("no `.dotfiles-sync.yml` — clone-only
+mirror") and `external-sync --status` shows `**no manifest**` for that repo,
+so a repo you meant to configure but forgot to finish doesn't quietly sit
+there deploying nothing forever. Add a manifest and re-run Ansible and the
+warning clears on its own — see [docs/external-sync.md](external-sync.md#renaming-or-removing-a-destination)
+for the full self-heal behaviour. A manifest that exists but simply omits
+`deploy:` (the example below) is silent — that's the "yes, deliberately
+clone-only" spelling.
 
 ```yaml
 # .dotfiles-sync.yml — schema version 1
@@ -138,7 +159,11 @@ version: 1
 branch: main
 ```
 
-Or omit the file entirely — a repo with no manifest is treated identically.
+If your tool reads its config from a fixed location that isn't the clone
+itself (e.g. an editor expecting `~/.config/<tool>`), don't reach for
+clone-only — see [archetype 4](#4-symlink-the-whole-repo-link_tree) instead.
+There is no per-machine "clone directory" choice to make here; the clone
+location is always engine-computed.
 
 ### 2. Copy, never-overwrite
 
@@ -171,7 +196,8 @@ deploy:
 `mode: link`. The engine creates a symlink from `dest` to the file inside
 the clone directory, so every `git pull` is reflected immediately with no
 overwrite question to answer. Good fit for scripts deployed to
-`~/.local/bin`.
+`~/.local/bin` — commit the executable bit in the repo itself (`git update-index
+--chmod=+x`); the engine does not chmod deployed files.
 
 ```yaml
 # .dotfiles-sync.yml — schema version 1
@@ -182,10 +208,38 @@ deploy:
   - src: bin/my-tool.sh
     dest: ~/.local/bin/my-tool
     mode: link
-    executable: true
 ```
 
-### 4. Clone-only with a post-deploy hook
+### 4. Symlink the whole repo (link_tree)
+
+`mode: link_tree`, `src: .` — the only src value it accepts. The engine
+creates **one** symlink: `dest` → the clone itself. There is no per-file
+work, and `dest` *becomes* the clone — `cd <dest> && git status` works, and
+you develop directly in place, exactly as if you'd cloned it there by hand.
+This is the shape for a tool that reads its config from a fixed location
+(an editor expecting `~/.config/<tool>`, for example) and that you also want
+to edit in place.
+
+```yaml
+# .dotfiles-sync.yml — schema version 1
+version: 1
+branch: main
+
+deploy:
+  - src: .
+    dest: ~/.config/nvim
+    mode: link_tree
+```
+
+`link_tree` **never deletes a real (non-symlink) directory** already at
+`dest` — it warns and refuses instead, so a background timer can never
+delete a working git clone based on manifest content. Converting an
+existing real directory at `dest` to a `link_tree` symlink is therefore a
+one-time **manual** migration — see
+[docs/external-sync.md](external-sync.md#renaming-or-removing-a-destination)
+for the steps.
+
+### 5. Clone-only with a post-deploy hook
 
 Clone-only, plus a `hooks.post_deploy` that runs some setup step the
 declarative `deploy:` block can't express — installing plugins, running a
@@ -213,33 +267,60 @@ can't be expressed as "copy/link this path to that path."
 
 ## Deploy semantics
 
+The three modes differ along one axis: **who owns the destination.**
+
+| Mode | `src` shape | What it does | `force` semantics | Ownership |
+| --- | --- | --- | --- | --- |
+| `copy` | file or dir | Copies the file, or every file within a dir tree (`.git/` excluded). | `true`: overwrite existing files. `false` (default): skip existing files, leaving them untouched. | **Detached.** A one-way, point-in-time publish. Once deployed, an edit to the deployed file survives and silently stops tracking the repo — see the note below. |
+| `link` | file or dir | Symlinks the file, or each file within a dir tree individually (`.git/` excluded), into `dest`. | `true`: repoint an existing symlink to the correct target. `false` (default): leave an existing symlink alone. **Never** deletes a non-symlink — warns instead. | **Contribution.** The repo adds files into a `dest` it does not exclusively own (e.g. `~/.local/bin/`). |
+| `link_tree` | must be `.` | Creates **one** symlink: `dest` → the clone. No per-file work. | `true`: replace an existing *symlink* pointing elsewhere. `false` (default): leave it. **Never** deletes a real directory — warns and refuses (see [archetype 4](#4-symlink-the-whole-repo-link_tree)). | **Exclusive.** `dest` *is* the clone. Nothing else may write there. |
+
+Other rules that apply across all three modes:
+
 - **Path resolution.** `src` is resolved relative to the repo's clone
-  directory. `dest` (and `dest_macos`) may use `~`; the engine expands it to
-  an absolute path when it writes `deploy.list` — the sync script never
-  performs tilde expansion at runtime.
-- **`copy` + `force: false`** (default): if the destination already exists,
-  skip it — leave whatever is there untouched. If it doesn't exist, copy it.
-- **`copy` + `force: true`**: always overwrite the destination with the
-  repo's version.
-- **`link`**: create a symlink at `dest` pointing at the file in the clone
-  directory. `force` governs what happens when `dest` already exists and is
-  *not* already the correct symlink — `force: true` replaces it, `force:
-  false` leaves it alone.
+  directory. `dest` (and `dest_macos`) may use a leading `~`, expanded to an
+  absolute path when the engine writes `deploy.list` — this is the **only**
+  expansion performed; `${XDG_*}` and other variables in `dest` are taken
+  literally. The sync script never performs any expansion at runtime.
+- **`copy` is a detached, one-way publish, by design (not a default to work
+  around).** An edit to a deployed `copy` file stays local and stops
+  tracking the repo silently — that's intentional: develop locally, then
+  promote your change by editing the source repo and opening a PR. Every
+  `copy` destination directory gets an engine-authored `.external-sync-info`
+  marker explaining this (rewritten on every deploy, safe to delete — the
+  next sync restores it), and `external-sync --status` reports a `Diverged`
+  count so a local fork is visible, never silently lost.
 - **Directories.** A directory `src` deploys recursively, preserving the
-  relative structure under `dest`. The repo's own `.git/` directory is
-  always excluded from a directory deploy, even for `src: .` (the whole
-  repo) — you never need to account for it yourself.
+  relative structure under `dest` (`copy`/`link`) or as a single symlinked
+  unit (`link_tree`). The repo's own `.git/` directory is always excluded
+  from a `copy`/`link` directory deploy, even for `src: .` — you never need
+  to account for it yourself. `link_tree` has no such exclusion to make:
+  `.git` lives inside the symlinked directory, which is correct, since
+  `dest` is meant to be a working clone you develop in.
+- **The engine never deletes anything it doesn't already own the shape
+  of.** A `dest` that's a real directory where `link_tree` expects a
+  symlink, or a plain file where `link` expects a symlink, is a warning and
+  a skip — never an automatic removal. See ["What the engine guarantees /
+  does not"](#what-the-engine-guarantees--does-not) for the broader
+  principle this is one expression of.
 - **Per-OS destination.** On Darwin, the engine uses `dest_macos` if the
   entry defines one, otherwise it falls back to `dest`. On Linux/WSL,
   `dest_macos` is ignored.
 - **Per-OS filtering.** `platforms`, if given, restricts whether the entry
   deploys at all on the current OS. An entry with `platforms: [macos]` is
   skipped entirely (not just re-pointed) when running on Linux.
-- **Branch precedence.** `branch` in the manifest sets the branch the engine
-  clones on first contact. Once `sync.conf` exists for the repo, its
-  `GIT_BRANCH` value is authoritative — this is the same field a user edits
-  by hand to track a feature branch temporarily, and Ansible will not stomp
-  on that choice on subsequent runs.
+- **Branch precedence and the bootstrap constraint.** `branch` in the
+  manifest sets the branch the engine tracks. Once `sync.conf` exists for
+  the repo, its `GIT_BRANCH` value is authoritative — the same field a user
+  edits by hand to track a feature branch temporarily, and Ansible will not
+  stomp on that choice on subsequent runs. **Important:** the manifest is
+  only ever read from the clone of the remote's *default* branch — the
+  initial clone deliberately doesn't pin a `version:`, so it follows
+  whatever branch the remote's own HEAD points at, and that's the checkout
+  Ansible reads `.dotfiles-sync.yml` from. This means `branch:` can
+  redirect tracking *after* the initial clone, but a manifest committed only
+  on a feature branch is invisible — it cannot bootstrap discovery of
+  itself. Commit `.dotfiles-sync.yml` to your default branch.
 
 ### `dest` validation
 
@@ -274,7 +355,7 @@ or deploy somewhere unexpected.
 ## Hook contract
 
 Hooks are an **escape hatch**, not a replacement for the declarative
-`deploy:` block — see [Archetype 4](#4-clone-only-with-a-post-deploy-hook).
+`deploy:` block — see [Archetype 5](#5-clone-only-with-a-post-deploy-hook).
 Most repos never need one. Reach for `deploy:` first.
 
 ### Hook manifest schema
@@ -356,7 +437,7 @@ is guaranteed to be present (see [Hook obligations](#hook-obligations)):
 | Variable | Value |
 | --- | --- |
 | `EXTERNAL_SYNC_NAME` | The repo's registered name, e.g. `nvim-config`. |
-| `EXTERNAL_SYNC_CLONE_DIR` | Absolute path to the clone (same as the invocation `cwd`). |
+| `EXTERNAL_SYNC_CLONE_DIR` | Absolute path to the clone (same as the invocation `cwd`) — always `${XDG_DATA_HOME}/external-sync/<name>/repo`, the engine-computed clone path. For a `link_tree` repo this same directory is *also* reachable via the symlinked `dest`, but a hook should use this variable, which always points at the real clone regardless of mode. |
 | `EXTERNAL_SYNC_BRANCH` | The resolved `GIT_BRANCH` this sync used. |
 | `EXTERNAL_SYNC_REASON` | `initial` \| `updated` \| `manual` \| `forced` — see below. |
 | `EXTERNAL_SYNC_OS` | `linux` \| `macos`. |
@@ -534,15 +615,31 @@ exit 0
 
 ## What the engine guarantees / does not
 
-- The engine **will not delete** files it did not create.
-- The engine **never removes** a destination file when the corresponding
-  source disappears from the repo on a later commit. Deploys are
-  add-only/update-only — if you remove a file from your repo, its previously
-  deployed copy is left in place until a human removes it.
-- Deploying is always safe to re-run: copy respects `force`, link
-  recreates/repoints idempotently, and a clone-only repo does nothing beyond
-  pulling. A hook is expected to be equally safe to re-run — see [Hook
-  obligations](#hook-obligations).
+- **The engine heals forward, never backward.** Adding a manifest, or a new
+  `deploy` entry, deploys it on the next sync/Ansible cycle (see [How to
+  make your repo compatible](#how-to-make-your-repo-compatible) for exactly
+  which). **Renaming or removing** a `dest` — in the manifest, on a later
+  commit — deploys the new location (if any) but does **not** remove the
+  old one. There is no record of the previous placement to diff against,
+  and by deliberate design a background timer executing repo-authored
+  instructions is never given the power to delete files based on those
+  instructions changing. This is a security posture, not an unfinished
+  feature — see [docs/external-sync.md](external-sync.md#renaming-or-removing-a-destination)
+  for the operator-facing cleanup steps. Do not expect this to be "fixed"
+  into an auto-prune later; it's a design constraint, not a bug.
+- The engine **will not delete** files, or real directories, it did not
+  create — see the mode table above for what each mode does when it finds
+  something at `dest` it didn't expect.
+- Deploying is always safe to re-run: `copy` respects `force`, `link`/
+  `link_tree` recreate/repoint idempotently, and a clone-only repo does
+  nothing beyond pulling. A hook is expected to be equally safe to re-run —
+  see [Hook obligations](#hook-obligations).
+- A repo with **no manifest at all** is not silently ignored: the engine
+  warns on every sync and `external-sync --status` shows `**no manifest**`
+  until one is added — see [archetype 1](#1-clone-only).
+- `external-sync --status` reports only state it can verify cheaply and
+  locally. It does **not** detect orphaned old destinations (the point
+  above) — that is a documented manual cleanup, not a tracked diff.
 
 ## How to make your repo compatible
 
@@ -589,5 +686,6 @@ the script's own `--help` for the full check list.
 ## See also
 
 - [docs/external-sync.md](external-sync.md) — the operator guide: adding a
-  repo, choosing a clone directory, the `allow_hooks` gate, sync cadence,
-  DEV_MODE, `external-sync --status`, troubleshooting.
+  repo, the on-disk layout, the `allow_hooks` gate, sync cadence, DEV_MODE,
+  `external-sync --status`, migrating an existing clone to `link_tree`,
+  troubleshooting.

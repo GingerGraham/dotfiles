@@ -51,7 +51,8 @@ Checks (fail the manifest):
   - src is a safe relative path (no leading /, no .. segment)
   - dest (and dest_macos) starts with ~/, contains no .. segment, and does
     not target the dest denylist (see the spec's "dest validation")
-  - mode, when given, is copy or link
+  - mode, when given, is copy, link, or link_tree
+  - mode: link_tree requires src: '.' (it symlinks the whole repo)
   - platforms, when given, only contains linux/macos
   - hooks.post_deploy.command, when hooks.post_deploy is declared, is a
     non-empty list (not a string) whose [0] is a safe relative path that
@@ -207,8 +208,12 @@ if [[ "${_deploy_count}" -gt 0 ]]; then
             err "${_label}: dest_macos '${_dest_macos}' must start with ~/, contain no '..' segments, and must not target the dest denylist (docs/sync-manifest-spec.md §dest validation)."
         fi
 
-        if [[ -n "${_mode}" && "${_mode}" != "null" && "${_mode}" != "copy" && "${_mode}" != "link" ]]; then
-            err "${_label}: mode must be 'copy' or 'link' — found '${_mode}'."
+        if [[ -n "${_mode}" && "${_mode}" != "null" && "${_mode}" != "copy" && "${_mode}" != "link" && "${_mode}" != "link_tree" ]]; then
+            err "${_label}: mode must be 'copy', 'link', or 'link_tree' — found '${_mode}'."
+        fi
+
+        if [[ "${_mode}" == "link_tree" && "${_src}" != "." ]]; then
+            err "${_label}: mode: link_tree requires src: '.' — link_tree symlinks the whole repo as a single unit, it cannot target a subpath (docs/sync-manifest-spec.md §3.2)."
         fi
 
         _platforms_count=$(yq eval ".deploy[${_i}].platforms // [] | length" "${MANIFEST}")

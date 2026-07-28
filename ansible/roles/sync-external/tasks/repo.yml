@@ -2,24 +2,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Processes a single entry from external_synced_repos. Included via a loop
 # from tasks/main.yml with loop_var: repo.
-# Expects: repo.name, repo.repo_url, repo.clone_dir, repo.private,
+# Expects: repo.name, repo.repo_url, repo.private,
 #          repo.allow_hooks (optional, default false — see Step 7b)
 #
-# The src/dest/command[0] validation rules enforced below (Steps 5a-5c) are
-# also implemented independently in scripts/validate-sync-manifest.sh (a
-# developer-time check add-on repo authors run by hand — see that script's
-# own header) and documented in docs/sync-manifest-spec.md, which is the
-# single authoritative source if the three ever disagree. Each of the three
-# implementations names the other two; a discrepancy is a bug against
-# whichever one doesn't match the spec.
+# The src/dest/mode/command[0] validation rules enforced below (Steps
+# 5a-5c) are also implemented independently in
+# scripts/validate-sync-manifest.sh (a developer-time check add-on repo
+# authors run by hand — see that script's own header) and documented in
+# docs/sync-manifest-spec.md, which is the single authoritative source if
+# the three ever disagree. Each of the three implementations names the
+# other two; a discrepancy is a bug against whichever one doesn't match
+# the spec.
 
-# ── Step 1: Resolve clone_dir to an absolute path ─────────────────────────────
-# Generated config/deploy.list/hooks.list content must use fully-expanded
-# absolute paths — the sync script never performs tilde expansion at runtime.
+# ── Step 1: Compute the clone path ─────────────────────────────────────────────
+# The clone location is engine-computed, not read from host_vars (D3 — see
+# docs/sync-manifest-spec.md's "On-disk layout"). Destinations are a
+# property of the repo (declared in its manifest), never of the machine, so
+# there is no per-machine clone_dir to resolve. Generated
+# config/deploy.list/hooks.list content must use fully-expanded absolute
+# paths — the sync script never performs tilde expansion at runtime.
 
-- name: "Resolve clone_dir to an absolute path: {{ repo.name }}"
+- name: "Compute clone path: {{ repo.name }}"
   ansible.builtin.set_fact:
-    _clone_dir_absolute: "{{ repo.clone_dir | regex_replace('^~', ansible_facts['env']['HOME']) }}"
+    _clone_dir_absolute: "{{ external_sync_state_dir }}/{{ repo.name }}/repo"
 
 # ── Step 2: Ensure per-repo config/state directories exist ────────────────────
 
@@ -214,6 +219,40 @@
   loop_control:
     label: "{{ item.dest_macos | default('n/a') }}"
   when: item.dest_macos is defined
+
+# ── Step 5b2: Validate deploy[].mode and the link_tree src constraint (DF-4) ──
+# link_tree creates a single symlink for the whole repo (dest *is* the
+# clone) — it only makes sense when src is the repo root. Any other src
+# under link_tree is a manifest authoring error, not a runtime edge case,
+# so it's rejected here rather than silently doing something surprising.
+
+- name: "Validate manifest deploy entries declare a supported mode: {{ repo.name }}"
+  ansible.builtin.assert:
+    that:
+      - (item.mode | default('copy')) in ['copy', 'link', 'link_tree']
+    fail_msg: >-
+      Rejecting {{ repo.name }}'s .dotfiles-sync.yml: deploy[].mode
+      '{{ item.mode | default('copy') }}' must be one of copy, link,
+      link_tree (see docs/sync-manifest-spec.md §3.2, "The three modes").
+    quiet: true
+  loop: "{{ _manifest.deploy | default([]) }}"
+  loop_control:
+    label: "{{ item.src | default('(missing src)') }}"
+
+- name: "Validate link_tree entries target the whole repo: {{ repo.name }}"
+  ansible.builtin.assert:
+    that:
+      - item.src == '.'
+    fail_msg: >-
+      Rejecting {{ repo.name }}'s .dotfiles-sync.yml: deploy[].mode
+      link_tree requires src: '.' (got '{{ item.src | default('(missing)') }}')
+      — link_tree symlinks the whole repo as a single unit, it cannot
+      target a subpath (see docs/sync-manifest-spec.md §3.2).
+    quiet: true
+  loop: "{{ _manifest.deploy | default([]) }}"
+  loop_control:
+    label: "{{ item.src | default('(missing src)') }}"
+  when: (item.mode | default('copy')) == 'link_tree'
 
 # ── Step 5c: Validate hooks.post_deploy.command[0] ─────────────────────────────
 # Same rules and same reasoning as Step 5a's src validation — command[0] is a

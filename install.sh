@@ -69,7 +69,6 @@ GIT_DEFAULT_SIGNING_KEY=""
 # no associative arrays.
 EXTERNAL_REPO_NAMES=()
 EXTERNAL_REPO_URLS=()
-EXTERNAL_REPO_CLONE_DIRS=()
 EXTERNAL_REPO_PRIVATE=()
 EXTERNAL_REPO_ALLOW_HOOKS=()
 
@@ -687,7 +686,7 @@ generate_host_vars() {
             read -r -p "  Add an external add-on repo? [y/N]: " add_more_answer < /dev/tty || true
 
             while [[ "${add_more_answer}" == "y" || "${add_more_answer}" == "Y" ]]; do
-                local repo_name="" repo_url="" repo_clone_dir="" repo_private_answer="" repo_private="false"
+                local repo_name="" repo_url="" repo_private_answer="" repo_private="false"
                 local repo_allow_hooks_answer="" repo_allow_hooks="false"
                 local dup_found="false" i
 
@@ -712,23 +711,6 @@ generate_host_vars() {
                         read -r -p "    Repo URL for ${repo_name}: " repo_url < /dev/tty || true
                     done
 
-                    # Two legitimate clone_dir patterns — see docs/external-sync.md
-                    # #choosing-a-clone-directory for the full explanation. Never
-                    # special-cased by repo name here: the engine is generic, so
-                    # the guidance is generic too and the operator decides.
-                    info "    A repo whose files are deployed elsewhere via its own"
-                    info "    .dotfiles-sync.yml manifest can use the default below —"
-                    info "    the clone directory itself is just working storage."
-                    info "    A repo whose tool reads its config from a fixed location"
-                    info "    (e.g. an editor reading ~/.config/<tool> directly, with no"
-                    info "    deploy: block) must be cloned to that exact location instead."
-                    # shellcheck disable=SC2088 # intentional: written verbatim into
-                    # host_vars as clone_dir, expanded later by the sync-external
-                    # role's regex_replace('^~', ...) — not by this shell.
-                    local default_clone_dir="~/.local/share/${repo_name}"
-                    read -r -p "    Clone directory for ${repo_name} [${default_clone_dir}]: " repo_clone_dir < /dev/tty || true
-                    repo_clone_dir="${repo_clone_dir:-${default_clone_dir}}"
-
                     read -r -p "    Is ${repo_name} private? [y/N]: " repo_private_answer < /dev/tty || true
                     if [[ "${repo_private_answer}" == "y" || "${repo_private_answer}" == "Y" ]]; then
                         repo_private="true"
@@ -743,13 +725,11 @@ generate_host_vars() {
 
                     EXTERNAL_REPO_NAMES+=("${repo_name}")
                     EXTERNAL_REPO_URLS+=("${repo_url}")
-                    EXTERNAL_REPO_CLONE_DIRS+=("${repo_clone_dir}")
                     EXTERNAL_REPO_PRIVATE+=("${repo_private}")
                     EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks}")
 
                     external_repos_yaml+="  - name: \"${repo_name}\"\n"
                     external_repos_yaml+="    repo_url: \"${repo_url}\"\n"
-                    external_repos_yaml+="    clone_dir: \"${repo_clone_dir}\"\n"
                     external_repos_yaml+="    private: ${repo_private}\n"
                     external_repos_yaml+="    allow_hooks: ${repo_allow_hooks}\n"
 
