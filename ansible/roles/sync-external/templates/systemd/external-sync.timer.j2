@@ -1,0 +1,20 @@
+[Unit]
+Description=External Add-on Repo GitOps Sync Timer
+Requires=external-sync.service
+
+[Timer]
+# Fire shortly after login so the first shell of a new session gets fresh
+# add-on repo config
+OnBootSec=3min
+# Hourly — a longer interval than the dotfiles repo's own 30-minute
+# self-sync (roles/sync), since add-on repos are lower-priority background
+# config rather than the machine's core setup.
+OnUnitActiveSec=1h
+# Catch up if the machine was off during a scheduled run
+Persistent=true
+# Randomise start within a 2-minute window — avoids hammering multiple
+# origins at exactly the top of the hour on many machines
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

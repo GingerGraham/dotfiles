@@ -39,6 +39,13 @@
       tags:
         - vim
 
+    - name: Import sync-external role
+      ansible.builtin.import_role:
+        name: sync-external
+      when: dotfiles_sync_enabled | bool
+      tags:
+        - sync-external
+
     - name: Import sync role
       ansible.builtin.import_role:
         name: sync

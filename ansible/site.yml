@@ -4,10 +4,10 @@
   gather_facts: false
   tasks:
     # Profile behaviour in this playbook:
-    #   workstation — all roles run (nvim, ai-tools, sync gated by when: conditions below)
+    #   workstation — all roles run (sync-external, sync gated by when: conditions below)
     #   server      — use server.yml instead; this playbook is not profile-aware beyond
-    #                 the workstation gate on nvim/ai-tools
-    #   minimal     — common, shell, git, ssh only; tmux, vim, nvim, ai-tools, sync skipped
+    #                 the workstation gate on tmux/vim
+    #   minimal     — common, shell, git, ssh only; tmux, vim, sync-external, sync skipped
     - name: Import common role
       ansible.builtin.import_role:
         name: common
@@ -46,23 +46,14 @@
       tags:
         - vim
 
-    - name: Import nvim role for workstation profile
+    - name: Import sync-external role for workstation and server profiles
       ansible.builtin.import_role:
-        name: nvim
+        name: sync-external
       when:
-        - dotfiles_profile == 'workstation'
-        - dotfiles_nvim_enabled | bool
+        - dotfiles_profile in ['workstation', 'server']
+        - dotfiles_sync_enabled | bool
       tags:
-        - nvim
-
-    - name: Import ai-tools role for workstation profile
-      ansible.builtin.import_role:
-        name: ai-tools
-      when:
-        - dotfiles_profile == 'workstation'
-        - dotfiles_ai_tools_enabled | bool
-      tags:
-        - ai-tools
+        - sync-external
 
     - name: Import sync role for workstation and server profiles
       ansible.builtin.import_role:

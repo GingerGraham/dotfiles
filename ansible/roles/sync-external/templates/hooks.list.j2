@@ -1,0 +1,6 @@
+{% if _hook_declared and _hooks_allowed -%}
+{% set _hook = _manifest.hooks.post_deploy -%}
+{% set _run_on = _hook.run_on | default('changed') -%}
+{% set _timeout = _hook.timeout | default(300) -%}
+post_deploy|{{ _run_on }}|{{ _timeout }}|{{ _clone_dir_absolute }}/{{ _hook.command[0] }}{% for _arg in _hook.command[1:] %}|{{ _arg }}{% endfor %}
+{% endif -%}

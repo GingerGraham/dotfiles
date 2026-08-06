@@ -1,0 +1,16 @@
+[Unit]
+Description=External Add-on Repo GitOps Sync
+Documentation=file://{{ dotfiles_dir }}/docs/external-sync.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/external-sync
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=300
+SuccessExitStatus=0
+
+[Install]
+WantedBy=default.target

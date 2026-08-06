@@ -1,7 +1,7 @@
 # dotfiles
 
 An Ansible-native, XDG-compliant dotfiles system for Fedora/RHEL, Ubuntu/Debian, macOS, and WSL2.
-Manages shell configuration, git identity, SSH key structure, Neovim config, and AI tooling — and keeps itself up to date via a background sync timer.
+Manages shell configuration, git identity, and SSH key structure — and keeps itself, plus any number of registered external add-on repos (editor config, AI tooling, or anything else you point it at), up to date via background sync timers. See [External sync](docs/external-sync.md) for the add-on repo engine.
 
 > **Forking this repo?** The bootstrap URL below points to `GingerGraham/dotfiles`. Update it to your own fork's raw URL before sharing or using your fork's one-liner.
 
@@ -24,7 +24,7 @@ Manages shell configuration, git identity, SSH key structure, Neovim config, and
 bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh)
 ```
 
-The bootstrap script clones the repo and hands off to `install.sh`. On first run you will be prompted for a profile, machine name, git identity, and optional companion repo URLs.
+The bootstrap script clones the repo and hands off to `install.sh`. On first run you will be prompted for a profile, machine name, git identity, and any external add-on repos you want synced (e.g. editor config, AI tooling).
 
 See the [docs/](docs/) directory for full documentation.
 
@@ -34,11 +34,12 @@ See the [docs/](docs/) directory for full documentation.
 | --- | --- |
 | [docs/installation.md](docs/installation.md) | Bootstrap, `install.sh` reference, all CLI options |
 | [docs/profiles.md](docs/profiles.md) | Workstation, server, and minimal profiles |
-| [docs/optional-components.md](docs/optional-components.md) | nvim and ai-tools roles — what they do and how to enable them |
 | [docs/shell-config.md](docs/shell-config.md) | Shell loading architecture, tiers, local overrides |
 | [docs/tool-management.md](docs/tool-management.md) | `update-tools`, installers, and the managed tools registry |
 | [docs/installers.md](docs/installers.md) | Per-tool installer reference (`install-*` functions) |
 | [docs/sync.md](docs/sync.md) | Background sync, DEV_MODE, branch switching |
+| [docs/external-sync.md](docs/external-sync.md) | Generic external add-on repo sync engine — adding repos, cadence, troubleshooting |
+| [docs/sync-manifest-spec.md](docs/sync-manifest-spec.md) | `.dotfiles-sync.yml` manifest contract for add-on repo authors |
 | [docs/gpg.md](docs/gpg.md) | GPG key management, password manager backup, git provider signing setup |
 
 ## Supported platforms
