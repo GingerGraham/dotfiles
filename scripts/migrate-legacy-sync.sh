@@ -7,7 +7,11 @@
 #
 # Removes the legacy timers/agents, their sync scripts, and their runtime
 # state — but never the config clones themselves (~/.config/nvim and
-# ~/.local/share/ai-config), which sync-external adopts in place.
+# ~/.local/share/ai-config). sync-external does NOT adopt those in place:
+# it clones each repo fresh to ~/.local/share/external-sync/<name>/repo, and
+# tearing the old clones down is a manual, verified step described in
+# docs/external-sync.md (§"Migrating from the old nvim/ai-tools sync") —
+# not something a teardown script should do for you.
 #
 # Idempotent and safe to re-run: every removal step checks the target exists
 # first, and unit disable/unload calls ignore errors so an already-torn-down
@@ -54,8 +58,9 @@ Usage: $(basename "$0") [OPTIONS]
   -h, --help    Show this help.
 
 Removes legacy timers/agents, sync scripts, and runtime state. Never removes
-~/.config/nvim or ~/.local/share/ai-config — sync-external adopts those
-clones in place. Safe to re-run.
+~/.config/nvim or ~/.local/share/ai-config — sync-external clones fresh to
+~/.local/share/external-sync/<name>/repo instead; removing the old clones is
+a manual, verified step (see docs/external-sync.md). Safe to re-run.
 EOF
 }
 

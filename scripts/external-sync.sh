@@ -19,8 +19,7 @@
 #   external-sync --help                 Usage.
 #
 # Per repo, runtime config lives at:
-#   ~/.config/external-sync/<name>/sync.conf    REPO_URL, CLONE_DIR,
-#                                                GIT_BRANCH, DEV_MODE
+#   ~/.config/external-sync/<name>/sync.conf    REPO_URL, GIT_BRANCH, DEV_MODE
 #   ~/.config/external-sync/<name>/deploy.list  src|dest|mode|force
 #                                                one line per deploy entry,
 #                                                paths pre-expanded absolute;
@@ -30,9 +29,12 @@
 #                                                one line per hook; empty or
 #                                                absent = no hooks
 #
-# CLONE_DIR is engine-computed (${XDG_DATA_HOME}/external-sync/<name>/repo)
-# and written into sync.conf by Ansible — never a host_vars field. See
-# docs/sync-manifest-spec.md's "On-disk layout".
+# The clone path is never a sync.conf field: it is engine-computed here as
+# ${XDG_DATA_HOME}/external-sync/<name>/repo, the same derivation Ansible
+# uses (D3 — see docs/external-sync.md's "On-disk layout"). sync.conf only
+# carries values a human legitimately mutates at runtime; a CLONE_DIR line
+# left over from an older layout is sourced but ignored, never honoured as
+# an override.
 #
 # sync.conf is written once by the sync-external Ansible role and never
 # overwritten — DEV_MODE and GIT_BRANCH are yours to edit at runtime. Set
@@ -165,11 +167,18 @@ ensure_branch() {
     git -C "${clone_dir}" fetch origin "${branch}" >>"${LOG_FILE}" 2>&1 || true
 
     log "Switching branch: ${current} -> ${branch}"
+    # A successful switch changes the working tree just as materially as a
+    # pull does — deployed content (a link_tree dest especially) now shows
+    # the other branch — so it must count as head-moved: run_on: changed
+    # hooks fire, and EXTERNAL_SYNC_RESULT/Ansible report changed. Set via
+    # the same dynamic-scoping mechanism do_repo_sync() documents.
     if git -C "${clone_dir}" switch "${branch}" >>"${LOG_FILE}" 2>&1; then
+        _repo_head_moved="true"
         return 0
     fi
 
     if git -C "${clone_dir}" switch -c "${branch}" --track "origin/${branch}" >>"${LOG_FILE}" 2>&1; then
+        _repo_head_moved="true"
         return 0
     fi
 
@@ -181,11 +190,12 @@ ensure_branch() {
 # Fetch/pull failures are logged and treated as non-fatal — the next scheduled
 # run will retry. A dirty working tree is never clobbered.
 #
-# Sets the caller's _repo_head_moved to "true" on an actual successful pull
-# (the only branch where content genuinely changed) — used both for DF-5's
+# Sets the caller's _repo_head_moved to "true" whenever working-tree content
+# genuinely changed: a successful pull here, or a successful branch switch in
+# ensure_branch() (the second writer) — used both for DF-5's
 # EXTERNAL_SYNC_RESULT line and for hook run_on: changed evaluation. Relies on
 # bash's dynamic scoping: _repo_head_moved is declared `local` in sync_one()
-# and this function (called from sync_one()) mutates that same variable
+# and these functions (called from sync_one()) mutate that same variable
 # without re-declaring it. Return value is unrelated and still means "is the
 # clone ready to deploy from" (0 = yes, 1 = no) — unchanged from before.
 
@@ -255,14 +265,25 @@ do_repo_sync() {
 # owns that file; writing it from here would silence the warning without
 # actually applying anything.
 
+# The single implementation of "what hash represents the manifest in this
+# clone right now": the manifest's git blob hash when present, the literal
+# "absent" when not — the same two values repo.yml's manifest-hash task can
+# write, so both sides of every comparison speak the same vocabulary. Used
+# by check_manifest_drift() and cmd_status(); do not re-derive it inline.
+manifest_current_hash() {
+    local clone_dir="$1"
+    if [[ -e "${clone_dir}/.dotfiles-sync.yml" ]]; then
+        git -C "${clone_dir}" hash-object .dotfiles-sync.yml 2>/dev/null || echo "unknown"
+    else
+        echo "absent"
+    fi
+}
+
 check_manifest_drift() {
     local name="$1" clone_dir="$2" state_dir="$3"
-    local manifest="${clone_dir}/.dotfiles-sync.yml"
 
-    local current_hash="absent"
-    if [[ -e "${manifest}" ]]; then
-        current_hash=$(git -C "${clone_dir}" hash-object .dotfiles-sync.yml 2>/dev/null || echo "unknown")
-    fi
+    local current_hash
+    current_hash=$(manifest_current_hash "${clone_dir}")
 
     local recorded_hash=""
     [[ -r "${state_dir}/manifest-hash" ]] && recorded_hash=$(cat "${state_dir}/manifest-hash" 2>/dev/null || echo "")
@@ -677,10 +698,10 @@ sync_one() {
 
     # Per-repo result state, reset here (not script-global) so one process
     # syncing many repos in a loop never lets one repo's outcome leak into
-    # the next — same reasoning as the REPO_URL/CLONE_DIR/GIT_BRANCH/DEV_MODE
-    # reset below. do_repo_sync()/deploy_copy_file()/deploy_link_file()/
-    # run_post_deploy_hooks() mutate these via bash's dynamic scoping without
-    # re-declaring them.
+    # the next — same reasoning as the REPO_URL/GIT_BRANCH/DEV_MODE reset
+    # below. ensure_branch()/do_repo_sync()/deploy_copy_file()/
+    # deploy_link_file()/deploy_link_tree()/run_post_deploy_hooks() mutate
+    # these via bash's dynamic scoping without re-declaring them.
     local _repo_head_moved="false"
     local _deploy_changes=0
     local _hook_status="none"
@@ -694,18 +715,17 @@ sync_one() {
     fi
 
     # Reset before sourcing so a repo missing a field doesn't inherit the
-    # previous repo's value from this same process.
+    # previous repo's value from this same process. CLONE_DIR is declared
+    # local purely to contain any stale line an old-layout sync.conf still
+    # carries — it is unconditionally recomputed below, never honoured as an
+    # override (per-machine clone placement is exactly what D3 removed).
     local REPO_URL="" CLONE_DIR="" GIT_BRANCH="" DEV_MODE=""
     # shellcheck source=/dev/null
     source "${conf}"
 
     GIT_BRANCH="${GIT_BRANCH:-main}"
     DEV_MODE="${DEV_MODE:-false}"
-
-    if [[ -z "${CLONE_DIR}" ]]; then
-        err "[${name}] CLONE_DIR not set in ${conf} — skipping"
-        return 0
-    fi
+    CLONE_DIR="${state_dir}/repo"
 
     log "[${name}] sync starting (repo: ${REPO_URL:-unset})"
 
@@ -815,33 +835,56 @@ cmd_status() {
         local conf="${CONFIG_ROOT}/${name}/sync.conf"
         local deploy_list="${CONFIG_ROOT}/${name}/deploy.list"
         local state_dir="${STATE_ROOT}/${name}"
+        # Engine-computed, same derivation as sync_one() — never read from
+        # sync.conf (a stale CLONE_DIR line there is deliberately ignored).
+        local clone_dir="${STATE_ROOT}/${name}/repo"
 
-        local branch="unknown" clone_dir="unknown" dev_mode="unknown"
+        local branch="unknown" dev_mode="unknown"
         if [[ -r "${conf}" ]]; then
             local GIT_BRANCH="" CLONE_DIR="" DEV_MODE=""
             # shellcheck source=/dev/null
             source "${conf}"
             branch="${GIT_BRANCH:-unknown}"
-            clone_dir="${CLONE_DIR:-unknown}"
             dev_mode="${DEV_MODE:-false}"
         fi
 
         local clone_note=""
-        if [[ "${clone_dir}" != "unknown" ]]; then
-            if [[ ! -d "${clone_dir}" ]]; then
-                clone_note=" (missing)"
-            elif ! is_git_repo "${clone_dir}"; then
-                clone_note=" (not a git repo)"
-            fi
+        if [[ ! -d "${clone_dir}" ]]; then
+            clone_note=" (missing)"
+        elif ! is_git_repo "${clone_dir}"; then
+            clone_note=" (not a git repo)"
         fi
 
         local last_sync="never"
         [[ -f "${state_dir}/last-sync" ]] && last_sync=$(cat "${state_dir}/last-sync")
 
+        # Same comparison vocabulary as check_manifest_drift(): recorded is
+        # whatever Ansible last wrote (a hash, or the literal "absent");
+        # current is the live clone's answer via the shared helper. Empty
+        # current means the clone itself is unreadable — already flagged by
+        # clone_note, so no manifest judgement is made from it.
         local recorded_hash=""
         [[ -r "${state_dir}/manifest-hash" ]] && recorded_hash=$(cat "${state_dir}/manifest-hash" 2>/dev/null || echo "")
+        local current_hash=""
+        [[ -d "${clone_dir}" ]] && current_hash=$(manifest_current_hash "${clone_dir}")
+
+        # "**no manifest**" only when recorded and live AGREE there is none
+        # (the true, still-nagging clone-only case, D11). A manifest that
+        # landed in the clone after the last Ansible run is the drift case
+        # below — recorded "absent" alone must not mask it.
         local no_manifest="false"
-        [[ "${recorded_hash}" == "absent" ]] && no_manifest="true"
+        if [[ "${recorded_hash}" == "absent" ]] && [[ -z "${current_hash}" || "${current_hash}" == "absent" ]]; then
+            no_manifest="true"
+        fi
+
+        local manifest_state="ok"
+        if [[ -n "${recorded_hash}" && -n "${current_hash}" && "${current_hash}" != "${recorded_hash}" ]]; then
+            # Covers both directions: absent -> hash (manifest added
+            # upstream, awaiting an Ansible run) and hash -> absent
+            # (manifest deleted upstream).
+            manifest_state="**drift**"
+            any_issue="true"
+        fi
 
         local deploy_summary="clone-only"
         if [[ "${no_manifest}" == "true" ]]; then
@@ -852,16 +895,6 @@ cmd_status() {
             n=$(grep -c . "${deploy_list}" 2>/dev/null || echo 0)
             deploy_summary="${n} entry"
             [[ "${n}" != "1" ]] && deploy_summary="${n} entries"
-        fi
-
-        local manifest_state="ok"
-        if [[ "${no_manifest}" != "true" && "${clone_dir}" != "unknown" && -e "${clone_dir}/.dotfiles-sync.yml" && -n "${recorded_hash}" ]]; then
-            local current
-            current=$(git -C "${clone_dir}" hash-object .dotfiles-sync.yml 2>/dev/null || echo "unknown")
-            if [[ "${current}" != "${recorded_hash}" ]]; then
-                manifest_state="**drift**"
-                any_issue="true"
-            fi
         fi
 
         local diverged=""

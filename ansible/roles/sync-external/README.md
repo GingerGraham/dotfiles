@@ -173,7 +173,7 @@ Two **parallel** trees per repo — the clone is not a sibling of
 `deploy.list`, it lives under the data root:
 
 ```
-~/.config/external-sync/<name>/sync.conf     # REPO_URL, CLONE_DIR, GIT_BRANCH, DEV_MODE
+~/.config/external-sync/<name>/sync.conf     # REPO_URL, GIT_BRANCH, DEV_MODE
 ~/.config/external-sync/<name>/deploy.list   # src|dest|mode|force (empty = clone-only)
 ~/.config/external-sync/<name>/hooks.list    # event|run_on|timeout|argv... (empty = no hooks / gated off)
 ~/.local/share/external-sync/<name>/repo/    # THE CLONE — always here, computed, never in host_vars
