@@ -143,15 +143,32 @@ print_summary() {
         done
     fi
 
-    echo >&2
-    echo "Preserved (adopted in place by sync-external):" >&2
-    echo "  - ${HOME}/.config/nvim" >&2
-    echo "  - ${HOME}/.local/share/ai-config" >&2
+    # Only ever named when actually present — a machine that never had these
+    # must not be told it has orphans to clean up.
+    local legacy_clones=() c
+    for c in "${HOME}/.config/nvim" "${HOME}/.local/share/ai-config"; do
+        [[ -e "${c}" ]] && legacy_clones+=("${c}")
+    done
+
+    if [[ ${#legacy_clones[@]} -gt 0 ]]; then
+        echo >&2
+        echo "Left in place — NOT adopted by sync-external, and now orphaned:" >&2
+        for c in "${legacy_clones[@]}"; do
+            echo "  - ${c}" >&2
+        done
+        echo >&2
+        warn "sync-external always clones fresh to ~/.local/share/external-sync/<name>/repo."
+        warn "Each path above needs a one-time manual step before it will work: a link_tree"
+        warn "conversion where a repo's manifest deploys back to it (nvim-config), or a"
+        warn "verify-then-remove where the clone is simply superseded (ai-config). This is"
+        warn "not optional — a link_tree deploy refuses to replace a real directory."
+    fi
     echo >&2
     info "Next: register these repos via ./install.sh, or hand-edit"
     info "external_synced_repos in ansible/host_vars/localhost.yml, then run:"
     info "  ansible-playbook site.yml --tags sync-external"
-    info "See docs/external-sync.md for the full walkthrough."
+    info "See docs/external-sync.md (Migrating from the old nvim/ai-tools sync) for"
+    info "the full walkthrough, including the manual steps for any legacy clone."
 }
 
 main() {
