@@ -111,17 +111,38 @@ REPO_ROOT="$(cd "$(dirname "${MANIFEST}")" && pwd)"
 # Mirrors ansible/roles/sync-external/tasks/repo.yml's src/command[0]
 # assertion: non-empty, no leading /, no .. segment. Runs against the raw
 # manifest value, same as the Ansible-side check — this script has no
-# concept of an absolute clone_dir, it only checks the manifest's own shape.
+# concept of an absolute clone path, it only checks the manifest's own shape.
+#
+# Splitting uses `IFS='/' read -r -a`, never an unquoted `for seg in ${p}`.
+# The latter subjects each segment to pathname expansion, so a manifest
+# value containing *, ? or [ would be matched against the filesystem before
+# being compared — pointless I/O, and a silent behavioural difference from
+# the Ansible side, which compares Python's raw p.split('/') output. (It is
+# not a hole in the '..' check specifically: bash never yields '.' or '..'
+# from a glob, and a literal '..' has no metacharacters to expand. The
+# point is that this validator's whole job is to mirror the Ansible check
+# exactly, so it must not consult the filesystem at all.)
+
+_split_path_segments() {
+    # Sets _PATH_SEGMENTS (caller-visible) to "$1" split on '/', with no
+    # pathname expansion. Bash 3.2 has no way to return an array, hence the
+    # named global — callers read it immediately.
+    _PATH_SEGMENTS=()
+    IFS='/' read -r -a _PATH_SEGMENTS <<< "$1"
+}
 
 _is_safe_relative_path() {
     local p="$1"
     [[ -z "${p}" || "${p}" == "null" ]] && return 1
     [[ "${p}" == /* ]] && return 1
+
+    _split_path_segments "${p}"
     local seg
-    local IFS='/'
-    for seg in ${p}; do
-        [[ "${seg}" == ".." ]] && return 1
-    done
+    if [[ "${#_PATH_SEGMENTS[@]}" -gt 0 ]]; then
+        for seg in "${_PATH_SEGMENTS[@]}"; do
+            [[ "${seg}" == ".." ]] && return 1
+        done
+    fi
     return 0
 }
 
@@ -148,11 +169,15 @@ _is_safe_dest() {
     local rel="${d#\~/}"
     [[ -z "${rel}" ]] && return 1
 
+    # Same no-pathname-expansion split as _is_safe_relative_path — see the
+    # comment there for why an unquoted `for seg in ${rel}` is wrong here.
+    _split_path_segments "${rel}"
     local seg
-    local IFS='/'
-    for seg in ${rel}; do
-        [[ "${seg}" == ".." ]] && return 1
-    done
+    if [[ "${#_PATH_SEGMENTS[@]}" -gt 0 ]]; then
+        for seg in "${_PATH_SEGMENTS[@]}"; do
+            [[ "${seg}" == ".." ]] && return 1
+        done
+    fi
 
     local entry
     for entry in "${_DEST_DENYLIST_DIRS_REL[@]}"; do

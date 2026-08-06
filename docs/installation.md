@@ -71,7 +71,7 @@ On a machine where `ansible/host_vars/localhost.yml` does not yet exist, `instal
 3. **Projects base directory** — root of your project tree
 4. **Git global identity** — name, default email, optional GPG signing key
 5. **Git project contexts** — one or more context/provider/email tuples (e.g. Personal/GitHub, Personal/GitLab, Acme/AzureDevOps); press Enter to finish; add more later with `git-add-project`
-6. **External add-on repos** — any number of repos synced/deployed by `sync-external` (e.g. `nvim-config`, `ai-config`); for each, a name, repo URL, clone directory, and an explicit public/private choice (workstation and server profiles only). See [External sync](external-sync.md).
+6. **External add-on repos** — any number of repos synced/deployed by `sync-external` (e.g. `nvim-config`, `ai-config`); for each, a name, repo URL, an explicit public/private choice, and whether to allow that repo's post-deploy hooks (default no) — workstation and server profiles only. There is no clone-directory prompt: the clone location is engine-computed, and where a repo's content is deployed comes from its own manifest. See [External sync](external-sync.md).
 
 `host_vars/localhost.yml` is gitignored and **never overwritten** by subsequent Ansible runs. Re-running `install.sh` after it exists goes straight to Ansible.
 

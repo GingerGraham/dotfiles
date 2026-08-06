@@ -142,9 +142,14 @@ OPTIONS
       Show this help.
 
 PROFILES
-  workstation   Full setup: common, shell, git, ssh, tmux, vim, sync-external, sync
-  server        Common, shell, git, ssh, sync-external, sync
-  minimal       Common and shell only
+  workstation   common, shell, git, ssh, tmux, vim, sync-external, sync
+  server        Same roles as workstation, via the server.yml playbook
+                (--playbook server)
+  minimal       common, shell, git, ssh
+
+  common, shell, git, and ssh run under every profile — git and ssh are
+  imported unconditionally, so 'minimal' is not shell-only. See
+  docs/profiles.md.
 
   Note: external add-on repos are not prompted for the 'minimal' profile
   because the sync-external role does not run under it.
@@ -580,9 +585,9 @@ generate_host_vars() {
     PROFILE="${ARG_PROFILE}"
     if [[ -z "${PROFILE}" ]]; then
         echo "Select a profile:"
-        echo "  1) workstation  Full setup — shell, git, ssh, tmux, vim, sync-external, sync"
-        echo "  2) server       Common, shell, git, ssh, sync-external, sync"
-        echo "  3) minimal      Common and shell only"
+        echo "  1) workstation  common, shell, git, ssh, tmux, vim, sync-external, sync"
+        echo "  2) server       Same roles, via the server.yml playbook"
+        echo "  3) minimal      common, shell, git, ssh (no editor roles, no sync)"
         echo
         local choice
         read -r -p "Profile [1]: " choice || true
