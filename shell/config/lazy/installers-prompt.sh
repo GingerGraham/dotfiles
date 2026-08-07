@@ -8,7 +8,7 @@ source "${SHELL_CONFIG_DIR:-$HOME/.config/shell}/lazy/installers-common.sh"
 
 _omp-install-linux() {
     if command -v oh-my-posh &>/dev/null; then
-        if oh-my-posh update; then
+        if oh-my-posh upgrade; then
             log_info "oh-my-posh updated successfully"
             return 0
         else
@@ -33,7 +33,7 @@ _omp-install-macos() {
         if brew update && brew upgrade oh-my-posh; then
             log_info "oh-my-posh updated successfully via Homebrew"
             return 0
-        elif oh-my-posh update; then
+        elif oh-my-posh upgrade; then
             log_info "oh-my-posh updated successfully via built-in updater"
             return 0
         else
