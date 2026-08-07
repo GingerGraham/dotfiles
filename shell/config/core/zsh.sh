@@ -58,9 +58,9 @@ bindkey ' ' magic-space
 bindkey '^_' undo
 
 # ── Directory change hook ─────────────────────────────────────────────────────
-# Auto-list directory contents after every cd
+# Auto-list directory contents after every cd (but not in home directory)
 chpwd() {
-    ls -Alh --color=auto
+    [[ "$PWD" != "$HOME" ]] && ls -Alh --color=auto
 }
 
 log_debug "zsh: shell-specific config loaded"
