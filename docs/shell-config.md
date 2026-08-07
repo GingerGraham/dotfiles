@@ -132,8 +132,12 @@ current shell with `DOTFILES_PLAIN_SHELL=true`. That flag makes `loader.sh`:
 
 Useful for capturing terminal output for pasting elsewhere (AI tooling,
 issue reports, etc.) with no prompt escapes or SGR colour sequences to strip.
-`exec` replaces the process rather than nesting one, so `exit` returns
-straight to the original styled shell.
+`exec` **replaces** the shell process rather than nesting a child — the plain
+shell takes over the same PID, so there is no styled shell left underneath
+it. Running `exit` ends the session entirely (closes the terminal, or drops
+an SSH connection), exactly like `exit` in any top-level shell. To get back
+to a styled shell, open a new terminal/session rather than expecting `exit`
+to pop back to one.
 
 Under **zsh**, plain mode skips the oh-my-zsh branch entirely — not just a
 different prompt, but no omz plugins and no omz completion bindings either,

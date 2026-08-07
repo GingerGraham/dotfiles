@@ -148,9 +148,12 @@ unblock-sync() {
 # Useful when capturing terminal output for pasting elsewhere: no prompt
 # escapes, no SGR sequences from NO_COLOR-aware tools.
 #
-# exec replaces this process rather than nesting, so `exit` returns straight
-# to the styled shell with no subshell stack to unwind. Background jobs in the
-# current shell are lost — same as any exec.
+# exec REPLACES this process rather than nesting it — the plain shell is not
+# a child of the styled one, it takes over the same PID. There is no styled
+# shell left to fall back to: `exit` here ends the session (closes the
+# terminal, or drops an SSH connection), the same as `exit` in any top-level
+# shell. To get back to a styled shell, open a new session. Background jobs
+# in the pre-exec shell are also lost — same as any exec.
 #
 # The interpreter is resolved from DOTFILES_SHELL (the shell actually running)
 # rather than $SHELL (the passwd login shell), which can differ.
