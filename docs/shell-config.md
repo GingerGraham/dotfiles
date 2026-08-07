@@ -13,6 +13,7 @@ Shell config lives at `~/.config/shell/` — an XDG-compliant directory that is 
     - [Tier 2 — Conditional eager](#tier-2--conditional-eager)
     - [Tier 3 — Lazy](#tier-3--lazy)
   - [Prompt engine selection](#prompt-engine-selection)
+    - [Plain shell](#plain-shell)
   - [Exported variables](#exported-variables)
   - [Machine-local overrides](#machine-local-overrides)
   - [Shell introspection](#shell-introspection)
@@ -43,9 +44,10 @@ Both `~/.bashrc` and `~/.zshrc` are thin stubs that do one thing: source `~/.con
 9. Source `platform/$DOTFILES_OS.sh`; additionally source `platform/wsl.sh` if `$DOTFILES_WSL == "true"`
 10. Source `distro/$DOTFILES_DISTRO.sh`
 11. Source completions with the same tool guards
-12. Elect a prompt engine (oh-my-posh → starship → oh-my-zsh → distro-native → fallback PS1)
+12. Elect a prompt engine (oh-my-posh → starship → oh-my-zsh → distro-native → fallback PS1) — bypassed entirely in [plain shell mode](#plain-shell)
 13. Register lazy stubs for `lazy/`
 14. Source `env/90-local.sh` last — machine-local overrides win
+15. Source [user extension](user-extensions.md) files from `DOTFILES_USER_EXT_DIR` — after `90-local.sh` (so user definitions shadow it), before PATH dedupe (so PATH entries they add still get deduped)
 
 Detection runs exactly once per session. Results are exported as `DOTFILES_*` variables; no repeated `uname` or `/etc/os-release` reads.
 
@@ -100,6 +102,7 @@ gpg-create-key
 | `installers.sh`     | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
 | `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                                 |
 | `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)      |
+| `user-extensions.sh` | `check-user-extensions` — full syntax/lint/collision pass over `DOTFILES_USER_EXT_DIR`. Registered only when that directory has at least one `*.sh` file. See [user-extensions.md](user-extensions.md). |
 
 Use `get-installers` (alias: `installers`) to list all available lazy install commands.
 
@@ -113,6 +116,40 @@ Use `get-installers` (alias: `installers`) to list all available lazy install co
 4. **distro-native** — if the distro file exports `_DOTFILES_DISTRO_PROMPT_FILE` pointing to a valid file (zsh only)
 5. **Fallback PS1** — set unconditionally if none of the above match; detects terminal colour support and sets an appropriate `PS1`
 
+### Plain shell
+
+`plain-shell` (defined in `core/functions.sh`, always available) re-execs the
+current shell with `DOTFILES_PLAIN_SHELL=true`. That flag makes `loader.sh`:
+
+- `export NO_COLOR=1` early, in the "Behaviour flags" section — before any
+  `tools/` file that reads `NO_COLOR` at init time;
+- bypass the entire prompt-engine election chain above (including the
+  fallback branch, so nothing from `/etc/bashrc`/`/etc/zshrc` leaks through)
+  and set an explicit, colour-free prompt instead — `PS1='\u@\h:\w\$ '` under
+  bash, `PROMPT='%n@%m:%~%# '` under zsh;
+- set `DOTFILES_PROMPT_ENGINE="plain"`, so introspection stays honest about
+  which branch actually ran.
+
+Useful for capturing terminal output for pasting elsewhere (AI tooling,
+issue reports, etc.) with no prompt escapes or SGR colour sequences to strip.
+`exec` **replaces** the shell process rather than nesting a child — the plain
+shell takes over the same PID, so there is no styled shell left underneath
+it. Running `exit` ends the session entirely (closes the terminal, or drops
+an SSH connection), exactly like `exit` in any top-level shell. To get back
+to a styled shell, open a new terminal/session rather than expecting `exit`
+to pop back to one.
+
+Under **zsh**, plain mode skips the oh-my-zsh branch entirely — not just a
+different prompt, but no omz plugins and no omz completion bindings either,
+since that whole branch of the election chain never runs.
+
+You don't need the function to test this: `DOTFILES_PLAIN_SHELL=true zsh -i`
+(or `bash -i`) works directly, which is useful when debugging whether a
+problem is prompt-engine related versus something else in the config.
+
+`--color=auto`-style aliases in `core/aliases.sh` are deliberately left
+alone — plain mode's blast radius is `NO_COLOR` and the prompt only.
+
 ## Exported variables
 
 | Variable                  | Values                                          | Set by            |
@@ -124,6 +161,10 @@ Use `get-installers` (alias: `installers`) to list all available lazy install co
 | `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`)             | `env/90-local.sh` |
 | `SHELL_CONFIG_DIR`        | `~/.config/shell`                               | `loader.sh`       |
 | `DOTFILES_REPO_DIR`       | path to repo                                    | `env/00-core.sh`  |
+| `DOTFILES_USER_EXT_DIR`   | `${XDG_CONFIG_HOME}/dotfiles/user` (default)    | `loader.sh` / `env/90-local.sh` |
+| `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)            | `loader.sh` / `env/90-local.sh` |
+| `DOTFILES_PLAIN_SHELL`    | `true` / `false` (default: `false`)             | `plain-shell` (via `exec env`) |
+| `DOTFILES_PROMPT_ENGINE`  | `plain` / `distro-native` / …                   | `loader.sh`       |
 
 ## Machine-local overrides
 
@@ -313,6 +354,10 @@ shell/
     │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, etc.
     │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
     │   │                       # Coordinates install-* commands and automatic updates
-    │   └── gpg-management.sh   # GPG key creation, rotation, export/import, signing key publishing
+    │   ├── gpg-management.sh   # GPG key creation, rotation, export/import, signing key publishing
+    │   └── user-extensions.sh  # check-user-extensions — full check of DOTFILES_USER_EXT_DIR
     └── completions/        # Same tool guards as tools/
 ```
+
+User extension files themselves live outside this tree entirely — see
+[user-extensions.md](user-extensions.md).

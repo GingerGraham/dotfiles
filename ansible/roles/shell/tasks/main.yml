@@ -187,3 +187,16 @@
     dest: "{{ xdg_config_home }}/direnv/direnv.toml"
     mode: "0644"
     force: false
+
+# ============================================================================
+# Section 6d — User extension directory (create only, never managed)
+# ============================================================================
+# Machine-local drop-in directory for user-defined functions, aliases, and
+# installers. Deliberately outside the repo (~/.config/shell is a symlink into
+# the working tree, so files there would dirty git status and block sync).
+# Ansible creates it and then has no further involvement.
+- name: Ensure user extension directory exists
+  ansible.builtin.file:
+    path: "{{ shell_user_ext_dir }}"
+    state: directory
+    mode: "0755"
