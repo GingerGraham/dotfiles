@@ -56,12 +56,17 @@ _uv_packaged_version() {
 install-uv() {
     log_info "Installing or updating uv..."
 
+    # set -o pipefail in a subshell, not the caller's shell: without it, a
+    # curl/wget failure (network error, 404) still leaves `sh` reading an
+    # empty pipe, which it treats as a no-op and exits 0 — masking the
+    # failure as success. Scoped to a subshell so this lazy-loaded file never
+    # changes pipefail for the rest of the user's interactive session.
     local rc
     if command -v curl &>/dev/null; then
-        curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
+        ( set -o pipefail; curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh )
         rc=$?
     elif command -v wget &>/dev/null; then
-        wget -qO- https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
+        ( set -o pipefail; wget -qO- https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh )
         rc=$?
     else
         log_error "curl or wget is required to install uv"

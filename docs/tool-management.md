@@ -73,7 +73,7 @@ The registry currently includes:
 | **tflint**     | `command -v`        | `install-tflint`           | Terraform linter                |
 | **tofu**       | `command -v`        | via tenv or `install-tenv` | OpenTofu variant                |
 | **trivy**      | `command -v`        | `install-trivy`            | Container vulnerability scanner |
-| **uv**         | `command -v`        | `_update_uv`                | Python package & project manager |
+| **uv**         | `command -v`        | `install-uv`                | Python package & project manager |
 
 ## How update-tools works
 
