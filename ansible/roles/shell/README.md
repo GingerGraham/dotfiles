@@ -17,6 +17,7 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | _(template)_    | `~/.config/shell/env/90-local.sh` | Created once, never overwritten        |
 | _(template)_    | `~/.config/direnv/direnv.toml`    | Created once, never overwritten        |
 | _(template)_    | `~/.config/starship.toml`         | Created once, never overwritten        |
+| _(none)_         | `~/.config/dotfiles/user`         | Directory only — never managed after creation. See [user-extensions.md](../../../docs/user-extensions.md) |
 
 ## Idempotency behaviour
 
@@ -79,6 +80,7 @@ depends on.
 | `shell_stubs`             | `[bashrc, zshrc, zshenv]`      | `defaults/main.yml`  | Stub files symlinked into HOME                |
 | `dotfiles_machine_name`   | `{{ ansible_hostname }}`       | Set by `common` role | Used in 90-local.sh template                  |
 | `projects_base`           | `{{ xdg_data_home }}/projects` | `group_vars/all.yml` | Used in direnv.toml template                  |
+| `shell_user_ext_dir`      | `{{ xdg_config_home }}/dotfiles/user` | `group_vars/all.yml` | User extension drop-in directory — created only, never templated |
 
 ## Running this role alone
 

@@ -15,6 +15,7 @@ The dotfiles shell config automates discovery, installation, and updates for 20+
     - [Built-in installers](#built-in-installers)
   - [Updater functions](#updater-functions)
     - [Writing a custom updater](#writing-a-custom-updater)
+  - [User-defined tools](#user-defined-tools)
   - [The installer ↔ updater contract](#the-installer--updater-contract)
   - [Usage patterns](#usage-patterns)
     - [Update everything](#update-everything)
@@ -180,6 +181,27 @@ _update_mytool() {
 
 The `_update_ensure_fn` helper sources the tool file only if the function isn't already loaded, avoiding redundant sourcing.
 
+## User-defined tools
+
+Your own tools don't need a repo change. Define a `_user_tools_registry`
+function in any file under `DOTFILES_USER_EXT_DIR`, in the same
+pipe-delimited row format as `_managed_tools_registry` above, and
+`update-tools` folds its rows in automatically — sorted in alongside the
+managed (and optional, if enabled) rows.
+
+```bash
+_user_tools_registry() {
+    cat <<'EOF'
+my-cli|my-cli|_update_my_cli|install-my-cli|My personal CLI tool
+EOF
+}
+```
+
+`tests/check-updater-coverage.sh` does not check this — it's repo-scoped CI
+with no visibility into a user's machine. See
+[user-extensions.md](user-extensions.md#the-optional-_user_tools_registry-contract)
+for the full contract and a worked example.
+
 ## The installer ↔ updater contract
 
 **Rule:** Every installer function added to `lazy/installers.sh` must be reachable from `update-tools` — either directly or via the registry.
@@ -315,6 +337,7 @@ This makes shell startup fast — all ~25 installer functions are lazy-loaded on
 ## See also
 
 - [shell-config.md](shell-config.md) — Shell architecture and lazy loading
+- [user-extensions.md](user-extensions.md) — User-defined functions, aliases, and the `_user_tools_registry` contract
 - [installation.md](installation.md) — Initial bootstrap and first-run setup
 - [installers.md](installers.md) — Per-tool installer reference
 - [gpg.md](gpg.md) — GPG key management, password manager backup, and signing key publishing

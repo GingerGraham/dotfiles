@@ -13,6 +13,7 @@ xdg_state_home: "{{ ansible_facts['env']['HOME'] }}/.local/state" # Base XDG sta
 shell_config_dir: "{{ xdg_config_home }}/shell" # Shell role destination; override only if shell config should not live under XDG config.
 git_config_dir: "{{ xdg_config_home }}/git"   # Git role destination; override only for a custom git config layout.
 dotfiles_migration_dir: "{{ xdg_config_home }}/dotfiles/migration"
+shell_user_ext_dir: "{{ xdg_config_home }}/dotfiles/user" # User-defined config extension drop-in directory; deliberately outside shell_config_dir (a repo symlink) — see docs/user-extensions.md.
 
 # ── External sync engine ──────────────────────────────────────────────────────
 # Generic add-on repo sync — see ansible/roles/sync-external/README.md and

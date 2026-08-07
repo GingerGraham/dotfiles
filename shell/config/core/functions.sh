@@ -143,6 +143,28 @@ unblock-sync() {
     fi
 }
 
+# ── Plain shell ───────────────────────────────────────────────────────────────
+# Re-exec the current shell with prompt styling and colour disabled.
+# Useful when capturing terminal output for pasting elsewhere: no prompt
+# escapes, no SGR sequences from NO_COLOR-aware tools.
+#
+# exec replaces this process rather than nesting, so `exit` returns straight
+# to the styled shell with no subshell stack to unwind. Background jobs in the
+# current shell are lost — same as any exec.
+#
+# The interpreter is resolved from DOTFILES_SHELL (the shell actually running)
+# rather than $SHELL (the passwd login shell), which can differ.
+#
+# `exec env VAR=... cmd` rather than a `VAR=... exec cmd` assignment prefix:
+# assignment prefixes on special builtins behave inconsistently across bash and
+# zsh, whereas env(1) is unambiguous in both.
+plain-shell() {
+    local _sh
+    _sh="$(command -v "${DOTFILES_SHELL:-bash}" 2>/dev/null)"
+    [[ -z "${_sh}" ]] && _sh="${SHELL:-/bin/bash}"
+    exec env DOTFILES_PLAIN_SHELL=true "${_sh}" -i
+}
+
 # ── cheat.sh lookup ───────────────────────────────────────────────────────────
 cheat() {
     curl "https://cheat.sh/$1"
@@ -383,6 +405,24 @@ get-functions() {
         | grep -Fv "/loader.sh")
     if [[ -n "${BASH_VERSION}" && "${_globstar_was_off}" -eq 1 ]]; then
         shopt -u globstar
+    fi
+
+    # User extension files live outside $SHELL_CONFIG_DIR (deliberately — see
+    # DOTFILES_USER_EXT_DIR in loader.sh) so they need a second, flat glob
+    # root (no globstar needed — the directory is not recursive).
+    if [[ -n "${DOTFILES_USER_EXT_DIR}" && -d "${DOTFILES_USER_EXT_DIR}" ]]; then
+        if [[ -n "${ZSH_VERSION}" ]]; then
+            setopt nullglob
+        else
+            shopt -s nullglob
+        fi
+        local -a _user_ext_sf=( "${DOTFILES_USER_EXT_DIR}"/*.sh )
+        if [[ -n "${ZSH_VERSION}" ]]; then
+            unsetopt nullglob
+        else
+            shopt -u nullglob
+        fi
+        _source_files+=( "${_user_ext_sf[@]}" )
     fi
 
     # ── Functions ─────────────────────────────────────────────────────────────

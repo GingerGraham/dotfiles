@@ -12,6 +12,10 @@
 #      as a defined function somewhere under shell/config (catches typos like
 #      `helm-install` for `install-helm`).
 #
+# Deliberately does NOT check DOTFILES_USER_EXT_DIR / _user_tools_registry
+# (see docs/user-extensions.md). This is repo-scoped CI with no visibility
+# into a user's machine — do not extend it to the user extension directory.
+#
 # Run with bash (not sh): bash tests/check-updater-coverage.sh
 set -euo pipefail
 

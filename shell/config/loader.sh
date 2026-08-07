@@ -110,6 +110,33 @@ export DOTFILES_SHELL
 # Override any of these in env/90-local.sh — that file is sourced last.
 DOTFILES_SHOW_FUNCTIONS="${DOTFILES_SHOW_FUNCTIONS:-false}"
 
+# User-defined config extensions — a machine-local drop-in directory for
+# user-defined functions/aliases/installers, deliberately OUTSIDE the repo.
+# ~/.config/shell (SHELL_CONFIG_DIR) is a symlink into the dotfiles working
+# tree, so anything dropped under it would make `git status` dirty and block
+# the external-sync timer (see docs/external-sync.md). This instead lives in
+# the existing ~/.config/dotfiles/ namespace, alongside migration/, which is
+# real machine-local storage with no repo involvement.
+# The default can't reference XDG_CONFIG_HOME directly — env/00-core.sh (which
+# exports it) hasn't sourced yet at this point in the loader — so the same
+# HOME-based fallback used there is inlined here.
+DOTFILES_USER_EXT_DIR="${DOTFILES_USER_EXT_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/user}"
+# Debug escape hatch only — no profile logic is attached to this flag.
+DOTFILES_USER_EXT_ENABLED="${DOTFILES_USER_EXT_ENABLED:-true}"
+
+# Plain shell mode — set by the plain-shell function (core/functions.sh) via
+# `exec env DOTFILES_PLAIN_SHELL=true`, so it is normally already present in
+# the environment by the time this line runs. Named for the mode rather than
+# the prompt specifically, because it also controls colour.
+DOTFILES_PLAIN_SHELL="${DOTFILES_PLAIN_SHELL:-false}"
+if [[ "${DOTFILES_PLAIN_SHELL}" == "true" ]]; then
+    # Some tools/ files read NO_COLOR at init time (Tier 2, sourced long
+    # before the prompt-engine election below) — must be set this early.
+    export NO_COLOR=1
+    # The startup function dump is noise when capturing terminal output.
+    DOTFILES_SHOW_FUNCTIONS=false
+fi
+
 # ── Lazy-load helper ─────────────────────────────────────────────────────────
 _bash_lazy_load() {
     local stub_name="$1"
@@ -257,6 +284,29 @@ if [[ "${DOTFILES_OS}" == "Linux" ]] && command -v systemd-cryptenroll &>/dev/nu
     [[ -f "${SHELL_CONFIG_DIR}/lazy/disk-encryption.sh" ]] && _register_lazy_stubs "${SHELL_CONFIG_DIR}/lazy/disk-encryption.sh"
 fi
 
+# check-user-extensions only appears in get-functions when there is actually
+# something to check — gate registration itself (not the function body) on
+# DOTFILES_USER_EXT_DIR existing and containing at least one *.sh file. The
+# nullglob-guarded array expansion below is a builtin glob test, not a
+# subprocess (no ls/find).
+if [[ "${DOTFILES_USER_EXT_ENABLED}" == "true" ]] && [[ -d "${DOTFILES_USER_EXT_DIR}" ]]; then
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        setopt nullglob
+    else
+        shopt -s nullglob
+    fi
+    _user_ext_files=( "${DOTFILES_USER_EXT_DIR}"/*.sh )
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        unsetopt nullglob
+    else
+        shopt -u nullglob
+    fi
+    if [[ ${#_user_ext_files[@]} -gt 0 ]]; then
+        [[ -f "${SHELL_CONFIG_DIR}/lazy/user-extensions.sh" ]] && _register_lazy_stubs "${SHELL_CONFIG_DIR}/lazy/user-extensions.sh"
+    fi
+    unset _user_ext_files
+fi
+
 # ── Tier 3: optional lazy stubs — registered only when opted in ──────────────
 # Set DOTFILES_OPTIONAL_INSTALLERS=true in env/90-local.sh to enable.
 # Files in lazy/optional/ follow the same public-function convention as lazy/.
@@ -274,7 +324,19 @@ fi
 #   3. oh-my-zsh    (zsh only)
 #   4. distro-native prompt (zsh only, e.g. Manjaro powerline10k)
 #   5. fallback PS1
-if command -v oh-my-posh &>/dev/null; then
+if [[ "${DOTFILES_PLAIN_SHELL}" == "true" ]]; then
+    # Plain mode bypasses the whole election chain — including the fallback
+    # branch — so it never inherits whatever /etc/bashrc or /etc/zshrc left
+    # behind. Explicit, colour-free prompt instead.
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        # shellcheck disable=SC2034  # PROMPT is zsh's special prompt var, not unused
+        PROMPT='%n@%m:%~%# '
+    else
+        PS1='\u@\h:\w\$ '
+    fi
+    export DOTFILES_PROMPT_ENGINE="plain"
+    log_debug "loader: plain shell mode — prompt engines and colour disabled"
+elif command -v oh-my-posh &>/dev/null; then
     # shellcheck disable=SC1091
     [[ -f "${SHELL_CONFIG_DIR}/tools/omp.sh" ]] && source "${SHELL_CONFIG_DIR}/tools/omp.sh"
 elif command -v starship &>/dev/null; then
@@ -316,6 +378,62 @@ _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 # shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
 unset _local_env
+
+# ── User extensions ───────────────────────────────────────────────────────────
+# Sourced after 90-local.sh so user definitions shadow everything, including
+# local env overrides; sourced before dedupe-path (below) so PATH entries
+# added by user files still get deduped. See docs/user-extensions.md.
+#
+# Per file: if changed since the last successful check (or never checked),
+# run `bash -n` as a syntax smoke-test before sourcing; a failure is warned,
+# the file is skipped, and the stamp is withheld so it's re-checked (and
+# re-warned) on every subsequent start until fixed. `bash -n` runs even under
+# zsh — it is a syntax smoke-test for "is this obviously broken", not a
+# compatibility gate, and zsh has no equivalent safe to run on arbitrary
+# user files. Shellcheck does NOT run here (100ms+/file) — see
+# check-user-extensions for the full, explicit check.
+if [[ "${DOTFILES_USER_EXT_ENABLED}" == "true" ]] && [[ -d "${DOTFILES_USER_EXT_DIR}" ]]; then
+    _user_ext_cache_dir="${XDG_CACHE_HOME}/dotfiles"
+    _user_ext_stamp="${_user_ext_cache_dir}/user-ext.stamp"
+    _user_ext_dirty=false
+
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        setopt nullglob
+    else
+        shopt -s nullglob
+    fi
+    _user_ext_files=( "${DOTFILES_USER_EXT_DIR}"/*.sh )
+    if [[ -n "${ZSH_VERSION}" ]]; then
+        unsetopt nullglob
+    else
+        shopt -u nullglob
+    fi
+
+    for _uef in "${_user_ext_files[@]}"; do
+        [[ -f "${_uef}" ]] || continue
+        # -nt is a builtin test operator in both bash and zsh — no stat
+        # subprocess. A missing stamp counts as "needs checking" (first run,
+        # or a prior run that never reached the touch below because some
+        # file failed). In the steady state (stamp newer than every file)
+        # this loop runs zero subprocesses.
+        if [[ ! -f "${_user_ext_stamp}" ]] || [[ "${_uef}" -nt "${_user_ext_stamp}" ]]; then
+            if ! bash -n "${_uef}" 2>/dev/null; then
+                log_warn "loader: user extension ${_uef} failed syntax check (bash -n) — skipping"
+                _user_ext_dirty=true
+                continue
+            fi
+        fi
+        # shellcheck disable=SC1090
+        source "${_uef}"
+    done
+
+    if [[ "${_user_ext_dirty}" == "false" ]]; then
+        [[ -d "${_user_ext_cache_dir}" ]] || mkdir -p "${_user_ext_cache_dir}" 2>/dev/null
+        : > "${_user_ext_stamp}"
+    fi
+
+    unset _user_ext_cache_dir _user_ext_stamp _user_ext_dirty _user_ext_files _uef
+fi
 
 # ── Migration pending warning ─────────────────────────────────────────────────
 _migration_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/migration"

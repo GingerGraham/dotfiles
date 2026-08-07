@@ -68,16 +68,24 @@ EOF
 }
 
 # Active registry — always _managed_tools_registry; additionally
-# _optional_tools_registry when DOTFILES_OPTIONAL_INSTALLERS=true.
-# Rows are sorted alphabetically by tool name so optional tools weave in
-# naturally regardless of declaration order in their source registries.
-# All consumers call this function — never the individual registries directly.
+# _optional_tools_registry when DOTFILES_OPTIONAL_INSTALLERS=true; additionally
+# _user_tools_registry when the user has defined one in a DOTFILES_USER_EXT_DIR
+# file (see docs/user-extensions.md). Rows are sorted alphabetically by tool
+# name so optional and user tools weave in naturally regardless of declaration
+# order. All consumers call this function — never the individual registries
+# directly.
+#
+# _user_tools_registry is presence-checked with `command -v`, not `declare -F`
+# — user extension files are eagerly sourced at startup (loader.sh), so by the
+# time this lazy-loaded file runs, the function is already defined if it
+# exists at all.
 _active_tools_registry() {
-    if [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]]; then
-        { _managed_tools_registry; _optional_tools_registry; } | sort
-    else
-        _managed_tools_registry | sort
-    fi
+    {
+        _managed_tools_registry
+        [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]] && _optional_tools_registry
+        command -v _user_tools_registry &>/dev/null && _user_tools_registry
+        true
+    } | sort
 }
 
 # Presence check supporting both `command -v` and `path:<file>` detect tokens.
