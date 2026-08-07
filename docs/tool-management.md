@@ -60,6 +60,7 @@ The registry currently includes:
 | **glab**       | `command -v`        | `install-glab`             | GitLab CLI                      |
 | **helm**       | `command -v`        | `install-helm`             | Kubernetes package manager      |
 | **kubectl**    | `command -v`        | `set-kubectl`              | Kubernetes client               |
+| **neovim**     | `command -v`        | `install-neovim`           | Neovim                          |
 | **noteshub**   | `command -v`        | `install-noteshub`         | NotesHub                        |
 | **nvm**        | `command -v`        | `install-nvm`              | Node version manager            |
 | **oh-my-posh** | `command -v`        | `install-oh-my-posh`       | Prompt engine                   |
@@ -72,6 +73,7 @@ The registry currently includes:
 | **tflint**     | `command -v`        | `install-tflint`           | Terraform linter                |
 | **tofu**       | `command -v`        | via tenv or `install-tenv` | OpenTofu variant                |
 | **trivy**      | `command -v`        | `install-trivy`            | Container vulnerability scanner |
+| **uv**         | `command -v`        | `install-uv`                | Python package & project manager |
 
 ## How update-tools works
 
@@ -164,6 +166,7 @@ Some updater functions are simple wrappers (call `install-<tool>` directly). Oth
 
 - **tenv-managed tools** (`terraform`, `tofu`) — if tenv is installed, the updater defers to `_update_tenv_managed()` to avoid duplicate version managers
 - **Custom paths** (`oh-my-zsh`) — uses the tool's built-in upgrade mechanism instead of a re-download
+- **uv** — `_update_uv()` tries `uv self update` first (only works for a standalone install); on failure it falls back to `install-uv`, which both handles a package-manager-installed `uv` and transparently converts it to a standalone install that stays self-updatable from then on
 
 ### Writing a custom updater
 

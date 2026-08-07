@@ -258,6 +258,12 @@ fi
 # shellcheck disable=SC1091
 { command -v terraform &>/dev/null || command -v tofu &>/dev/null; } && [[ -f "${SHELL_CONFIG_DIR}/completions/terraform.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/terraform.sh"
 
+# uv's completions are generated locally (`uv generate-shell-completion`, no
+# network access), unlike the gh/glab cases above — so it sits outside the
+# DOTFILES_OFFLINE guard, same as terraform.
+# shellcheck disable=SC1091
+command -v uv &>/dev/null && [[ -f "${SHELL_CONFIG_DIR}/completions/uv.sh" ]] && source "${SHELL_CONFIG_DIR}/completions/uv.sh"
+
 # ── Tier 3: lazy stubs — auto-discovered from lazy/*.sh ──────────────────────
 # Any public function (no leading _) defined in a lazy/ file gets a stub
 # automatically. To add a new lazy-loaded function: add it to the relevant
@@ -378,6 +384,14 @@ _local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
 # shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
 unset _local_env
+
+# ── Python manager finalisation ───────────────────────────────────────────────
+# Deferred until now (see env/20-development.sh): DOTFILES_PYTHON_MANAGER is
+# only meaningful once env/90-local.sh, sourced above, has had its final say.
+if command -v _dotfiles_init_python_manager &>/dev/null; then
+    _dotfiles_init_python_manager
+    unset -f _dotfiles_init_python_manager
+fi
 
 # ── User extensions ───────────────────────────────────────────────────────────
 # Sourced after 90-local.sh so user definitions shadow everything, including

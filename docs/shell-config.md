@@ -61,7 +61,7 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 | ----------------------- | --------------------------------------------------------- |
 | `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history          |
 | `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                 |
-| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks    |
+| `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks — including the uv/pyenv gate (`DOTFILES_PYTHON_MANAGER`): uv wins by default when present, and pyenv's shims are skipped (though `pyenv` itself stays on PATH) so the two don't compete for `python` |
 | `env/90-local.sh`       | Machine-local overrides — created once, never overwritten |
 | `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)         |
 | `core/functions.sh`     | Shell introspection (`get-fuctions`, `dedupe-path`)   |
@@ -100,6 +100,7 @@ gpg-create-key
 | File                | Contents                                                                                                                                  |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `installers.sh`     | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
+| `installers-python.sh` | `install-uv` — Python tooling group file, split out from the other installer groups in anticipation of more Python tools |
 | `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                                 |
 | `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)      |
 | `user-extensions.sh` | `check-user-extensions` — full syntax/lint/collision pass over `DOTFILES_USER_EXT_DIR`. Registered only when that directory has at least one `*.sh` file. See [user-extensions.md](user-extensions.md). |
@@ -165,6 +166,7 @@ alone — plain mode's blast radius is `NO_COLOR` and the prompt only.
 | `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)            | `loader.sh` / `env/90-local.sh` |
 | `DOTFILES_PLAIN_SHELL`    | `true` / `false` (default: `false`)             | `plain-shell` (via `exec env`) |
 | `DOTFILES_PROMPT_ENGINE`  | `plain` / `distro-native` / …                   | `loader.sh`       |
+| `DOTFILES_PYTHON_MANAGER` | `auto` / `uv` / `pyenv` / `both` (default: `auto`) | `env/90-local.sh` |
 
 ## Machine-local overrides
 
@@ -351,12 +353,14 @@ shell/
     ├── lazy/                   # Lazy-loaded on first call, not at startup
     │   ├── installers-X.sh     # install-<tool> and set-<tool> commands
     |   |                       # Split into multiple files to avoid shell startup slowdown from parsing a single large file
-    │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, etc.
+    │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, neovim, uv, etc.
+    │   ├── installers-python.sh    # install-uv — Python tooling group file
     │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
     │   │                       # Coordinates install-* commands and automatic updates
     │   ├── gpg-management.sh   # GPG key creation, rotation, export/import, signing key publishing
     │   └── user-extensions.sh  # check-user-extensions — full check of DOTFILES_USER_EXT_DIR
     └── completions/        # Same tool guards as tools/
+        └── uv.sh               # version-stamped cache, generated locally — outside the DOTFILES_OFFLINE guard
 ```
 
 User extension files themselves live outside this tree entirely — see

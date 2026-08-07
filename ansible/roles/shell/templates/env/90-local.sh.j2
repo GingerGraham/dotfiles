@@ -37,6 +37,12 @@ export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name | default(ansible_facts['
 # DOTFILES_SHOW_FUNCTIONS=true
 # Uncomment to enable optional installers (lazy/optional/installers*.sh) in update-tools.
 # DOTFILES_OPTIONAL_INSTALLERS=true
+# Controls whether pyenv shims are initialised alongside uv (see env/20-development.sh):
+#   auto (default) uv wins if present, otherwise pyenv initialises
+#   uv              never initialise pyenv shims
+#   pyenv           always initialise pyenv shims, even if uv is present
+#   both            same as pyenv; kept as an explicit, self-documenting value
+# export DOTFILES_PYTHON_MANAGER="auto"
 
 # ── Editor / pager overrides ──────────────────────────────────────────────────
 # Override the shared EDITOR/VISUAL set in 10-editors.sh if needed.
