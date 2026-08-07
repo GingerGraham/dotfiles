@@ -165,7 +165,32 @@ plain-shell() {
     local _sh
     _sh="$(command -v "${DOTFILES_SHELL:-bash}" 2>/dev/null)"
     [[ -z "${_sh}" ]] && _sh="${SHELL:-/bin/bash}"
+    log_warn "Re-execing ${_sh} with prompt styling and colour disabled (plain mode). Use 'pretty-shell' to restore normal prompt behaviour. This shell will exit normally when you type 'exit'."
     exec env DOTFILES_PLAIN_SHELL=true "${_sh}" -i
+}
+
+# ── Pretty shell ──────────────────────────────────────────────────────────────
+# Re-exec the current shell with prompt styling and colour restored — the
+# counterpart to plain-shell(). Same exec-replace semantics: this takes over
+# the current PID rather than nesting, so there's no lingering plain-mode
+# process left behind either.
+#
+# DOTFILES_PLAIN_SHELL and NO_COLOR were exported by plain-shell(), so a bare
+# `exec zsh -i` inherits them and loader.sh stays in plain mode — that's the
+# actual cause of "subshells retain plain status". Explicitly setting
+# DOTFILES_PLAIN_SHELL=false and stripping NO_COLOR from the child's
+# environment is what lets the normal prompt-engine election chain run again.
+#
+# NO_COLOR is unset rather than restored to a prior value: if you have it set
+# permanently in env/90-local.sh, loader.sh re-applies it at the end of the
+# normal run anyway (90-local.sh is always sourced last), so there's nothing
+# to lose by clearing it here.
+pretty-shell() {
+    local _sh
+    _sh="$(command -v "${DOTFILES_SHELL:-bash}" 2>/dev/null)"
+    [[ -z "${_sh}" ]] && _sh="${SHELL:-/bin/bash}"
+    log_info "Re-execing ${_sh} with prompt styling and colour restored (pretty mode). This shell will exit normally when you type 'exit'."
+    exec env -u NO_COLOR DOTFILES_PLAIN_SHELL=false "${_sh}" -i
 }
 
 # ── cheat.sh lookup ───────────────────────────────────────────────────────────

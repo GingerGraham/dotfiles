@@ -14,6 +14,7 @@ Shell config lives at `~/.config/shell/` — an XDG-compliant directory that is 
     - [Tier 3 — Lazy](#tier-3--lazy)
   - [Prompt engine selection](#prompt-engine-selection)
     - [Plain shell](#plain-shell)
+    - [Pretty shell](#pretty-shell)
   - [Exported variables](#exported-variables)
   - [Machine-local overrides](#machine-local-overrides)
   - [Shell introspection](#shell-introspection)
@@ -57,15 +58,15 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 
 `env/` and `core/` load unconditionally on every shell start. Files here must be fast — no subprocesses, no network calls.
 
-| File                    | Purpose                                                   |
-| ----------------------- | --------------------------------------------------------- |
-| `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history          |
-| `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                 |
+| File                    | Purpose                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history                                                                                                                                                                                                             |
+| `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                                                                                                                                                                                                                    |
 | `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks — including the uv/pyenv gate (`DOTFILES_PYTHON_MANAGER`): uv wins by default when present, and pyenv's shims are skipped (though `pyenv` itself stays on PATH) so the two don't compete for `python` |
-| `env/90-local.sh`       | Machine-local overrides — created once, never overwritten |
-| `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)         |
-| `core/functions.sh`     | Shell introspection (`get-fuctions`, `dedupe-path`)   |
-| `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                       |
+| `env/90-local.sh`       | Machine-local overrides — created once, never overwritten                                                                                                                                                                                                    |
+| `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)                                                                                                                                                                                                            |
+| `core/functions.sh`     | Shell introspection (`get-fuctions`, `dedupe-path`)                                                                                                                                                                                                          |
+| `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                                                                                                                                                                                                                          |
 
 ### Tier 2 — Conditional eager
 
@@ -97,13 +98,13 @@ Platform and distro files add platform-specific aliases, PATH entries, and envir
 gpg-create-key
 ```
 
-| File                | Contents                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `installers.sh`     | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md). |
-| `installers-python.sh` | `install-uv` — Python tooling group file, split out from the other installer groups in anticipation of more Python tools |
-| `maintenance.sh`    | `update-tools` — orchestrated update of all managed tools                                                                                 |
-| `gpg-management.sh` | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)      |
-| `user-extensions.sh` | `check-user-extensions` — full syntax/lint/collision pass over `DOTFILES_USER_EXT_DIR`. Registered only when that directory has at least one `*.sh` file. See [user-extensions.md](user-extensions.md). |
+| File                   | Contents                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installers.sh`        | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md).                                                               |
+| `installers-python.sh` | `install-uv` — Python tooling group file, split out from the other installer groups in anticipation of more Python tools                                                                                |
+| `maintenance.sh`       | `update-tools` — orchestrated update of all managed tools                                                                                                                                               |
+| `gpg-management.sh`    | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)                                                                    |
+| `user-extensions.sh`   | `check-user-extensions` — full syntax/lint/collision pass over `DOTFILES_USER_EXT_DIR`. Registered only when that directory has at least one `*.sh` file. See [user-extensions.md](user-extensions.md). |
 
 Use `get-installers` (alias: `installers`) to list all available lazy install commands.
 
@@ -151,22 +152,55 @@ problem is prompt-engine related versus something else in the config.
 `--color=auto`-style aliases in `core/aliases.sh` are deliberately left
 alone — plain mode's blast radius is `NO_COLOR` and the prompt only.
 
+### Pretty shell
+
+`pretty-shell` (defined in `core/functions.sh`, always available) is the
+counterpart to `plain-shell` — it re-execs the current shell with the two
+variables `plain-shell` exports cleared, so `loader.sh` runs its normal
+prompt-engine election chain again:
+
+- `DOTFILES_PLAIN_SHELL` is explicitly set to `false` (not merely unset),
+  keeping introspection consistent with how `DOTFILES_WSL` and
+  `DOTFILES_USER_EXT_ENABLED` report state — a deliberate `false` rather than
+  an absent variable;
+- `NO_COLOR` is stripped from the child process's environment entirely via
+  `env -u NO_COLOR`, rather than restored to some prior value.
+
+Both variables are `export`ed by `plain-shell`, so without this, a bare
+`exec zsh -i` or `exec bash -i` from inside a plain shell inherits them —
+`loader.sh` sees `DOTFILES_PLAIN_SHELL=true` and stays in plain mode. This is
+why starting a subshell doesn't get you back to a styled prompt on its own.
+
+If `NO_COLOR` is set permanently in `env/90-local.sh`, clearing it here
+doesn't lose that preference — `env/90-local.sh` is sourced last in every
+`loader.sh` run, plain or not, so a persistent setting re-applies itself
+after the election chain runs.
+
+Same `exec`-replace semantics as `plain-shell`: this takes over the current
+PID rather than nesting a child, so calling it doesn't leave a plain-mode
+process sitting underneath the styled one. Use it to toggle back out of
+`plain-shell` without closing the terminal or dropping an SSH connection.
+
+As with `plain-shell`, you don't need the function to test this directly:
+`env -u NO_COLOR DOTFILES_PLAIN_SHELL=false zsh -i` (or `bash -i`) works on
+its own.
+
 ## Exported variables
 
-| Variable                  | Values                                          | Set by            |
-| ------------------------- | ----------------------------------------------- | ----------------- |
-| `DOTFILES_OS`             | `Linux` / `Mac`                                 | `loader.sh`       |
-| `DOTFILES_WSL`            | `true` / `false`                                | `loader.sh`       |
-| `DOTFILES_DISTRO`         | `rhel` / `debian` / `suse` / `arch` / `unknown` | `loader.sh`       |
-| `DOTFILES_SHELL`          | `bash` / `zsh` / `sh`                           | `loader.sh`       |
-| `DOTFILES_SHOW_FUNCTIONS` | `true` / `false` (default: `false`)             | `env/90-local.sh` |
-| `SHELL_CONFIG_DIR`        | `~/.config/shell`                               | `loader.sh`       |
-| `DOTFILES_REPO_DIR`       | path to repo                                    | `env/00-core.sh`  |
-| `DOTFILES_USER_EXT_DIR`   | `${XDG_CONFIG_HOME}/dotfiles/user` (default)    | `loader.sh` / `env/90-local.sh` |
-| `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)            | `loader.sh` / `env/90-local.sh` |
-| `DOTFILES_PLAIN_SHELL`    | `true` / `false` (default: `false`)             | `plain-shell` (via `exec env`) |
-| `DOTFILES_PROMPT_ENGINE`  | `plain` / `distro-native` / …                   | `loader.sh`       |
-| `DOTFILES_PYTHON_MANAGER` | `auto` / `uv` / `pyenv` / `both` (default: `auto`) | `env/90-local.sh` |
+| Variable                    | Values                                             | Set by                          |
+| --------------------------- | -------------------------------------------------- | ------------------------------- |
+| `DOTFILES_OS`               | `Linux` / `Mac`                                    | `loader.sh`                     |
+| `DOTFILES_WSL`              | `true` / `false`                                   | `loader.sh`                     |
+| `DOTFILES_DISTRO`           | `rhel` / `debian` / `suse` / `arch` / `unknown`    | `loader.sh`                     |
+| `DOTFILES_SHELL`            | `bash` / `zsh` / `sh`                              | `loader.sh`                     |
+| `DOTFILES_SHOW_FUNCTIONS`   | `true` / `false` (default: `false`)                | `env/90-local.sh`               |
+| `SHELL_CONFIG_DIR`          | `~/.config/shell`                                  | `loader.sh`                     |
+| `DOTFILES_REPO_DIR`         | path to repo                                       | `env/00-core.sh`                |
+| `DOTFILES_USER_EXT_DIR`     | `${XDG_CONFIG_HOME}/dotfiles/user` (default)       | `loader.sh` / `env/90-local.sh` |
+| `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)                 | `loader.sh` / `env/90-local.sh` |
+| `DOTFILES_PLAIN_SHELL`      | `true` / `false` (default: `false`)                | `plain-shell` (via `exec env`)  |
+| `DOTFILES_PROMPT_ENGINE`    | `plain` / `distro-native` / …                      | `loader.sh`                     |
+| `DOTFILES_PYTHON_MANAGER`   | `auto` / `uv` / `pyenv` / `both` (default: `auto`) | `env/90-local.sh`               |
 
 ## Machine-local overrides
 
