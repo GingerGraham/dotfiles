@@ -105,6 +105,21 @@ _update_detect() {
     esac
 }
 
+# npm-global tools (bw, copilot, ...) live under nvm's active-version bin
+# dir, which only lands on PATH once nvm has actually been loaded — see
+# env/20-development.sh, where node/npm/nvm/npx start as lazy stubs and
+# defer `source nvm.sh` to first use. `_update_detect` below is a plain
+# `command -v`, so without this, any npm-installed tool false-negatives
+# in `update-tools`/`--list` until something else in the session has
+# already touched node/npm. Only fires if node is still the stub (checked
+# by grepping its body for _load_nvm) so we never re-source nvm.sh over
+# top of a version the user already `nvm use`'d by hand.
+_update_prime_nvm() {
+    declare -f node &>/dev/null || return 0
+    declare -f node | grep -q '_load_nvm' || return 0
+    _load_nvm &>/dev/null
+}
+
 # Return the full registry row for a given name (exact match), or non-zero.
 _managed_tool_row() {
     local want="$1" n d u i l
@@ -231,6 +246,8 @@ update-tools() {
             *) wanted+=("${arg}") ;;
         esac
     done
+
+    _update_prime_nvm
 
     local n d u i l
     if [[ "${list_only}" == "true" ]]; then

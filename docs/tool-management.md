@@ -44,36 +44,36 @@ update-tools --list        # Show all managed tools and install status
 
 The registry currently includes:
 
-| Tool           | Detection           | Install                    | Use case                        |
-| -------------- | ------------------- | -------------------------- | ------------------------------- |
-| **1password**  | `command -v`        | `install-1password`        | 1Password Desktop               |
-| **ansible**    | `command -v`        | `install-ansible`          | Configuration management        |
-| **aws**        | `command -v`        | `aws-update`               | AWS CLI                         |
-| **az**         | `command -v`        | `az-update`                | Azure CLI                       |
-| **bitwarden**  | `command -v`        | `install-bitwarden`        | Bitwarden Desktop               |
-| **bw**         | `command -v`        | `install-bw-cli`           | Bitwarden CLI                   |
-| **claude**     | `command -v`        | `install-claude-code`      | Claude Code CLI                 |
-| **copilot**    | `command -v`        | `install-copilot-cli`      | GitHub Copilot CLI              |
-| **cosign**     | `command -v`        | `install-cosign`           | Container signing               |
-| **edit**       | `command -v`        | `install-edit`             | Microsoft Edit                  |
-| **gh**         | `command -v`        | `install-gh`               | GitHub CLI                      |
-| **glab**       | `command -v`        | `install-glab`             | GitLab CLI                      |
-| **helm**       | `command -v`        | `install-helm`             | Kubernetes package manager      |
-| **kubectl**    | `command -v`        | `set-kubectl`              | Kubernetes client               |
-| **neovim**     | `command -v`        | `install-neovim`           | Neovim                          |
-| **noteshub**   | `command -v`        | `install-noteshub`         | NotesHub                        |
-| **nvm**        | `command -v`        | `install-nvm`              | Node version manager            |
-| **oh-my-posh** | `command -v`        | `install-oh-my-posh`       | Prompt engine                   |
-| **oh-my-zsh**  | `path:~/.oh-my-zsh` | `install-oh-my-zsh`        | Zsh framework                   |
-| **op**         | `command -v`        | `install-op-cli`           | 1Password CLI                   |
-| **opendeck**   | `command -v`        | `install-opendeck`         | Opendeck                        |
-| **starship**   | `command -v`        | `install-starship`         | Prompt engine                   |
-| **terraform**  | `command -v`        | via tenv or `install-tenv` | Infrastructure as code          |
-| **tenv**       | `command -v`        | `install-tenv`             | Manages terraform/tofu versions |
-| **tflint**     | `command -v`        | `install-tflint`           | Terraform linter                |
-| **tofu**       | `command -v`        | via tenv or `install-tenv` | OpenTofu variant                |
-| **trivy**      | `command -v`        | `install-trivy`            | Container vulnerability scanner |
-| **uv**         | `command -v`        | `install-uv`                | Python package & project manager |
+| Tool           | Detection           | Install                    | Use case                         |
+| -------------- | ------------------- | -------------------------- | -------------------------------- |
+| **1password**  | `command -v`        | `install-1password`        | 1Password Desktop                |
+| **ansible**    | `command -v`        | `install-ansible`          | Configuration management         |
+| **aws**        | `command -v`        | `aws-update`               | AWS CLI                          |
+| **az**         | `command -v`        | `az-update`                | Azure CLI                        |
+| **bitwarden**  | `command -v`        | `install-bitwarden`        | Bitwarden Desktop                |
+| **bw**         | `command -v`        | `install-bw-cli`           | Bitwarden CLI                    |
+| **claude**     | `command -v`        | `install-claude-code`      | Claude Code CLI                  |
+| **copilot**    | `command -v`        | `install-copilot-cli`      | GitHub Copilot CLI               |
+| **cosign**     | `command -v`        | `install-cosign`           | Container signing                |
+| **edit**       | `command -v`        | `install-edit`             | Microsoft Edit                   |
+| **gh**         | `command -v`        | `install-gh`               | GitHub CLI                       |
+| **glab**       | `command -v`        | `install-glab`             | GitLab CLI                       |
+| **helm**       | `command -v`        | `install-helm`             | Kubernetes package manager       |
+| **kubectl**    | `command -v`        | `set-kubectl`              | Kubernetes client                |
+| **neovim**     | `command -v`        | `install-neovim`           | Neovim                           |
+| **noteshub**   | `command -v`        | `install-noteshub`         | NotesHub                         |
+| **nvm**        | `command -v`        | `install-nvm`              | Node version manager             |
+| **oh-my-posh** | `command -v`        | `install-oh-my-posh`       | Prompt engine                    |
+| **oh-my-zsh**  | `path:~/.oh-my-zsh` | `install-oh-my-zsh`        | Zsh framework                    |
+| **op**         | `command -v`        | `install-op-cli`           | 1Password CLI                    |
+| **opendeck**   | `command -v`        | `install-opendeck`         | Opendeck                         |
+| **starship**   | `command -v`        | `install-starship`         | Prompt engine                    |
+| **terraform**  | `command -v`        | via tenv or `install-tenv` | Infrastructure as code           |
+| **tenv**       | `command -v`        | `install-tenv`             | Manages terraform/tofu versions  |
+| **tflint**     | `command -v`        | `install-tflint`           | Terraform linter                 |
+| **tofu**       | `command -v`        | via tenv or `install-tenv` | OpenTofu variant                 |
+| **trivy**      | `command -v`        | `install-trivy`            | Container vulnerability scanner  |
+| **uv**         | `command -v`        | `install-uv`               | Python package & project manager |
 
 ## How update-tools works
 
@@ -92,6 +92,17 @@ Each tool has a **detection token**:
   ```bash
   path:~/.oh-my-zsh    # oh-my-zsh is always in ~/.oh-my-zsh
   ```
+
+**npm-global tools under nvm (e.g. `bw`, `copilot`):** these use `command -v` too,
+but their binaries live under nvm's active-version bin directory, which only
+lands on `$PATH` once nvm has actually loaded. `node`/`npm`/`nvm`/`npx` start
+each shell as lazy stubs (see
+[shell-config.md](shell-config.md#lazy-loading-architecture)) that defer
+`source nvm.sh` to first use — so on a shell where nothing has touched
+node/npm yet, `bw`/`copilot` would otherwise false-negative. `update-tools`
+works around this with `_update_prime_nvm`, called once at the top of every
+run: it loads nvm, but only if it's still the unloaded stub, so it never
+overrides a version you've already `nvm use`'d by hand in that shell.
 
 Detection runs during `--list` and before every update attempt. If a tool is not detected, `update-tools` reports it as "not installed" and suggests the install command.
 
@@ -304,6 +315,11 @@ If using `path:<file>` detection (like oh-my-zsh), ensure the file exists:
 ```bash
 ls -la ~/.oh-my-zsh
 ```
+
+If it's an npm-global tool installed under nvm (e.g. `bw`, `copilot`), this
+should now resolve itself automatically — see [Detection](#detection) for
+why it could show `-` in a fresh shell historically, and how `update-tools`
+handles it.
 
 ### Updater failed
 
