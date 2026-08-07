@@ -9,20 +9,69 @@ if [[ -d "${HOME}/go" ]]; then
 fi
 [[ -d "/usr/local/go/bin" ]] && PATH="/usr/local/go/bin:${PATH}"
 
-# ── Python / pyenv ────────────────────────────────────────────────────────────
+# ── Python: uv / pyenv ────────────────────────────────────────────────────────
+# uv is the primary Python package/project manager. pyenv remains supported but
+# its shims are not installed when uv is present: two shim systems competing for
+# `python` on PATH is the same class of problem tenv solved for terraform/tofu.
+#
+# DOTFILES_PYTHON_MANAGER (set in env/90-local.sh):
+#   auto   (default) uv wins if present, otherwise pyenv initialises
+#   uv     never initialise pyenv shims
+#   pyenv  always initialise pyenv shims, even if uv is present
+#   both   same as pyenv; kept as an explicit, self-documenting value
+#
+# PYENV_ROOT/PATH are set unconditionally below (subprocess-free, matches this
+# file's contract) so `pyenv` itself stays callable for management regardless
+# of the gate. The gate/eval logic that reads DOTFILES_PYTHON_MANAGER is
+# deliberately NOT run inline here: env/90-local.sh — the only place that
+# variable is meant to be set — sources *after* this file within loader.sh's
+# Tier 1 pass, so reading it here would only ever see the default. Instead
+# this defines _dotfiles_init_python_manager, and loader.sh invokes it once,
+# later, after 90-local.sh has had its final say (same reasoning as
+# dedupe-path running "after all tiers").
 if [[ -d "${HOME}/.pyenv" ]]; then
     export PYENV_ROOT="${HOME}/.pyenv"
     PATH="${PYENV_ROOT}/bin:${PATH}"
 fi
-# Activate shims and shell integration — must run after PYENV_ROOT is in PATH.
-# pyenv init adds shims to PATH and sets up the version-switching hooks.
-# virtualenv-init is only called if the plugin is actually installed.
-if [[ -d "${HOME}/.pyenv" ]] && command -v pyenv &>/dev/null; then
-    eval "$(pyenv init - "${DOTFILES_SHELL:-bash}")"
-    if pyenv commands 2>/dev/null | grep -q virtualenv-init; then
-        eval "$(pyenv virtualenv-init -)"
+
+_dotfiles_init_python_manager() {
+    # uv is detected with the `command -v` builtin (no subprocess) —
+    # ~/.local/bin is already on PATH from 00-core.sh by this point.
+    local uv_present=false
+    command -v uv &>/dev/null && uv_present=true
+
+    if [[ "${uv_present}" == "true" ]]; then
+        # uv tool install already targets ~/.local/bin by default (verified
+        # against current uv docs — the "executable directory" is
+        # XDG-derived and resolves to ~/.local/bin on both Linux and macOS);
+        # setting this explicitly just makes that deterministic rather than
+        # implicit. UV_PYTHON_INSTALL_DIR and UV_TOOL_DIR are deliberately
+        # left unset — uv already resolves platform-appropriate locations
+        # for those on its own, and forcing an override risks orphaning an
+        # existing install's interpreters and tools.
+        export UV_TOOL_BIN_DIR="${HOME}/.local/bin"
     fi
-fi
+
+    local manager="${DOTFILES_PYTHON_MANAGER:-auto}"
+    local init_pyenv_shims=false
+    case "${manager}" in
+        uv)         ;;
+        pyenv|both) init_pyenv_shims=true ;;
+        *)          [[ "${uv_present}" == "false" ]] && init_pyenv_shims=true ;;
+    esac
+
+    [[ -d "${HOME}/.pyenv" ]] && command -v pyenv &>/dev/null || return 0
+
+    if [[ "${init_pyenv_shims}" == "true" ]]; then
+        eval "$(pyenv init - "${DOTFILES_SHELL:-bash}")"
+        if pyenv commands 2>/dev/null | grep -q virtualenv-init; then
+            eval "$(pyenv virtualenv-init -)"
+        fi
+        log_debug "python manager: pyenv (DOTFILES_PYTHON_MANAGER=${manager}, uv present=${uv_present})"
+    else
+        log_debug "python manager: uv (pyenv shims not initialised — DOTFILES_PYTHON_MANAGER=${manager})"
+    fi
+}
 
 # ── Node / nvm ────────────────────────────────────────────────────────────────
 export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"

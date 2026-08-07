@@ -42,6 +42,7 @@ glab|glab|install-glab|install-glab|GitLab CLI
 helm|helm|install-helm|install-helm|Helm
 jq|jq|install-jq|install-jq|jq (JSON processor)
 kubectl|kubectl|_update_kubectl|set-kubectl|kubectl
+neovim|nvim|install-neovim|install-neovim|Neovim
 oh-my-posh|oh-my-posh|install-oh-my-posh|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
 op|op|install-op-cli|install-op-cli|1Password CLI
@@ -53,6 +54,7 @@ terraform|terraform|_update_terraform|install-tenv|Terraform
 tflint|tflint|install-tflint|install-tflint|TFLint
 tofu|tofu|_update_tofu|install-tenv|OpenTofu
 trivy|trivy|install-trivy|install-trivy|Trivy
+uv|uv|_update_uv|install-uv|uv (Python package and project manager)
 yq|yq|install-yq|install-yq|yq (YAML processor)
 EOF
 }
@@ -127,6 +129,17 @@ _update_ensure_fn() {
 
 _update_aws() { _update_ensure_fn aws-update tools/aws.sh   && aws-update; }
 _update_az()  { _update_ensure_fn az-update  tools/azure.sh && az-update; }
+
+_update_uv() {
+    # `uv self update` only works for standalone installs; a package-manager
+    # copy errors out. Falling back to install-uv both handles that case and
+    # transparently converts it to a standalone install we can keep updated.
+    if uv self update; then
+        return 0
+    fi
+    log_warn "uv self update failed — falling back to the standalone installer"
+    install-uv
+}
 
 _update_kubectl() {
     _update_ensure_fn set-kubectl tools/kubernetes.sh || { log_warn "set-kubectl not available"; return 1; }

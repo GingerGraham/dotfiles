@@ -26,6 +26,8 @@ root is required.
   - [GitHub Copilot CLI — `install-copilot-cli`](#github-copilot-cli--install-copilot-cli)
   - [Claude Code — `install-claude-code`](#claude-code--install-claude-code)
   - [Antigravity CLI — `install-antigravity`](#antigravity-cli--install-antigravity)
+  - [Neovim — `install-neovim`](#neovim--install-neovim)
+  - [uv — `install-uv`](#uv--install-uv)
   - [Node prerequisite (shared)](#node-prerequisite-shared)
 
 ## Available installers
@@ -44,6 +46,7 @@ root is required.
 | `install-gemini-cli`  | _(alias for `install-antigravity`)_       | See Antigravity CLI                                                          |
 | `install-gh`          | GitHub CLI (`gh`)                         | Official package repo per distro, with a binary tarball fallback             |
 | `install-glab`        | GitLab CLI (`glab`)                       | Native dnf/pacman repo on Fedora/Arch; release tarball fallback              |
+| `install-neovim`      | Neovim (`nvim`)                           | GitHub release tarball on every platform → `~/.local/opt/nvim-<tag>`, symlinked into `~/.local/bin` |
 | `install-oh-my-posh`  | oh-my-posh prompt                         | Upstream install script / Homebrew                                           |
 | `install-oh-my-zsh`   | oh-my-zsh framework                       | Upstream install script                                                      |
 | `install-op-cli`      | 1Password CLI (`op`)                      | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS      |
@@ -56,6 +59,7 @@ root is required.
 | `install-tenv`        | tenv (Terraform/OpenTofu version manager) | GitHub release tarball → `~/.local/bin`                                      |
 | `install-tofu`        | tofu CLI                                  | GitHub release tarball → `~/.local/bin`                                      |
 | `install-trivy`       | Trivy scanner                             | Vendor repo per distro / Homebrew                                            |
+| `install-uv`          | uv (Python package & project manager)     | Astral's standalone installer (`UV_NO_MODIFY_PATH=1`) → `~/.local/bin`       |
 
 ## GitHub CLI — `install-gh`
 
@@ -174,6 +178,88 @@ an `antigravity/` subdirectory that deploys to `~/.gemini/`.
 
 Launch `agy` to authenticate (opens a browser on first run). Requires a Google
 account.
+
+## Neovim — `install-neovim`
+
+Always installs from upstream GitHub release tarballs, on **every** platform —
+including macOS (no Homebrew path). This is deliberate: distro packages lag
+badly on Debian/Ubuntu, the `nvim-config` companion repo (deployed by
+[`sync-external`](external-sync.md)) requires Neovim 0.10+ and only selects the
+treesitter `main` branch at 0.12+, and a single install path across every
+platform is far easier to reason about than a version-floor matrix with
+per-distro sticky method tracking.
+
+`sync-external` and `install-neovim` deliberately split responsibilities:
+`sync-external` (`link_tree` mode against the `nvim-config` repo) owns config,
+`install-neovim` owns the binary — neither has an opinion about the other. On a
+fresh machine, run both; if `~/.config/nvim` looks empty after installing the
+binary, that's `sync-external`'s job, not this one's.
+
+**Versioned install layout:**
+
+- Extracted to `~/.local/opt/nvim-<tag>/`
+- Symlinked: `~/.local/bin/nvim` → `~/.local/opt/nvim-<tag>/bin/nvim`
+- Older `~/.local/opt/nvim-*` directories are pruned on every successful run
+- If the currently symlinked version already matches the latest tag, the
+  function logs and exits without downloading anything
+
+**Pre-flight cleanup** handles three classes of stale install, every run:
+
+1. **A real file (not a symlink) at `~/.local/bin/nvim`** — the retired
+   Ansible role's `appimage` method left a generated bash wrapper script at
+   exactly this path. It's moved to `~/.local/bin/nvim.pre-dotfiles.bak`
+   (logged) so the new symlink can take the path.
+2. **`~/.local/share/nvim/nvim.appimage`** — removed, **file only**.
+   `~/.local/share/nvim` is Neovim's XDG *data* directory: it holds the
+   lazy.nvim plugin tree and site files. **The directory itself is never
+   touched** — removing it would destroy the plugin install.
+3. **A package-manager-managed Neovim** — detected via the package database
+   (`rpm -q` / `dpkg -s` / `pacman -Q` / `brew list --versions`), not
+   `command -v` (which would also match our own tarball install once it's on
+   PATH). Since `~/.local/bin` is ahead of the system path, the tarball binary
+   takes precedence either way — removal here is hygiene, not necessity, so
+   the function reports the packaged version and prompts before removing
+   anything. Declining, or a non-interactive shell, leaves the packaged copy
+   in place with a warning.
+
+On macOS, the versioned install directory has its quarantine attribute
+stripped (`xattr -cr`) after extraction — without it, Gatekeeper blocks the
+unnotarized binary.
+
+## uv — `install-uv`
+
+Installs via Astral's official standalone installer, with shell-profile
+modification disabled:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
+```
+
+**`UV_NO_MODIFY_PATH=1` is load-bearing, not optional.** By default the
+installer appends PATH exports to every shell profile it finds. Our
+`~/.bashrc` / `~/.zshrc` are managed symlinks into the dotfiles repo, so an
+unguarded run would write uncommitted changes into the working tree and block
+the `sync-external`/self-sync timers — the same class of problem `install-nvm`
+used to cause before `_restore_managed_shell_files` was added to clean up
+after it. Setting the variable prevents the problem rather than repairing it.
+`UV_UNMANAGED_INSTALL` is deliberately **not** used — it disables
+`uv self update`, which `update-tools`' `_update_uv` depends on.
+
+The default install directory (`~/.local/bin`) is already on `PATH` via
+`env/00-core.sh`, so no `UV_INSTALL_DIR` override is needed.
+
+**Self-update:** `update-tools uv` calls `uv self update` first; that only
+works for a standalone install, so if it fails (e.g. a package-manager copy)
+the updater falls back to re-running `install-uv`, which transparently
+converts it to a standalone install that stays managed from then on.
+
+**Package-manager coexistence:** if a package-manager-installed `uv` is also
+present, `install-uv` logs a warning naming it. It is never removed — the
+standalone binary in `~/.local/bin` simply takes `PATH` precedence and is the
+one `uv self update` manages.
+
+**`uvx`** runs a tool in an ephemeral environment without installing it
+(`uvx ruff check .`) — see the printed post-install output for common commands.
 
 ## Node prerequisite (shared)
 
