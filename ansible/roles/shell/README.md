@@ -14,7 +14,7 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | `shell/bashrc`  | `~/.bashrc`                       | Thin stub that sources loader.sh       |
 | `shell/zshrc`   | `~/.zshrc`                        | Thin stub that sources loader.sh       |
 | `shell/zshenv`  | `~/.zshenv`                       | Sets ZDOTDIR for zsh                   |
-| _(template)_    | `~/.config/shell/env/90-local.sh` | Created once, never overwritten        |
+| _(template)_    | `~/.config/dotfiles/local/90-local.sh` | Created once, never overwritten. Deliberately outside `~/.config/shell` (a repo symlink) so it survives a release-mode symlink swap |
 | _(template)_    | `~/.config/direnv/direnv.toml`    | Created once, never overwritten        |
 | _(template)_    | `~/.config/starship.toml`         | Created once, never overwritten        |
 | _(none)_         | `~/.config/dotfiles/user`         | Directory only — never managed after creation. See [user-extensions.md](../../../docs/user-extensions.md) |
@@ -27,18 +27,25 @@ repo are immediately live in new shell sessions without re-running Ansible.
 | Real file (non-symlink) at `~/.bashrc` etc.      | Backed up to `~/.config/dotfiles/migration/<filename>.pre-dotfiles.bak`; replaced |
 | `~/.config/shell` is already the correct symlink | No change (Ansible no-op)                                                         |
 | `~/.config/shell` is a real directory            | **Role fails with instructions** — manual step required                           |
-| `90-local.sh` already exists                     | Left untouched (`force: false`)                                                   |
+| `90-local.sh` already exists at the relocated path | Left untouched (`force: false`)                                                 |
+| Legacy `90-local.sh` found in-tree (pre-relocation installs) | Copied to the relocated path (unless already present there), then removed from the repo tree |
 | `direnv.toml` already exists                     | Left untouched (`force: false`)                                                   |
 | `starship.toml` already exists                   | Left untouched (`force: false`)                                                   |
 
 ## Machine-local env file
 
-`~/.config/shell/env/90-local.sh` is templated on first Ansible run and never
-overwritten. It is gitignored (`shell/config/env/90-local.sh` in `.gitignore`).
+`~/.config/dotfiles/local/90-local.sh` is templated on first Ansible run and
+never overwritten. It lives outside `~/.config/shell` (a symlink into
+`dotfiles_repo_root`, the dotfiles repo working tree or release checkout) so
+it survives a release-mode symlink swap untouched — see
+[docs/sync.md#install-modes](../../../docs/sync.md#install-modes). The `.j2`
+template itself stays tracked in the repo, refreshed on every sync, so you
+have a reference to diff your deployed copy against — there is no auto-merge.
 
-Edit it directly on the machine to add machine-specific PATH extensions, proxy
-settings, credentials, or tool version pins. It is sourced last in the `env/`
-tier so its values override everything in the shared config.
+Edit the deployed file directly on the machine to add machine-specific PATH
+extensions, proxy settings, credentials, or tool version pins. `loader.sh`
+sources it last, after every shared `env/` file, so its values override
+everything in the shared config.
 
 See the file itself for annotated examples.
 
@@ -81,6 +88,7 @@ depends on.
 | `dotfiles_machine_name`   | `{{ ansible_hostname }}`       | Set by `common` role | Used in 90-local.sh template                  |
 | `projects_base`           | `{{ xdg_data_home }}/projects` | `group_vars/all.yml` | Used in direnv.toml template                  |
 | `shell_user_ext_dir`      | `{{ xdg_config_home }}/dotfiles/user` | `group_vars/all.yml` | User extension drop-in directory — created only, never templated |
+| `dotfiles_local_env_dir`  | `{{ xdg_config_home }}/dotfiles/local` | `group_vars/all.yml` | `90-local.sh` destination — outside `shell_config_dir` so it survives release-mode symlink swaps |
 
 ## Running this role alone
 

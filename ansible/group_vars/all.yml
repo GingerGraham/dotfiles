@@ -14,6 +14,7 @@ shell_config_dir: "{{ xdg_config_home }}/shell" # Shell role destination; overri
 git_config_dir: "{{ xdg_config_home }}/git"   # Git role destination; override only for a custom git config layout.
 dotfiles_migration_dir: "{{ xdg_config_home }}/dotfiles/migration"
 shell_user_ext_dir: "{{ xdg_config_home }}/dotfiles/user" # User-defined config extension drop-in directory; deliberately outside shell_config_dir (a repo symlink) — see docs/user-extensions.md.
+dotfiles_local_env_dir: "{{ xdg_config_home }}/dotfiles/local" # Machine-local env override (90-local.sh) destination; deliberately outside shell_config_dir (a repo symlink) so it survives a release-mode symlink swap untouched — see docs/sync.md#install-modes.
 
 # ── External sync engine ──────────────────────────────────────────────────────
 # Generic add-on repo sync — see ansible/roles/sync-external/README.md and
@@ -24,8 +25,13 @@ external_sync_conf_dir: "{{ xdg_config_home }}/external-sync"  # Per-repo sync.c
 external_sync_state_dir: "{{ xdg_data_home }}/external-sync"   # Per-repo repo/ clone, last-sync, logs base directory; override only for a non-standard data root.
 
 # ── Dotfiles Repo Root ────────────────────────────────────────────────────────
+# dotfiles_dir is used as-is by roles/sync-external, which has its own
+# clone/deploy model and is out of scope for install-mode awareness.
+# roles/sync and roles/shell instead consume dotfiles_repo_root, resolved
+# fresh from disk every run — see ansible/tasks/detect_install_mode.yml.
 dotfiles_dir: "{{ playbook_dir | dirname }}"
 dotfiles_repo_url: ""  # Override in host_vars/localhost.yml.
+dotfiles_release_repo_url: "https://github.com/GingerGraham/dotfiles.git" # Fallback dotfiles_repo_url in release mode, where there is no git remote to detect it from. Forking this repo? Override this (or dotfiles_repo_url directly) in host_vars/localhost.yml — see also the hardcoded REPO_OWNER/REPO_NAME in bootstrap.sh.
 
 # ── Profile ───────────────────────────────────────────────────────────────────
 # Override in host_vars/localhost.yml. Valid values: workstation | server | minimal

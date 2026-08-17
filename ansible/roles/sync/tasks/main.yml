@@ -10,6 +10,7 @@
   loop:
     - "{{ ansible_facts['env']['HOME'] }}/.local/bin"
     - "{{ xdg_data_home }}/dotfiles/logs"
+    - "{{ xdg_data_home }}/dotfiles/releases"
     - "{{ xdg_config_home }}/dotfiles"
     - "{{ xdg_config_home }}/systemd/user"
 
@@ -17,7 +18,7 @@
 
 - name: Make repo scripts executable
   ansible.builtin.file:
-    path: "{{ dotfiles_dir }}/scripts/{{ item }}"
+    path: "{{ dotfiles_repo_root }}/scripts/{{ item }}"
     mode: "0755"
   loop:
     - sync.sh
@@ -25,18 +26,19 @@
   failed_when: false
 
 # Deploy stable wrappers to ~/.local/bin so the path never changes even if
-# the repo moves. Symlinks rather than copies — changes in the repo are
-# immediately reflected without re-running Ansible.
+# the repo moves (or, in release mode, the 'current' symlink is flipped to a
+# new release). Symlinks rather than copies — changes are immediately
+# reflected without re-running Ansible.
 - name: Deploy dotfiles-sync wrapper symlink
   ansible.builtin.file:
-    src: "{{ dotfiles_dir }}/scripts/sync.sh"
+    src: "{{ dotfiles_repo_root }}/scripts/sync.sh"
     dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-sync"
     state: link
     force: true
 
 - name: Deploy dotfiles-branch wrapper symlink
   ansible.builtin.file:
-    src: "{{ dotfiles_dir }}/scripts/switch-branch.sh"
+    src: "{{ dotfiles_repo_root }}/scripts/switch-branch.sh"
     dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/dotfiles-branch"
     state: link
     force: true
@@ -54,28 +56,33 @@
 # ansible.builtin.command is correct here — git remote get-url is a pure read
 # with no side effects. changed_when: false satisfies the idempotency linter.
 # ansible.builtin.git is a checkout module and does not inspect existing repos.
+# dev mode only — a release-mode checkout has no .git to read a remote from.
 - name: Detect dotfiles remote URL from git # noqa: command-instead-of-module
   ansible.builtin.command:
     cmd: git remote get-url origin
-    chdir: "{{ dotfiles_dir }}"
+    chdir: "{{ dotfiles_repo_root }}"
   register: _dotfiles_remote_url
   changed_when: false
   failed_when: false
   check_mode: false
+  when: dotfiles_resolved_mode == 'dev'
 
 - name: Debug detected dotfiles remote URL
   ansible.builtin.debug:
     msg: "Detected dotfiles remote URL: {{ _dotfiles_remote_url.stdout | trim }}"
-  when: _dotfiles_remote_url.rc == 0
+  when:
+    - dotfiles_resolved_mode == 'dev'
+    - _dotfiles_remote_url.rc == 0
 
 - name: Fail with actionable message if remote URL cannot be determined
   ansible.builtin.fail:
     msg: >
       Could not determine dotfiles remote URL from 'git remote get-url origin'
-      in {{ dotfiles_dir }} (exit code: {{ _dotfiles_remote_url.rc }}).
+      in {{ dotfiles_repo_root }} (exit code: {{ _dotfiles_remote_url.rc }}).
       Either the repo has no 'origin' remote or git is not available.
       Set dotfiles_repo_url explicitly in host_vars/localhost.yml to override.
   when:
+    - dotfiles_resolved_mode == 'dev'
     - _dotfiles_remote_url.rc != 0
     - dotfiles_repo_url == ""
 
@@ -83,7 +90,17 @@
   ansible.builtin.set_fact:
     dotfiles_repo_url: "{{ _dotfiles_remote_url.stdout | trim }}"
   when:
+    - dotfiles_resolved_mode == 'dev'
     - _dotfiles_remote_url.rc == 0
+    - dotfiles_repo_url == ""
+
+# release mode — no git remote to read; fall back to the known public repo
+# URL (see dotfiles_release_repo_url in group_vars/all.yml).
+- name: Set dotfiles_repo_url fact for release mode
+  ansible.builtin.set_fact:
+    dotfiles_repo_url: "{{ dotfiles_release_repo_url }}"
+  when:
+    - dotfiles_resolved_mode == 'release'
     - dotfiles_repo_url == ""
 
 # Only create sync.conf if it does not already exist. install.sh creates it

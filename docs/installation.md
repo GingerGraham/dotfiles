@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Bootstrap (recommended)](#bootstrap-recommended)
+  - [Dev mode](#dev-mode)
   - [Passing options through bootstrap](#passing-options-through-bootstrap)
 - [Running install.sh directly](#running-installsh-directly)
   - [First-run prompts](#first-run-prompts)
@@ -17,29 +18,49 @@
 
 ## Bootstrap (recommended)
 
-The fastest path to a working setup is the one-liner bootstrap. It clones the repo to a sensible location under your projects directory and then runs `install.sh` automatically.
+The fastest path to a working setup is the one-liner bootstrap.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh)
 ```
 
-> **Forking this repo?** Replace the URL above with your own fork's raw bootstrap URL.
+> **Forking this repo?** Replace the URL above with your own fork's raw bootstrap URL, and update `REPO_OWNER`/`REPO_NAME` at the top of `bootstrap.sh` and `dotfiles_release_repo_url` in `ansible/group_vars/all.yml` to match.
 
-On first run you will be prompted for:
+By default this fetches a tarball snapshot of `main` to `~/.local/share/dotfiles/` — **no `git clone`, no `.git` anywhere** — and hands off to `install.sh`. This is **release mode**: no `git` required to get started, and nothing entangled with your own project tree. See [docs/sync.md#install-modes](sync.md#install-modes) for the full comparison with dev mode below.
 
-- A projects base directory (default: `~/Projects`). The repo will be cloned to `<base>/Personal/GitHub/dotfiles`.
-- Everything that `install.sh` prompts for interactively — profile, machine name, git identity, and so on (see [First-run prompts](#first-run-prompts) below).
+The fetch-and-flip is atomic (an old release stays in place until the new one is fully extracted), so re-running the one-liner is always safe. Only `curl` and `tar` are required for this path — `install.sh` still checks for `git`/`python3`/`ansible-core` afterwards, since Ansible itself needs `git` (to fetch `bash-logger`) regardless of install mode.
 
-If the repo already exists at the target path, `bootstrap.sh` runs `git pull --ff-only` before handing off to `install.sh`, so re-running the one-liner is safe.
+On first run you will be prompted for everything `install.sh` prompts for interactively — profile, machine name, git identity, your own projects base directory, and so on (see [First-run prompts](#first-run-prompts) below).
+
+### Dev mode
+
+Actively developing this repo? Add `--dev` for the original clone-and-symlink workflow — a real `git` checkout you can switch branches on with `dotfiles-branch`:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) --dev
+```
+
+You'll be prompted for a projects base directory (default: `~/Projects`); the repo is cloned to `<base>/Personal/GitHub/dotfiles`. If it already exists there, `bootstrap.sh` runs `git pull --ff-only` before handing off to `install.sh`, so re-running is safe here too. `--projects-base` can be passed explicitly to skip the prompt — it only takes effect together with `--dev`.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) \
+  --dev --projects-base ~/Code
+```
 
 ### Passing options through bootstrap
 
-`bootstrap.sh` only handles `--projects-base` itself. All other flags are passed straight through to `install.sh`, so you can suppress interactive prompts from the one-liner:
+`bootstrap.sh` only handles `--dev` and `--projects-base` itself (and only uses `--projects-base` for the clone location when `--dev` is also given — otherwise it's forwarded straight through to `install.sh` for your own project tree). Every other flag is passed straight through to `install.sh`, so you can suppress interactive prompts from the one-liner:
 
 ```bash
-# Fully non-interactive workstation install
+# Fully non-interactive workstation install (release mode)
 bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) \
   --projects-base ~/Code \
+  --profile workstation \
+  --machine-name my-laptop
+
+# Same, but dev mode — --projects-base also picks the clone location here
+bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) \
+  --dev --projects-base ~/Code \
   --profile workstation \
   --machine-name my-laptop
 
@@ -56,7 +77,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/b
 
 ## Running install.sh directly
 
-If you have already cloned the repo, run `install.sh` from the repo root:
+If you already have a dotfiles tree on disk — a dev-mode clone, or a release-mode checkout at `~/.local/share/dotfiles/current` — run `install.sh` from its root:
 
 ```bash
 ./install.sh [OPTIONS]
@@ -128,7 +149,7 @@ See [docs/tool-management.md](tool-management.md) for the complete tool list, tr
 | `--profile <workstation\|server\|minimal>` | Skip profile prompt and use the given value |
 | `--machine-name <name>` | Skip machine name prompt |
 | `--playbook <site\|server>` | Ansible playbook to run (default: `site`). Use `server` with `--profile server` for server deployments |
-| `--projects-base <path>` | Skip projects base prompt. Tilde expansion handled (`~/Projects` is valid). Passed automatically by `bootstrap.sh` |
+| `--projects-base <path>` | Skip projects base prompt (root of your own project tree; also the dotfiles clone location in dev mode). Tilde expansion handled (`~/Projects` is valid). Forwarded automatically by `bootstrap.sh` when given |
 | `--skip-roles <role[,role,...]>` | Skip one or more roles. `common` cannot be skipped |
 | `--only-roles <role[,role,...]>` | Run only the named roles. `common` is always prepended |
 | `--check` | Ansible dry-run (`--check --diff`) — previews changes without applying |
@@ -188,6 +209,7 @@ Key variables:
 | --- | --- |
 | `dotfiles_profile` | Controls which roles run (`workstation` / `server` / `minimal`) |
 | `machine_name` | Friendly name used in git config and prompt |
+| `dotfiles_install_mode` | `dev` or `release` — a human-readable record only, self-detected and written once by `install.sh`; nothing reads it back to make decisions. See [docs/sync.md#install-modes](sync.md#install-modes) |
 | `external_synced_repos` | List of external add-on repos for `sync-external` to clone/adopt and deploy — see [External sync](external-sync.md) |
 | `dotfiles_sync_enabled` | Disable both the dotfiles self-sync and `sync-external` |
 | `dotfiles_extra_roles` | List of additional role names to run on this machine |

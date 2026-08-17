@@ -18,7 +18,7 @@
     msg: >-
       Backed up to {{ dotfiles_migration_dir }}/{{ item.path | basename }}.
       Review it and add anything you want to keep to
-      {{ shell_config_dir }}/env/90-local.sh
+      {{ dotfiles_local_env_dir }}/90-local.sh
   loop: "{{ _migration_backups.files }}"
   loop_control:
     label: "{{ item.path | basename }}"

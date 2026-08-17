@@ -118,7 +118,7 @@ _npm_global_install() {
     if [[ -n "${install_prefix}" ]]; then
         npm install -g --prefix "${install_prefix}" "${pkg}" || return 1
         if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
-            log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+            log_warn "${HOME}/.local/bin is not on PATH — add it in 90-local.sh"
         fi
     else
         npm install -g "${pkg}" || return 1

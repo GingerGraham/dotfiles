@@ -488,7 +488,7 @@ _op-install-binary() {
     log_warn "Installed without onepassword-cli group — biometric unlock via desktop app will not work."
     log_warn "For full integration, re-install via package manager: install-op-cli"
     [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
-        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in 90-local.sh"
 }
 
 

@@ -182,7 +182,7 @@ plain-shell() {
 # environment is what lets the normal prompt-engine election chain run again.
 #
 # NO_COLOR is unset rather than restored to a prior value: if you have it set
-# permanently in env/90-local.sh, loader.sh re-applies it at the end of the
+# permanently in 90-local.sh, loader.sh re-applies it at the end of the
 # normal run anyway (90-local.sh is always sourced last), so there's nothing
 # to lose by clearing it here.
 pretty-shell() {

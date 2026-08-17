@@ -2,8 +2,10 @@
 # install.sh — dotfiles bootstrap entry point
 #
 # Bootstraps the dotfiles system on a new machine. This script assumes it is
-# run from within the already-cloned dotfiles repository (the repo is public
-# and manually cloned before running this script).
+# run from within an already-acquired dotfiles tree — either a release-mode
+# tarball extraction (the bootstrap.sh default) or a dev-mode git clone
+# (bootstrap.sh --dev, or a manual clone). It does not care which; only
+# Ansible's dotfiles_repo_root fact does. See docs/sync.md#install-modes.
 #
 # On first run:
 #   1. Checks and optionally installs prerequisites (git, python3, ansible-core)
@@ -33,7 +35,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -114,8 +116,11 @@ OPTIONS
       Use 'server' in combination with --profile server for server deployments.
 
   --projects-base <path>
-      Skip the projects base directory prompt. Passed automatically by
-      bootstrap.sh. Tilde expansion is handled (~/Projects is valid).
+      Skip the projects base directory prompt (root of your own project
+      tree — unrelated to where the dotfiles repo itself lives, except in
+      dev mode, where it also picks the clone location). Forwarded
+      automatically by bootstrap.sh when given. Tilde expansion is handled
+      (~/Projects is valid).
 
   --skip-roles <role[,role,...]>
       Skip one or more named roles. Passed as --skip-tags to ansible-playbook.
@@ -581,6 +586,16 @@ generate_host_vars() {
     info "This file is gitignored and will never be committed or overwritten by Ansible."
     echo
 
+    # ── Install mode ─────────────────────────────────────────────────────────
+    # Self-detected from disk, same rule Ansible uses fresh on every run (see
+    # ansible/tasks/detect_install_mode.yml): a .git directory at REPO_ROOT
+    # means this is a dev-mode checkout (cloned by bootstrap.sh --dev, or
+    # manually); anything else (a release-mode tarball extraction) is
+    # release. Written once here as a human-readable record only — nothing
+    # reads it back to make decisions.
+    local install_mode="dev"
+    [[ -d "${REPO_ROOT}/.git" ]] || install_mode="release"
+
     # ── Profile ───────────────────────────────────────────────────────────────
     PROFILE="${ARG_PROFILE}"
     if [[ -z "${PROFILE}" ]]; then
@@ -762,6 +777,12 @@ generate_host_vars() {
 
 dotfiles_profile: ${PROFILE}
 machine_name: "${MACHINE_NAME}"
+
+# Human-readable record of how this machine was installed — dev (git clone,
+# switchable branches) or release (tarball, tracks main only). Nothing reads
+# this back to make decisions; the effective mode is always re-derived from
+# disk. See docs/sync.md#install-modes.
+dotfiles_install_mode: ${install_mode}
 
 # ── Role feature flags ─────────────────────────────────────────────────────
 # common is always required and cannot be disabled.

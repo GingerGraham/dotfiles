@@ -1,0 +1,66 @@
+# ansible/tasks/detect_install_mode.yml
+#
+# Resolves dotfiles_resolved_mode and dotfiles_repo_root fresh from disk on
+# every run — never read back from the dotfiles_install_mode value written
+# into host_vars/localhost.yml by install.sh, which is a human-readable
+# record only. See docs/sync.md#install-modes.
+#
+# Included with tags: [always] from site.yml/server.yml so it still runs
+# under filtered invocations (e.g. --tags shell).
+#
+# Detection rules:
+#   - A valid git checkout at the location this install is currently running
+#     from (playbook_dir | dirname) → dev.
+#   - Otherwise, a release-mode 'current' symlink under
+#     ~/.local/share/dotfiles → release.
+#   - Neither present → dev (should not happen in practice: by the time
+#     Ansible runs, bootstrap.sh has already either cloned a dev checkout or
+#     extracted+flipped a release).
+#   - Both present (stray manual clone, or `bootstrap.sh --dev` run on an
+#     already-release machine) → dev wins; a warning is surfaced by
+#     `dotfiles-branch --status`, not here.
+
+- name: mode-detect | resolve HOME
+  ansible.builtin.set_fact:
+    _dotfiles_home: "{{ lookup('env', 'HOME') }}"
+
+- name: mode-detect | set dev-clone candidate (wherever this install is currently running from)
+  ansible.builtin.set_fact:
+    _dotfiles_dev_candidate: "{{ playbook_dir | dirname }}"
+
+- name: mode-detect | stat dev-clone candidate .git
+  ansible.builtin.stat:
+    path: "{{ _dotfiles_dev_candidate }}/.git"
+  register: _dotfiles_dev_git_stat
+
+- name: mode-detect | stat release current symlink
+  ansible.builtin.stat:
+    path: "{{ _dotfiles_home }}/.local/share/dotfiles/current"
+  register: _dotfiles_release_stat
+
+- name: mode-detect | resolve mode and conflict flag
+  ansible.builtin.set_fact:
+    dotfiles_resolved_mode: >-
+      {{ 'dev' if _dotfiles_dev_git_stat.stat.exists
+         else ('release' if _dotfiles_release_stat.stat.exists else 'dev') }}
+    dotfiles_mode_conflict: "{{ _dotfiles_dev_git_stat.stat.exists and _dotfiles_release_stat.stat.exists }}"
+
+- name: mode-detect | warn on both dev clone and release symlink present
+  ansible.builtin.debug:
+    msg: >-
+      Both a dev-mode git checkout ({{ _dotfiles_dev_candidate }}) and a
+      release-mode 'current' symlink
+      ({{ _dotfiles_home }}/.local/share/dotfiles/current) are present on
+      this machine. Resolving to 'dev' — dev always wins. See
+      'dotfiles-branch --status' and docs/sync.md#install-modes.
+  when: dotfiles_mode_conflict
+
+- name: mode-detect | resolve dotfiles_repo_root (dev)
+  ansible.builtin.set_fact:
+    dotfiles_repo_root: "{{ lookup('env', 'DOTFILES_REPO_DIR') | default(_dotfiles_dev_candidate, true) }}"
+  when: dotfiles_resolved_mode == 'dev'
+
+- name: mode-detect | resolve dotfiles_repo_root (release)
+  ansible.builtin.set_fact:
+    dotfiles_repo_root: "{{ _dotfiles_home }}/.local/share/dotfiles/current"
+  when: dotfiles_resolved_mode == 'release'

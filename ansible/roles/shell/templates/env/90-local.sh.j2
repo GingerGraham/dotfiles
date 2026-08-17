@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# ~/.config/shell/env/90-local.sh
+# ~/.config/dotfiles/local/90-local.sh
 # Machine-local environment overrides for {{ dotfiles_machine_name | default(ansible_facts['hostname']) }}
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # THIS FILE IS MANAGED LOCALLY — NOT BY ANSIBLE
 # ─────────────────────────────────────────────────────────────────────────────
 # Created once by Ansible on first run. Never overwritten on subsequent runs.
-# Gitignored — all edits stay local to this machine.
+# Deliberately deployed outside the dotfiles repo tree (see
+# dotfiles_local_env_dir in group_vars/all.yml) so it survives a release-mode
+# symlink swap untouched — all edits stay local to this machine.
 #
 # PURPOSE
-#   This file is sourced last in the env/ tier (numeric sort: 90-*), so any
-#   value set here wins over the shared env files (00-core, 10-editors, etc.).
+#   This file is sourced last by loader.sh, after every shared env/ file
+#   (00-core, 10-editors, etc.), so any value set here wins over them.
 #   Use it for anything too machine-specific or sensitive to commit.
 #
 # HOW TO USE

@@ -107,7 +107,7 @@ fi
 export DOTFILES_SHELL
 
 # ── Behaviour flags ───────────────────────────────────────────────────────────
-# Override any of these in env/90-local.sh — that file is sourced last.
+# Override any of these in 90-local.sh — that file is sourced last.
 DOTFILES_SHOW_FUNCTIONS="${DOTFILES_SHOW_FUNCTIONS:-false}"
 
 # User-defined config extensions — a machine-local drop-in directory for
@@ -155,6 +155,19 @@ for _env_file in "${SHELL_CONFIG_DIR}/env"/[0-9][0-9]-*.sh; do
     [[ -f "${_env_file}" ]] && source "${_env_file}"
 done
 unset _env_file
+
+# 90-local.sh lives outside SHELL_CONFIG_DIR (see roles/shell/tasks/main.yml
+# Section 6 and docs/sync.md#install-modes), so it isn't picked up by the
+# glob above. Sourced here too — not just in "Local overrides (always last)"
+# below — so flags it sets that gate later tiers (DOTFILES_OFFLINE for
+# completions, DOTFILES_OPTIONAL_INSTALLERS for Tier 3 lazy stubs) actually
+# take effect; the final sourcing then re-affirms it wins over anything
+# Tier 2/3 also touches. Both passes source the same idempotent exports, so
+# running it twice is harmless.
+_local_env="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/local/90-local.sh"
+# shellcheck disable=SC1090
+[[ -f "${_local_env}" ]] && source "${_local_env}"
+unset _local_env
 
 # ── Tier 1: core/ — always sourced ───────────────────────────────────────────
 for _core_file in \
@@ -314,7 +327,7 @@ if [[ "${DOTFILES_USER_EXT_ENABLED}" == "true" ]] && [[ -d "${DOTFILES_USER_EXT_
 fi
 
 # ── Tier 3: optional lazy stubs — registered only when opted in ──────────────
-# Set DOTFILES_OPTIONAL_INSTALLERS=true in env/90-local.sh to enable.
+# Set DOTFILES_OPTIONAL_INSTALLERS=true in 90-local.sh to enable.
 # Files in lazy/optional/ follow the same public-function convention as lazy/.
 if [[ "${DOTFILES_OPTIONAL_INSTALLERS:-false}" == "true" ]]; then
     for _lazy_file in "${SHELL_CONFIG_DIR}/lazy/optional"/*.sh; do
@@ -380,14 +393,17 @@ unset _DOTFILES_DISTRO_PROMPT_FILE
 unset -f _source_if_cmd _source_if_any_cmd
 
 # ── Local overrides (always last) ─────────────────────────────────────────────
-_local_env="${SHELL_CONFIG_DIR}/env/90-local.sh"
+# Second pass — see the Tier 1 sourcing above for why it's read twice. This
+# one re-affirms it wins over anything Tier 2/3 (tools/platform/distro/lazy)
+# also touches, not just the other env/ files.
+_local_env="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/local/90-local.sh"
 # shellcheck disable=SC1090
 [[ -f "${_local_env}" ]] && source "${_local_env}"
 unset _local_env
 
 # ── Python manager finalisation ───────────────────────────────────────────────
 # Deferred until now (see env/20-development.sh): DOTFILES_PYTHON_MANAGER is
-# only meaningful once env/90-local.sh, sourced above, has had its final say.
+# only meaningful once 90-local.sh, sourced above, has had its final say.
 if command -v _dotfiles_init_python_manager &>/dev/null; then
     _dotfiles_init_python_manager
     unset -f _dotfiles_init_python_manager
@@ -455,11 +471,11 @@ _migration_found=false
 while IFS= read -r _bak; do
     if [[ -z "${_bak}" ]]; then continue; fi
     if [[ "${_migration_found}" == "false" ]]; then
-        log_warn "Migration pending: review backup files and merge any needed content into env/90-local.sh, then remove ${_migration_dir} to clear this warning."
+        log_warn "Migration pending: review backup files and merge any needed content into ${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/local/90-local.sh, then remove ${_migration_dir} to clear this warning."
         _migration_found=true
     fi
     log_warn "Migration backup: ${_bak}"
-    log_warn "  Review it and add anything you want to keep to ${SHELL_CONFIG_DIR}/env/90-local.sh"
+    log_warn "  Review it and add anything you want to keep to ${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/local/90-local.sh"
 done < <(find "${_migration_dir}" -maxdepth 1 -name "*.pre-dotfiles.bak" -type f 2>/dev/null)
 unset _migration_dir _migration_found _bak
 
@@ -470,7 +486,7 @@ dedupe-path 2>/dev/null || true
 
 # ── Interactive startup ───────────────────────────────────────────────────────
 # Only runs in interactive shells — skipped in scripts, cron, SSH non-interactive.
-# Set DOTFILES_SHOW_FUNCTIONS=true in env/90-local.sh to enable.
+# Set DOTFILES_SHOW_FUNCTIONS=true in 90-local.sh to enable.
 if [[ $- == *i* ]] && [[ "${DOTFILES_SHOW_FUNCTIONS}" == "true" ]] && command -v get-functions &>/dev/null; then
     get-functions
 fi
