@@ -1,11 +1,4 @@
 # ============================================================================
-# Section 1 — Derive repo root
-# ============================================================================
-- name: Set dotfiles repo root fact
-  ansible.builtin.set_fact:
-    dotfiles_repo_root: "{{ playbook_dir | dirname }}"
-
-# ============================================================================
 # Section 2 — Verify shell config source exists in repo
 # ============================================================================
 - name: Stat shell config source directory

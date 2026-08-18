@@ -50,16 +50,20 @@ When `git-add-project` / `git-update-project` / `git-remove-project` run:
 3. They create or edit `~/.config/git/profiles/<n>.inc` via `git config --file`
 4. **If `DOTFILES_REPO_DIR` is set**, they update `host_vars/localhost.yml`
 
-If `DOTFILES_REPO_DIR` is not set (e.g. first shell session after a manual clone),
-the functions warn and continue. The manifest and includes are still updated correctly
-for the local machine, but `host_vars` will be stale. The next Ansible run will
-re-render `project-includes` from the stale `host_vars`, overwriting local additions.
+`DOTFILES_REPO_DIR` is set automatically by Ansible on first run (rendered into
+`90-local.sh` from the resolved `dotfiles_repo_root` fact — correct for both
+dev and release mode; see [docs/sync.md#install-modes](../../../docs/sync.md#install-modes)),
+so this normally isn't something you need to think about. It's only unset in
+the narrow window before Ansible has ever run (e.g. the very first shell
+session right after a manual clone, before `install.sh` has run) — in that
+case the functions warn and continue. The manifest and includes are still
+updated correctly for the local machine, but `host_vars` will be stale. The
+next Ansible run will re-render `project-includes` from the stale
+`host_vars`, overwriting local additions.
 
-**Set `DOTFILES_REPO_DIR` in `env/00-core.sh`** to avoid this:
-
-```sh
-export DOTFILES_REPO_DIR="${HOME}/Projects/Personal/GitHub/dotfiles"
-```
+If you need to override the detected value, edit `DOTFILES_REPO_DIR` directly
+in `~/.config/dotfiles/local/90-local.sh` — it's created once and never
+overwritten, so edits there stick.
 
 If `host_vars` and the manifest have diverged, recover with:
 

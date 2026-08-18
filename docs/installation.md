@@ -85,7 +85,9 @@ If you already have a dotfiles tree on disk — a dev-mode clone, or a release-m
 
 ### First-run prompts
 
-On a machine where `ansible/host_vars/localhost.yml` does not yet exist, `install.sh` prompts interactively to build it:
+On a machine where this mode's config doesn't exist yet, `install.sh` first checks for a config from a *previous install in the other mode* at its conventional location (dev: `~/Projects/Personal/GitHub/dotfiles/ansible/host_vars/localhost.yml`; release: `~/.config/dotfiles/host_vars/localhost.yml`) — e.g. if you switch from `--dev` to the default release mode, or vice versa, on the same machine. If found, you're offered a chance to reuse it (`[Y/n]`, defaults to yes) instead of re-entering everything. Only the default projects-base convention is checked — a dev install under a custom `--projects-base` you don't also pass this run won't be discovered.
+
+Otherwise, `install.sh` prompts interactively to build a fresh config:
 
 1. **Profile** — workstation / server / minimal (see [Profiles](profiles.md))
 2. **Machine name** — defaults to `hostname -s`
@@ -94,7 +96,7 @@ On a machine where `ansible/host_vars/localhost.yml` does not yet exist, `instal
 5. **Git project contexts** — one or more context/provider/email tuples (e.g. Personal/GitHub, Personal/GitLab, Acme/AzureDevOps); press Enter to finish; add more later with `git-add-project`
 6. **External add-on repos** — any number of repos synced/deployed by `sync-external` (e.g. `nvim-config`, `ai-config`); for each, a name, repo URL, an explicit public/private choice, and whether to allow that repo's post-deploy hooks (default no) — workstation and server profiles only. There is no clone-directory prompt: the clone location is engine-computed, and where a repo's content is deployed comes from its own manifest. See [External sync](external-sync.md).
 
-`host_vars/localhost.yml` is gitignored and **never overwritten** by subsequent Ansible runs. Re-running `install.sh` after it exists goes straight to Ansible.
+`host_vars/localhost.yml` is **never overwritten** by subsequent Ansible runs. In dev mode it's a gitignored real file in the clone; in release mode it's stored at `~/.config/dotfiles/host_vars/localhost.yml` (outside every release directory, since each sync replaces the release directory wholesale) and symlinked into place so `ansible/host_vars/localhost.yml` still resolves normally — see [docs/sync.md#install-modes](sync.md#install-modes). Re-running `install.sh` after it exists goes straight to Ansible.
 
 ### Subsequent runs
 

@@ -16,6 +16,11 @@ CLONE_SUBPATH="Personal/GitHub/dotfiles"
 RELEASE_BASE="${HOME}/.local/share/dotfiles"
 KEEP_RELEASES=5
 
+# Machine config lives here, outside every release directory, so it survives
+# each release being replaced wholesale on sync — see install.sh's
+# _ensure_host_vars_symlink (same pattern as the 90-local.sh relocation).
+HOST_VARS_EXTERNAL="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/host_vars/localhost.yml"
+
 # ── Print bootstrap script version ────────────────────────────────────────────
 echo "Bootstrap script version ${VERSION}"
 
@@ -144,6 +149,15 @@ release_dir="${RELEASE_BASE}/releases/${timestamp}-${shortsha}"
 mv "${extracted_dir}" "${release_dir}"
 rm -rf "${tmp_extract}"
 trap - EXIT
+
+# Recreate the host_vars symlink in the new release directory before the
+# flip, so Ansible sees this machine's recorded config immediately after —
+# a fresh extraction only contains git-tracked files, and host_vars is
+# gitignored. Dangling on the very first-ever install (before install.sh has
+# generated anything yet at HOST_VARS_EXTERNAL) — harmless; install.sh
+# creates it moments later.
+mkdir -p "${release_dir}/ansible/host_vars"
+ln -sfn "${HOST_VARS_EXTERNAL}" "${release_dir}/ansible/host_vars/localhost.yml"
 
 # Flip: `ln -sfn` replaces an existing symlink in place rather than
 # following it — unlike `mv`, which (on both GNU and BSD, and without a

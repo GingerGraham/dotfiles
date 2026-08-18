@@ -197,6 +197,7 @@ cmd_switch() {
 cmd_dev() {
     # Suspend sync on the current branch without switching
     _conf_load
+    _require_dev_mode "dotfiles-branch --dev"
 
     if [[ "$DEV_MODE" == "true" ]]; then
         echo "Dev mode already active (branch: ${GIT_BRANCH})"
@@ -292,9 +293,10 @@ Usage:
   dotfiles-branch --init <url> <dir>  Initialise sync.conf (normally done by install.sh)
   dotfiles-branch --help            Show this help
 
-<branch>, --resume, and --reset require dev mode (a git checkout) — they
-refuse cleanly on a release-mode (tarball) install. Reinstall with --dev to
-get a checkout you can switch branches on. See docs/sync.md#install-modes.
+<branch>, --resume, --dev, and --reset require dev mode (a git checkout) —
+they refuse cleanly on a release-mode (tarball) install. Reinstall with
+--dev to get a checkout you can switch branches on. See
+docs/sync.md#install-modes.
 
 Examples:
   # Start working on a feature

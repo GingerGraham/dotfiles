@@ -194,7 +194,7 @@ its own.
 | `DOTFILES_SHELL`            | `bash` / `zsh` / `sh`                              | `loader.sh`                     |
 | `DOTFILES_SHOW_FUNCTIONS`   | `true` / `false` (default: `false`)                | `90-local.sh`                   |
 | `SHELL_CONFIG_DIR`          | `~/.config/shell`                                  | `loader.sh`                     |
-| `DOTFILES_REPO_DIR`         | path to repo                                       | `env/00-core.sh`                |
+| `DOTFILES_REPO_DIR`         | path to repo/release checkout                      | `90-local.sh` (set by Ansible)  |
 | `DOTFILES_USER_EXT_DIR`     | `${XDG_CONFIG_HOME}/dotfiles/user` (default)       | `loader.sh` / `90-local.sh`     |
 | `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)                 | `loader.sh` / `90-local.sh`     |
 | `DOTFILES_PLAIN_SHELL`      | `true` / `false` (default: `false`)                | `plain-shell` (via `exec env`)  |

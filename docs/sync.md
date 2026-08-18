@@ -6,6 +6,7 @@ The sync role installs a background timer that keeps the dotfiles installation u
 
 - [Install modes](#install-modes)
   - [Mode detection](#mode-detection)
+  - [Switching between modes](#switching-between-modes)
   - [dotfiles_install_mode vs DEV_MODE](#dotfiles_install_mode-vs-dev_mode)
 - [How it works](#how-it-works)
   - [dev mode](#dev-mode)
@@ -28,7 +29,7 @@ Every machine runs in one of two modes:
 | Acquired by | `bootstrap.sh --dev` (or a manual `git clone`) | `bootstrap.sh` (default, no flags) |
 | On disk | A real `git` checkout under `<projects_base>/Personal/GitHub/dotfiles` | A tarball extraction under `~/.local/share/dotfiles/releases/`, symlinked from `~/.local/share/dotfiles/current` — no `.git` anywhere |
 | Tracks | Whatever branch you check out | `main` HEAD only — no tagged/stable channel |
-| `dotfiles-branch <branch>` / `--resume` / `--reset` | Work normally | Refuse with a clear error — there is no working checkout to act on |
+| `dotfiles-branch <branch>` / `--resume` / `--dev` / `--reset` | Work normally | Refuse with a clear error — there is no working checkout to act on |
 | Background sync | `git pull --ff-only` | Fetches a fresh tarball, flips `current` to it if the commit changed, prunes old releases |
 
 Release mode exists so that anyone who just wants working shell/git/ssh config doesn't need `git` installed, and doesn't get a foreign repository entangled with their own project tree. Dev mode is unchanged from before this existed — it's what Graham uses on his own workstation.
@@ -42,14 +43,20 @@ Mode is never stored and read back to make decisions — it's re-derived from di
 - Neither present → **dev** (shouldn't happen in practice — by the time anything runs, `bootstrap.sh` has already produced one or the other).
 - **Both** present (a stray manual clone, or `bootstrap.sh --dev` run on an already-release machine) → **dev wins**, with a warning surfaced in `dotfiles-branch --status`.
 
-Dev mode also honours a `DOTFILES_REPO_DIR` environment variable override (see `shell/config/env/00-core.sh`) if you keep your checkout somewhere other than the conventional location.
+Dev mode also honours a `DOTFILES_REPO_DIR` environment variable override if you keep your checkout somewhere other than the conventional location. Ansible sets `DOTFILES_REPO_DIR` correctly in both modes on first run (rendered into `90-local.sh` — see [ansible/roles/git/README.md](../ansible/roles/git/README.md)), so this is only something you'd set by hand to override that default, not something you need to configure yourself.
+
+### Switching between modes
+
+`ansible/host_vars/localhost.yml` is never overwritten, but *where it lives* differs by mode — dev mode keeps it as a real, gitignored file in the clone (nothing ever forces that directory to move); release mode stores it at `~/.config/dotfiles/host_vars/localhost.yml`, outside every release directory, and symlinks it in — the same reasoning as the `90-local.sh` relocation, since a release directory gets replaced wholesale on every sync.
+
+Re-running the bootstrap one-liner in the other mode (`--dev` when you were on release, or bare when you were on `--dev`) checks the conventional location for a config from the mode you're switching *from*, and offers to reuse it (`[Y/n]`, defaults to yes) rather than re-prompting for everything — see [First-run prompts](installation.md#first-run-prompts). Only the default projects-base convention is checked for a prior dev install.
 
 ### dotfiles_install_mode vs DEV_MODE
 
 Two different flags that are easy to confuse:
 
 - **`dotfiles_install_mode`** (in `ansible/host_vars/localhost.yml`) — written once by `install.sh` on first run. It's a **human-readable record only** — nothing reads it back to make decisions, so a stale or hand-edited value doesn't break anything. The effective mode always comes from the disk-based detection above.
-- **`DEV_MODE`** (in `~/.config/dotfiles/sync.conf`) — a runtime toggle, unrelated to install mode, that suspends the background sync timer regardless of which install mode you're in (e.g. `dotfiles-branch --dev`, or switching to a non-main branch in dev mode).
+- **`DEV_MODE`** (in `~/.config/dotfiles/sync.conf`) — a runtime toggle, unrelated to install mode, that suspends the background sync timer. Only reachable in dev mode — via `dotfiles-branch --dev`, or switching to a non-main branch — since both writers are dev-gated; a release-mode machine can't set it through `dotfiles-branch` at all.
 
 ## How it works
 
@@ -110,7 +117,7 @@ Usage:
   dotfiles-branch --help            Show this help
 ```
 
-`<branch>`, `--resume`, and `--reset` require dev mode — there's no working `git` checkout for them to act on in release mode, so they refuse with a pointer to reinstall with `--dev`. `--status` and `--dev` (suspend sync) work in both modes.
+`<branch>`, `--resume`, `--dev`, and `--reset` all require dev mode — there's no working `git` checkout for them to act on in release mode, so they refuse with a pointer to reinstall with `--dev`. Only `--status` works in both modes.
 
 ### Typical development workflow
 

@@ -8,7 +8,9 @@
 #   2. ~/.config/git/project-includes    — includeIf file sourced by ~/.gitconfig
 #   3. ~/.config/git/profiles/<n>.inc    — per-project identity files
 #
-# When DOTFILES_REPO_DIR is set they also update:
+# DOTFILES_REPO_DIR is set by Ansible on first run (see
+# ansible/roles/shell/templates/env/90-local.sh.j2) — when present, these
+# functions also update:
 #   4. $DOTFILES_REPO_DIR/ansible/host_vars/localhost.yml
 #
 # Requires: yq v4 (mikefarah/yq) for manifest operations.
@@ -198,7 +200,8 @@ _git_includes_file() {
 _git_host_vars() {
     if [[ -z "${DOTFILES_REPO_DIR:-}" ]]; then
         log_warn "DOTFILES_REPO_DIR is not set — host_vars/localhost.yml was not updated."
-        log_warn "Set DOTFILES_REPO_DIR in env/00-core.sh to keep Ansible re-runs in sync."
+        log_warn "It's normally set by Ansible on first run — re-run install.sh, or set it"
+        log_warn "yourself in ~/.config/dotfiles/local/90-local.sh."
         return 1
     fi
     local hv="${DOTFILES_REPO_DIR}/ansible/host_vars/localhost.yml"

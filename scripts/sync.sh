@@ -25,6 +25,11 @@ RELEASES_DIR="${STATE_DIR}/releases"
 CURRENT_LINK="${STATE_DIR}/current"
 KEEP_RELEASES=5
 
+# Machine config lives here, outside every release directory, so it survives
+# each release being replaced wholesale on sync — see install.sh's
+# _ensure_host_vars_symlink (same pattern as the 90-local.sh relocation).
+HOST_VARS_EXTERNAL="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/host_vars/localhost.yml"
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 mkdir -p "${STATE_DIR}/logs"
@@ -279,6 +284,15 @@ release_sync() {
     new_release_dir="${RELEASES_DIR}/${timestamp}-${shortsha}"
     mv "$extracted_dir" "$new_release_dir"
     rm -rf "$tmp_extract"
+
+    # Recreate the host_vars symlink in the new release directory before the
+    # flip, so Ansible sees this machine's recorded config immediately
+    # after — a fresh extraction only contains git-tracked files, and
+    # host_vars is gitignored. By the time release_sync ever runs,
+    # install.sh has already run once, so HOST_VARS_EXTERNAL is guaranteed
+    # to exist.
+    mkdir -p "${new_release_dir}/ansible/host_vars"
+    ln -sfn "$HOST_VARS_EXTERNAL" "${new_release_dir}/ansible/host_vars/localhost.yml"
 
     # `ln -sfn` replaces an existing symlink in place rather than following
     # it — unlike `mv`, which (on both GNU and BSD, and without a portable

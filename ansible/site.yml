@@ -9,7 +9,11 @@
     #                 the workstation gate on tmux/vim
     #   minimal     — common, shell, git, ssh only; tmux, vim, sync-external, sync skipped
     - name: Detect dotfiles install mode and resolve repo root
-      ansible.builtin.include_tasks: tasks/detect_install_mode.yml
+      ansible.builtin.include_tasks:
+        file: tasks/detect_install_mode.yml
+        apply:
+          tags:
+            - always
       tags:
         - always
 
