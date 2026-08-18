@@ -24,5 +24,6 @@ export HISTSIZE=10000
 export HISTFILESIZE=20000
 export HISTCONTROL="ignoredups:erasedups"
 
-# ── Dotfiles repository ───────────────────────────────────────────────────────
-export DOTFILES_REPO_DIR="${HOME}/Projects/Personal/GitHub/dotfiles"
+# DOTFILES_REPO_DIR is set by Ansible in 90-local.sh (dotfiles_repo_root at
+# first deploy — correct for both dev and release mode, unlike a hardcoded
+# guess here) — see ansible/roles/shell/templates/env/90-local.sh.j2.

@@ -47,7 +47,7 @@ Both `~/.bashrc` and `~/.zshrc` are thin stubs that do one thing: source `~/.con
 11. Source completions with the same tool guards
 12. Elect a prompt engine (oh-my-posh → starship → oh-my-zsh → distro-native → fallback PS1) — bypassed entirely in [plain shell mode](#plain-shell)
 13. Register lazy stubs for `lazy/`
-14. Source `env/90-local.sh` last — machine-local overrides win
+14. Source `~/.config/dotfiles/local/90-local.sh` last — machine-local overrides win
 15. Source [user extension](user-extensions.md) files from `DOTFILES_USER_EXT_DIR` — after `90-local.sh` (so user definitions shadow it), before PATH dedupe (so PATH entries they add still get deduped)
 
 Detection runs exactly once per session. Results are exported as `DOTFILES_*` variables; no repeated `uname` or `/etc/os-release` reads.
@@ -63,7 +63,6 @@ Detection runs exactly once per session. Results are exported as `DOTFILES_*` va
 | `env/00-core.sh`        | XDG paths, base PATH extensions, locale, history                                                                                                                                                                                                             |
 | `env/10-editors.sh`     | `EDITOR`, `VISUAL`, pager                                                                                                                                                                                                                                    |
 | `env/20-development.sh` | `GOPATH`, `PYENV_ROOT`, language version manager hooks — including the uv/pyenv gate (`DOTFILES_PYTHON_MANAGER`): uv wins by default when present, and pyenv's shims are skipped (though `pyenv` itself stays on PATH) so the two don't compete for `python` |
-| `env/90-local.sh`       | Machine-local overrides — created once, never overwritten                                                                                                                                                                                                    |
 | `core/aliases.sh`       | Navigation aliases (`ls`, `cd`, common shortcuts)                                                                                                                                                                                                            |
 | `core/functions.sh`     | Shell introspection (`get-fuctions`, `dedupe-path`)                                                                                                                                                                                                          |
 | `core/ssh.sh`           | SSH agent helpers, `list-ssh-hosts`                                                                                                                                                                                                                          |
@@ -171,8 +170,8 @@ Both variables are `export`ed by `plain-shell`, so without this, a bare
 `loader.sh` sees `DOTFILES_PLAIN_SHELL=true` and stays in plain mode. This is
 why starting a subshell doesn't get you back to a styled prompt on its own.
 
-If `NO_COLOR` is set permanently in `env/90-local.sh`, clearing it here
-doesn't lose that preference — `env/90-local.sh` is sourced last in every
+If `NO_COLOR` is set permanently in `90-local.sh`, clearing it here
+doesn't lose that preference — `90-local.sh` is sourced last in every
 `loader.sh` run, plain or not, so a persistent setting re-applies itself
 after the election chain runs.
 
@@ -193,25 +192,25 @@ its own.
 | `DOTFILES_WSL`              | `true` / `false`                                   | `loader.sh`                     |
 | `DOTFILES_DISTRO`           | `rhel` / `debian` / `suse` / `arch` / `unknown`    | `loader.sh`                     |
 | `DOTFILES_SHELL`            | `bash` / `zsh` / `sh`                              | `loader.sh`                     |
-| `DOTFILES_SHOW_FUNCTIONS`   | `true` / `false` (default: `false`)                | `env/90-local.sh`               |
+| `DOTFILES_SHOW_FUNCTIONS`   | `true` / `false` (default: `false`)                | `90-local.sh`                   |
 | `SHELL_CONFIG_DIR`          | `~/.config/shell`                                  | `loader.sh`                     |
-| `DOTFILES_REPO_DIR`         | path to repo                                       | `env/00-core.sh`                |
-| `DOTFILES_USER_EXT_DIR`     | `${XDG_CONFIG_HOME}/dotfiles/user` (default)       | `loader.sh` / `env/90-local.sh` |
-| `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)                 | `loader.sh` / `env/90-local.sh` |
+| `DOTFILES_REPO_DIR`         | path to repo/release checkout                      | `90-local.sh` (set by Ansible)  |
+| `DOTFILES_USER_EXT_DIR`     | `${XDG_CONFIG_HOME}/dotfiles/user` (default)       | `loader.sh` / `90-local.sh`     |
+| `DOTFILES_USER_EXT_ENABLED` | `true` / `false` (default: `true`)                 | `loader.sh` / `90-local.sh`     |
 | `DOTFILES_PLAIN_SHELL`      | `true` / `false` (default: `false`)                | `plain-shell` (via `exec env`)  |
 | `DOTFILES_PROMPT_ENGINE`    | `plain` / `distro-native` / …                      | `loader.sh`                     |
-| `DOTFILES_PYTHON_MANAGER`   | `auto` / `uv` / `pyenv` / `both` (default: `auto`) | `env/90-local.sh`               |
+| `DOTFILES_PYTHON_MANAGER`   | `auto` / `uv` / `pyenv` / `both` (default: `auto`) | `90-local.sh`                   |
 
 ## Machine-local overrides
 
-`~/.config/shell/env/90-local.sh` is the place for anything specific to one machine:
+`~/.config/dotfiles/local/90-local.sh` is the place for anything specific to one machine:
 
 - Additional PATH entries
 - Proxy settings
 - Credential exports
 - Tool version pins
 
-It is created from a template on the first Ansible run and **never overwritten** by subsequent runs. It is gitignored, so it will not appear in commits. Edit it directly on the machine.
+It lives outside `~/.config/shell` (a symlink into the dotfiles repo working tree) so it survives a release-mode symlink swap untouched — see [docs/sync.md#install-modes](sync.md#install-modes). It is created from a template on the first Ansible run and **never overwritten** by subsequent runs, and is not tracked by git (it's outside the repo entirely, not merely gitignored). Edit it directly on the machine.
 
 Set `DOTFILES_SHOW_FUNCTIONS=true` here to print the function list automatically on every interactive shell start.
 
@@ -280,11 +279,11 @@ A warning is printed on every shell start until the backup directory is cleared:
 
 ```text
 [WARN]  Migration pending: review backup files and merge any needed content
-        into env/90-local.sh, then remove ~/.config/dotfiles/migration/ to
-        clear this warning.
+        into ~/.config/dotfiles/local/90-local.sh, then remove
+        ~/.config/dotfiles/migration/ to clear this warning.
 ```
 
-After porting any content you want to keep into `env/90-local.sh`:
+After porting any content you want to keep into `90-local.sh`:
 
 ```bash
 rm -rf ~/.config/dotfiles/migration/
@@ -362,11 +361,10 @@ shell/
 ├── zshenv                  # Sets ZDOTDIR
 └── config/                 # Symlinked to ~/.config/shell/
     ├── loader.sh
-    ├── env/
+    ├── env/                 # 90-local.sh is NOT here — see below
     │   ├── 00-core.sh
     │   ├── 10-editors.sh
-    │   ├── 20-development.sh
-    │   └── 90-local.sh     # gitignored — machine-local
+    │   └── 20-development.sh
     ├── core/
     │   ├── aliases.sh
     │   ├── functions.sh
@@ -398,4 +396,9 @@ shell/
 ```
 
 User extension files themselves live outside this tree entirely — see
-[user-extensions.md](user-extensions.md).
+[user-extensions.md](user-extensions.md). `90-local.sh` also lives outside
+this tree, at `~/.config/dotfiles/local/90-local.sh` — deliberately, so it
+survives a release-mode symlink swap untouched (see
+[docs/sync.md#install-modes](sync.md#install-modes)). Only its `.j2`
+template is tracked in the repo, under
+`ansible/roles/shell/templates/env/90-local.sh.j2`.

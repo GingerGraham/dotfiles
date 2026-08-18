@@ -14,7 +14,7 @@ fi
 # its shims are not installed when uv is present: two shim systems competing for
 # `python` on PATH is the same class of problem tenv solved for terraform/tofu.
 #
-# DOTFILES_PYTHON_MANAGER (set in env/90-local.sh):
+# DOTFILES_PYTHON_MANAGER (set in 90-local.sh):
 #   auto   (default) uv wins if present, otherwise pyenv initialises
 #   uv     never initialise pyenv shims
 #   pyenv  always initialise pyenv shims, even if uv is present
@@ -23,11 +23,11 @@ fi
 # PYENV_ROOT/PATH are set unconditionally below (subprocess-free, matches this
 # file's contract) so `pyenv` itself stays callable for management regardless
 # of the gate. The gate/eval logic that reads DOTFILES_PYTHON_MANAGER is
-# deliberately NOT run inline here: env/90-local.sh — the only place that
-# variable is meant to be set — sources *after* this file within loader.sh's
-# Tier 1 pass, so reading it here would only ever see the default. Instead
-# this defines _dotfiles_init_python_manager, and loader.sh invokes it once,
-# later, after 90-local.sh has had its final say (same reasoning as
+# deliberately NOT run inline here: 90-local.sh — the only place that
+# variable is meant to be set — sources near the very end of loader.sh (long
+# after this file), so reading it here would only ever see the default.
+# Instead this defines _dotfiles_init_python_manager, and loader.sh invokes
+# it once, later, after 90-local.sh has had its final say (same reasoning as
 # dedupe-path running "after all tiers").
 if [[ -d "${HOME}/.pyenv" ]]; then
     export PYENV_ROOT="${HOME}/.pyenv"

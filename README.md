@@ -24,9 +24,15 @@ Manages shell configuration, git identity, and SSH key structure — and keeps i
 bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh)
 ```
 
-The bootstrap script clones the repo and hands off to `install.sh`. On first run you will be prompted for a profile, machine name, git identity, and any external add-on repos you want synced (e.g. editor config, AI tooling).
+By default the bootstrap script fetches a tarball snapshot of `main` — no `git clone`, no `.git` anywhere, nothing entangled with your own `~/Projects` tree — and hands off to `install.sh`. On first run you will be prompted for a profile, machine name, git identity, and any external add-on repos you want synced (e.g. editor config, AI tooling).
 
-See the [docs/](docs/) directory for full documentation.
+Actively developing this repo instead? Add `--dev` for the classic git-clone workflow (switchable branches, `dotfiles-branch`, sync from your own working copy):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) --dev
+```
+
+See [docs/sync.md](docs/sync.md#install-modes) for the full comparison, and the [docs/](docs/) directory for full documentation.
 
 ## Documentation
 
@@ -37,7 +43,7 @@ See the [docs/](docs/) directory for full documentation.
 | [docs/shell-config.md](docs/shell-config.md) | Shell loading architecture, tiers, local overrides |
 | [docs/tool-management.md](docs/tool-management.md) | `update-tools`, installers, and the managed tools registry |
 | [docs/installers.md](docs/installers.md) | Per-tool installer reference (`install-*` functions) |
-| [docs/sync.md](docs/sync.md) | Background sync, DEV_MODE, branch switching |
+| [docs/sync.md](docs/sync.md) | Install modes (dev vs release), background sync, DEV_MODE, branch switching |
 | [docs/external-sync.md](docs/external-sync.md) | Generic external add-on repo sync engine — adding repos, cadence, troubleshooting |
 | [docs/sync-manifest-spec.md](docs/sync-manifest-spec.md) | `.dotfiles-sync.yml` manifest contract for add-on repo authors |
 | [docs/gpg.md](docs/gpg.md) | GPG key management, password manager backup, git provider signing setup |
@@ -77,9 +83,11 @@ GPG key backup, restore, and rotation (see [docs/gpg.md](docs/gpg.md)) support t
 
 ## Prerequisites
 
-`install.sh` checks for and will attempt to install:
+`bootstrap.sh` itself needs only `curl` and `tar` by default (`git` as well with `--dev`, to clone the repo).
 
-- `git`
+`install.sh` then checks for and will attempt to install:
+
+- `git` (Ansible's `common` role uses it to fetch `bash-logger`, regardless of install mode)
 - `python3 >= 3.9`
 - `ansible-core >= 2.14`
 

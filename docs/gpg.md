@@ -386,7 +386,7 @@ See [installers.md](installers.md) for details on each.
 echo $GPG_TTY     # should show something like /dev/pts/0
 ```
 
-If it is empty, add to `env/90-local.sh`:
+If it is empty, add to `~/.config/dotfiles/local/90-local.sh`:
 
 ```bash
 export GPG_TTY=$(tty)

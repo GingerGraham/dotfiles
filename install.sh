@@ -2,8 +2,10 @@
 # install.sh — dotfiles bootstrap entry point
 #
 # Bootstraps the dotfiles system on a new machine. This script assumes it is
-# run from within the already-cloned dotfiles repository (the repo is public
-# and manually cloned before running this script).
+# run from within an already-acquired dotfiles tree — either a release-mode
+# tarball extraction (the bootstrap.sh default) or a dev-mode git clone
+# (bootstrap.sh --dev, or a manual clone). It does not care which; only
+# Ansible's dotfiles_repo_root fact does. See docs/sync.md#install-modes.
 #
 # On first run:
 #   1. Checks and optionally installs prerequisites (git, python3, ansible-core)
@@ -33,7 +35,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
@@ -114,8 +116,11 @@ OPTIONS
       Use 'server' in combination with --profile server for server deployments.
 
   --projects-base <path>
-      Skip the projects base directory prompt. Passed automatically by
-      bootstrap.sh. Tilde expansion is handled (~/Projects is valid).
+      Skip the projects base directory prompt (root of your own project
+      tree — unrelated to where the dotfiles repo itself lives, except in
+      dev mode, where it also picks the clone location). Forwarded
+      automatically by bootstrap.sh when given. Tilde expansion is handled
+      (~/Projects is valid).
 
   --skip-roles <role[,role,...]>
       Skip one or more named roles. Passed as --skip-tags to ansible-playbook.
@@ -549,36 +554,119 @@ _extract_git_host() {
     printf '%s' "${host}"
 }
 
+# Reads back the values the SSH and Ansible phases need from an existing
+# host_vars file — used both for "already exists, skip" and for "reused the
+# other mode's config" (see generate_host_vars). External repos are a YAML
+# list, not a bare scalar, so PROFILE/MACHINE_NAME use the simple scalar
+# reader — the sync-external role reads the list directly.
+# EXTERNAL_REPO_NAMES/PRIVATE/URLS are re-derived from the list here too,
+# purely so setup_ssh_keys() can still find repos that were registered by
+# hand-editing host_vars rather than through the interactive loop.
+_load_host_vars_into_globals() {
+    local file="$1"
+    PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${file}")
+    MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${file}")
+
+    local repo_name repo_private repo_url repo_allow_hooks
+    while IFS='|' read -r repo_name repo_private repo_url repo_allow_hooks; do
+        [[ -z "${repo_name}" ]] && continue
+        EXTERNAL_REPO_NAMES+=("${repo_name}")
+        EXTERNAL_REPO_PRIVATE+=("${repo_private:-false}")
+        EXTERNAL_REPO_URLS+=("${repo_url}")
+        EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks:-false}")
+    done < <(_read_external_repos_from_host_vars "${file}")
+}
+
+# release mode only — the release directory this runs from gets replaced
+# wholesale on every sync (see scripts/sync.sh release_sync and bootstrap.sh),
+# so its config can't live inside it; it's stored externally instead (same
+# reasoning as the 90-local.sh relocation) and symlinked in here so
+# ansible/host_vars/localhost.yml still resolves normally within the tree.
+# Idempotent — safe to call on every run, including the "already exists" and
+# "reused the other mode's config" paths, not just fresh generation.
+_ensure_host_vars_symlink() {
+    local mode="$1" in_tree="$2" external="$3"
+    [[ "${mode}" == "release" ]] || return 0
+    mkdir -p "$(dirname "${in_tree}")"
+    ln -sfn "${external}" "${in_tree}"
+}
+
 generate_host_vars() {
-    local host_vars_file="${REPO_ROOT}/ansible/host_vars/localhost.yml"
+    # ── Install mode ─────────────────────────────────────────────────────────
+    # Self-detected from disk, same rule Ansible uses fresh on every run (see
+    # ansible/tasks/detect_install_mode.yml): a .git directory at REPO_ROOT
+    # means this is a dev-mode checkout (cloned by bootstrap.sh --dev, or
+    # manually); anything else (a release-mode tarball extraction) is
+    # release. Recorded in the file itself as a human-readable record only —
+    # nothing reads it back to make decisions.
+    local install_mode="dev"
+    [[ -d "${REPO_ROOT}/.git" ]] || install_mode="release"
+
+    local in_tree_host_vars="${REPO_ROOT}/ansible/host_vars/localhost.yml"
+    local external_host_vars="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/host_vars/localhost.yml"
+
+    # host_vars_file is THIS mode's authoritative location — dev mode keeps
+    # writing directly in-tree (a dev clone never moves, so nothing forces
+    # it out); release mode writes externally and symlinks it in, per
+    # _ensure_host_vars_symlink above.
+    local host_vars_file
+    if [[ "${install_mode}" == "dev" ]]; then
+        host_vars_file="${in_tree_host_vars}"
+    else
+        host_vars_file="${external_host_vars}"
+    fi
 
     if [[ -f "${host_vars_file}" ]]; then
         info "host_vars/localhost.yml already exists — skipping. Delete it to regenerate."
-        # Read back the values the Ansible run needs. External repos are a
-        # YAML list, not a bare scalar, so PROFILE/MACHINE_NAME use the
-        # simple scalar reader — the sync-external role reads the list
-        # directly. EXTERNAL_REPO_NAMES/PRIVATE/URLS are re-derived from the
-        # list here too, purely so setup_ssh_keys() (below) can still find
-        # repos that were registered by hand-editing this file rather than
-        # through the interactive loop.
-        PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${host_vars_file}")
-        MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${host_vars_file}")
-
-        local repo_name repo_private repo_url repo_allow_hooks
-        while IFS='|' read -r repo_name repo_private repo_url repo_allow_hooks; do
-            [[ -z "${repo_name}" ]] && continue
-            EXTERNAL_REPO_NAMES+=("${repo_name}")
-            EXTERNAL_REPO_PRIVATE+=("${repo_private:-false}")
-            EXTERNAL_REPO_URLS+=("${repo_url}")
-            EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks:-false}")
-        done < <(_read_external_repos_from_host_vars "${host_vars_file}")
-
+        _load_host_vars_into_globals "${host_vars_file}"
+        _ensure_host_vars_symlink "${install_mode}" "${in_tree_host_vars}" "${external_host_vars}"
         return 0
     fi
 
+    # ── Mode-switch reuse ─────────────────────────────────────────────────────
+    # Offer to carry over config from the other mode's conventional location
+    # rather than silently re-prompting for everything on a dev<->release
+    # switch. Only covers the default projects-base convention for locating a
+    # prior dev-mode install (or whatever --projects-base was actually
+    # passed this run) — a dev install under a projects-base not passed this
+    # time can't be discovered without already knowing it.
+    local other_mode_file=""
+    if [[ "${install_mode}" == "release" ]]; then
+        other_mode_file="${ARG_PROJECTS_BASE:-${HOME}/Projects}/Personal/GitHub/dotfiles/ansible/host_vars/localhost.yml"
+    else
+        other_mode_file="${external_host_vars}"
+    fi
+
+    if [[ -f "${other_mode_file}" ]]; then
+        local other_mode_label other_profile other_machine reuse_answer
+        if [[ "${install_mode}" == "release" ]]; then
+            other_mode_label="dev"
+        else
+            other_mode_label="release"
+        fi
+        other_profile=$(_read_yaml_scalar "dotfiles_profile" "${other_mode_file}")
+        other_machine=$(_read_yaml_scalar "machine_name" "${other_mode_file}")
+
+        header "Existing ${other_mode_label}-mode configuration found"
+        info "  ${other_mode_file}"
+        info "  profile: ${other_profile:-unknown}, machine: ${other_machine:-unknown}"
+        read -r -p "Reuse it for this ${install_mode}-mode install? [Y/n]: " reuse_answer || true
+
+        if [[ -z "${reuse_answer}" || "${reuse_answer}" == "y" || "${reuse_answer}" == "Y" ]]; then
+            mkdir -p "$(dirname "${host_vars_file}")"
+            cp "${other_mode_file}" "${host_vars_file}"
+            info "Reused ${other_mode_label}-mode configuration for ${install_mode} mode."
+            _load_host_vars_into_globals "${host_vars_file}"
+            _ensure_host_vars_symlink "${install_mode}" "${in_tree_host_vars}" "${external_host_vars}"
+            return 0
+        fi
+        echo
+    fi
+
     header "Machine Configuration"
-    info "Creating ansible/host_vars/localhost.yml"
-    info "This file is gitignored and will never be committed or overwritten by Ansible."
+    info "Creating host_vars/localhost.yml"
+    info "This file is gitignored (dev mode) or stored outside the repo tree entirely"
+    info "(release mode), and will never be committed or overwritten by Ansible."
     echo
 
     # ── Profile ───────────────────────────────────────────────────────────────
@@ -763,6 +851,12 @@ generate_host_vars() {
 dotfiles_profile: ${PROFILE}
 machine_name: "${MACHINE_NAME}"
 
+# Human-readable record of how this machine was installed — dev (git clone,
+# switchable branches) or release (tarball, tracks main only). Nothing reads
+# this back to make decisions; the effective mode is always re-derived from
+# disk. See docs/sync.md#install-modes.
+dotfiles_install_mode: ${install_mode}
+
 # ── Role feature flags ─────────────────────────────────────────────────────
 # common is always required and cannot be disabled.
 dotfiles_sync_enabled: true
@@ -803,6 +897,8 @@ EOF
     } > "${host_vars_file}"
 
     info "Created ${host_vars_file}"
+
+    _ensure_host_vars_symlink "${install_mode}" "${in_tree_host_vars}" "${external_host_vars}"
 }
 
 # ── Phase 3: SSH deploy keys ──────────────────────────────────────────────────

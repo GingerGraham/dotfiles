@@ -8,6 +8,15 @@
     #   server      — use server.yml instead; this playbook is not profile-aware beyond
     #                 the workstation gate on tmux/vim
     #   minimal     — common, shell, git, ssh only; tmux, vim, sync-external, sync skipped
+    - name: Detect dotfiles install mode and resolve repo root
+      ansible.builtin.include_tasks:
+        file: tasks/detect_install_mode.yml
+        apply:
+          tags:
+            - always
+      tags:
+        - always
+
     - name: Import common role
       ansible.builtin.import_role:
         name: common

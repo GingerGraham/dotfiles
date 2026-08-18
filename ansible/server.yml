@@ -3,6 +3,15 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Detect dotfiles install mode and resolve repo root
+      ansible.builtin.include_tasks:
+        file: tasks/detect_install_mode.yml
+        apply:
+          tags:
+            - always
+      tags:
+        - always
+
     - name: Import common role
       ansible.builtin.import_role:
         name: common

@@ -10,6 +10,7 @@ set -euo pipefail
 
 SYNC_CONF="${XDG_CONFIG_HOME:-${HOME}/.config}/dotfiles/sync.conf"
 STATE_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/dotfiles"
+CURRENT_LINK="${STATE_DIR}/current"
 MAIN_BRANCH="main"
 
 # ── Config helpers ────────────────────────────────────────────────────────────
@@ -53,6 +54,44 @@ _remote_branch_exists() {
     git -C "$DOTFILES_DIR" ls-remote --exit-code --heads origin "$1" > /dev/null 2>&1
 }
 
+# ── Mode detection ────────────────────────────────────────────────────────────
+# Derived fresh from disk on every call, never cached — mirrors
+# ansible/tasks/detect_install_mode.yml. Requires DOTFILES_DIR (from
+# _conf_load) to already be set.
+
+_resolve_mode() {
+    if [[ -d "${DOTFILES_DIR}/.git" ]]; then
+        echo "dev"
+    elif [[ -L "$CURRENT_LINK" ]]; then
+        echo "release"
+    else
+        echo "dev"
+    fi
+}
+
+_mode_conflict() {
+    [[ -d "${DOTFILES_DIR}/.git" && -L "$CURRENT_LINK" ]]
+}
+
+# Release id embedded in the 'current' symlink target's dirname
+# (<timestamp>-<shortsha>) — empty if no release is installed.
+_release_id() {
+    [[ -L "$CURRENT_LINK" ]] || return 0
+    basename "$(readlink "$CURRENT_LINK")" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-//'
+}
+
+# Refuses branch-switching subcommands outright in release mode — there is no
+# working git checkout for them to act on.
+_require_dev_mode() {
+    local subcommand="$1"
+    if [[ "$(_resolve_mode)" != "dev" ]]; then
+        echo "ERROR: '${subcommand}' requires dev mode — this machine is running in release mode." >&2
+        echo "Reinstall with --dev to get a git checkout you can switch branches on:" >&2
+        echo "  bash <(curl -fsSL https://raw.githubusercontent.com/GingerGraham/dotfiles/main/bootstrap.sh) --dev" >&2
+        exit 1
+    fi
+}
+
 # ── Timer helpers ─────────────────────────────────────────────────────────────
 
 _timer_status() {
@@ -71,8 +110,8 @@ _timer_status() {
 cmd_status() {
     _conf_load
 
-    local working last_sync timer_state
-    working=$(_working_branch)
+    local mode last_sync timer_state
+    mode=$(_resolve_mode)
     last_sync="never"
     [[ -f "${STATE_DIR}/last-sync" ]] && last_sync=$(cat "${STATE_DIR}/last-sync")
     timer_state=$(_timer_status)
@@ -87,28 +126,41 @@ cmd_status() {
         sync_state="timer not running"
     fi
 
-    # Flag mismatches that need attention
-    local branch_note=""
-    if [[ "$working" != "$GIT_BRANCH" ]]; then
-        branch_note="  *** working copy does not match configured branch ***"
-    fi
-
     echo ""
     echo "  Dotfiles sync status"
     echo "  ────────────────────────────────────"
-    printf "  %-16s %s\n" "Repo:"        "$DOTFILES_DIR"
+    printf "  %-16s %s\n" "Mode:" "$mode"
+
+    local branch_note=""
+    if [[ "$mode" == "dev" ]]; then
+        local working
+        working=$(_working_branch)
+        printf "  %-16s %s\n" "Repo:"         "$DOTFILES_DIR"
+        printf "  %-16s %s\n" "Working copy:" "$working"
+        if [[ "$working" != "$GIT_BRANCH" ]]; then
+            branch_note="  *** working copy does not match configured branch ***"
+        fi
+    else
+        local release_id
+        release_id=$(_release_id)
+        printf "  %-16s %s\n" "Release:" "${release_id:-none}"
+    fi
+
     printf "  %-16s %s\n" "Tracking:"    "$GIT_BRANCH"
-    printf "  %-16s %s\n" "Working copy:" "$working"
     printf "  %-16s %s\n" "Dev mode:"    "$DEV_MODE"
     printf "  %-16s %s\n" "Sync:"        "$sync_state"
     printf "  %-16s %s\n" "Last synced:" "$last_sync"
     [[ -n "$branch_note" ]] && echo "$branch_note"
+    if _mode_conflict; then
+        echo "  *** both a dev-mode checkout and a release-mode install are present on this machine — dev wins ***"
+    fi
     echo ""
 }
 
 cmd_switch() {
     local target="$1"
     _conf_load
+    _require_dev_mode "dotfiles-branch <branch>"
 
     local working
     working=$(_working_branch)
@@ -145,6 +197,7 @@ cmd_switch() {
 cmd_dev() {
     # Suspend sync on the current branch without switching
     _conf_load
+    _require_dev_mode "dotfiles-branch --dev"
 
     if [[ "$DEV_MODE" == "true" ]]; then
         echo "Dev mode already active (branch: ${GIT_BRANCH})"
@@ -159,6 +212,7 @@ cmd_dev() {
 cmd_resume() {
     # Return to main and re-enable sync
     _conf_load
+    _require_dev_mode "dotfiles-branch --resume"
 
     local working
     working=$(_working_branch)
@@ -182,6 +236,7 @@ cmd_resume() {
 cmd_reset() {
     # Hard-reset working copy to match remote — escape hatch for diverged branches
     _conf_load
+    _require_dev_mode "dotfiles-branch --reset"
 
     local working
     working=$(_working_branch)
@@ -234,9 +289,14 @@ Usage:
   dotfiles-branch --resume          Return to main and re-enable sync
   dotfiles-branch --dev             Suspend sync on current branch (no branch switch)
   dotfiles-branch --reset           Hard-reset working copy to match remote HEAD
-  dotfiles-branch --status          Show sync state, branch, and last sync time
+  dotfiles-branch --status          Show sync state, mode, and last sync time
   dotfiles-branch --init <url> <dir>  Initialise sync.conf (normally done by install.sh)
   dotfiles-branch --help            Show this help
+
+<branch>, --resume, --dev, and --reset require dev mode (a git checkout) —
+they refuse cleanly on a release-mode (tarball) install. Reinstall with
+--dev to get a checkout you can switch branches on. See
+docs/sync.md#install-modes.
 
 Examples:
   # Start working on a feature

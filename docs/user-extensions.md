@@ -18,7 +18,7 @@ loading it.
 
 ## What it's for
 
-`env/90-local.sh` is the machine-local env override file — it's for
+`90-local.sh` is the machine-local env override file — it's for
 environment variables (PATH extensions, proxy settings, credentials), not for
 functions, aliases, or installers. Overloading it with those would be the
 wrong shape. `DOTFILES_USER_EXT_DIR` is a proper drop-in directory for that
@@ -45,7 +45,7 @@ no further involvement (see `ansible/roles/shell/tasks/main.yml`, Section 6d).
 
 User extension files are sourced in `loader.sh`:
 
-- **after** `env/90-local.sh` ("Local overrides, always last") — so user
+- **after** `90-local.sh` ("Local overrides, always last") — so user
   definitions shadow everything, including machine-local env overrides;
 - **before** `dedupe-path` — so PATH entries added by a user file still get
   deduplicated.
@@ -176,8 +176,8 @@ not extended to cover user machines.
 
 | Variable                    | Default                                | Notes                                                |
 | ---------------------------- | --------------------------------------- | ----------------------------------------------------- |
-| `DOTFILES_USER_EXT_DIR`      | `${XDG_CONFIG_HOME}/dotfiles/user`      | Flat directory, outside the repo. Override in `env/90-local.sh`. |
-| `DOTFILES_USER_EXT_ENABLED`  | `true`                                  | Debug escape hatch only — set `false` in `env/90-local.sh` to disable entirely. |
+| `DOTFILES_USER_EXT_DIR`      | `${XDG_CONFIG_HOME}/dotfiles/user`      | Flat directory, outside the repo. Override in `90-local.sh`. |
+| `DOTFILES_USER_EXT_ENABLED`  | `true`                                  | Debug escape hatch only — set `false` in `90-local.sh` to disable entirely. |
 
 See also [shell-config.md](shell-config.md) for where this fits in the
 overall loading order, and [tool-management.md](tool-management.md) for how

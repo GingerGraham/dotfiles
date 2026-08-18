@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# ~/.config/shell/env/90-local.sh
+# ~/.config/dotfiles/local/90-local.sh
 # Machine-local environment overrides for {{ dotfiles_machine_name | default(ansible_facts['hostname']) }}
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # THIS FILE IS MANAGED LOCALLY — NOT BY ANSIBLE
 # ─────────────────────────────────────────────────────────────────────────────
 # Created once by Ansible on first run. Never overwritten on subsequent runs.
-# Gitignored — all edits stay local to this machine.
+# Deliberately deployed outside the dotfiles repo tree (see
+# dotfiles_local_env_dir in group_vars/all.yml) so it survives a release-mode
+# symlink swap untouched — all edits stay local to this machine.
 #
 # PURPOSE
-#   This file is sourced last in the env/ tier (numeric sort: 90-*), so any
-#   value set here wins over the shared env files (00-core, 10-editors, etc.).
+#   This file is sourced last by loader.sh, after every shared env/ file
+#   (00-core, 10-editors, etc.), so any value set here wins over them.
 #   Use it for anything too machine-specific or sensitive to commit.
 #
 # HOW TO USE
@@ -27,6 +29,13 @@
 export DOTFILES_MACHINE_NAME="{{ dotfiles_machine_name | default(ansible_facts['hostname']) }}"
 # NOTE: Do not set GIT_AUTHOR_EMAIL or GIT_COMMITTER_EMAIL here.
 # Git identity is managed via ~/.gitconfig and per-project [includeIf] profiles.
+
+# Resolved path to the dotfiles repo/release checkout on this machine —
+# dev mode: the git clone; release mode: the versioned release directory
+# (dotfiles_repo_root at the time this file was generated). Set once by
+# Ansible; like the rest of this file, won't auto-update if the repo moves
+# later — edit here if needed.
+export DOTFILES_REPO_DIR="{{ dotfiles_repo_root }}"
 
 # ── PATH extensions ───────────────────────────────────────────────────────────
 # Add machine-local tool directories that aren't in the shared env files.

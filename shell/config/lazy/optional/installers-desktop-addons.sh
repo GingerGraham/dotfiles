@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Not loaded at shell startup. Stubs are registered only when
-# DOTFILES_OPTIONAL_INSTALLERS=true is set in env/90-local.sh.
+# DOTFILES_OPTIONAL_INSTALLERS=true is set in 90-local.sh.
 # Functions here must also appear in _optional_tools_registry() in maintenance.sh.
 # shellcheck disable=SC1091
 source "${SHELL_CONFIG_DIR:-$HOME/.config/shell}/lazy/installers-common.sh"

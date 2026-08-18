@@ -11,6 +11,13 @@
 # Controls which roles run on this machine.
 dotfiles_profile: workstation    # workstation | server | minimal
 
+# ── Install mode ──────────────────────────────────────────────────────────────
+# Self-detected and written once by install.sh — dev (git clone) or release
+# (tarball, tracks main only). Human-readable record only; nothing reads this
+# back to make decisions, so there's no need to set it by hand here. See
+# docs/sync.md#install-modes.
+# dotfiles_install_mode: dev
+
 # ── Machine ───────────────────────────────────────────────────────────────────
 machine_name: ""                 # Friendly name used in git config and prompt.
                                  # Defaults to system hostname if left empty.

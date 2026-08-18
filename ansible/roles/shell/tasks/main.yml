@@ -1,11 +1,4 @@
 # ============================================================================
-# Section 1 — Derive repo root
-# ============================================================================
-- name: Set dotfiles repo root fact
-  ansible.builtin.set_fact:
-    dotfiles_repo_root: "{{ playbook_dir | dirname }}"
-
-# ============================================================================
 # Section 2 — Verify shell config source exists in repo
 # ============================================================================
 - name: Stat shell config source directory
@@ -148,10 +141,43 @@
 # ============================================================================
 # Section 6 — Deploy machine-local env override (create once, never overwrite)
 # ============================================================================
+# Destination lives outside shell_config_dir (a symlink into
+# dotfiles_repo_root) so it survives a release-mode symlink swap untouched —
+# see dotfiles_local_env_dir in group_vars/all.yml and docs/sync.md#install-modes.
+- name: Ensure machine-local env override directory exists
+  ansible.builtin.file:
+    path: "{{ dotfiles_local_env_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: shell | migration | stat legacy in-tree 90-local.sh
+  ansible.builtin.stat:
+    path: "{{ shell_config_dir }}/env/90-local.sh"
+  register: _legacy_90_local_stat
+
+- name: shell | migration | copy legacy in-tree 90-local.sh to relocated path
+  ansible.builtin.copy:
+    src: "{{ shell_config_dir }}/env/90-local.sh"
+    dest: "{{ dotfiles_local_env_dir }}/90-local.sh"
+    remote_src: true
+    force: false
+    mode: "0644"
+  when:
+    - _legacy_90_local_stat.stat.exists
+    - not _legacy_90_local_stat.stat.islnk
+
+- name: shell | migration | remove legacy in-tree 90-local.sh after relocation
+  ansible.builtin.file:
+    path: "{{ shell_config_dir }}/env/90-local.sh"
+    state: absent
+  when:
+    - _legacy_90_local_stat.stat.exists
+    - not _legacy_90_local_stat.stat.islnk
+
 - name: Deploy 90-local.sh machine override template
   ansible.builtin.template:
     src: env/90-local.sh.j2
-    dest: "{{ shell_config_dir }}/env/90-local.sh"
+    dest: "{{ dotfiles_local_env_dir }}/90-local.sh"
     mode: "0644"
     force: false
 

@@ -6,10 +6,6 @@ ansible/host_vars/localhost.yml
 *.retry
 .vault_pass
 
-# Prevents the machine-local env override from being committed.
-# The file is created by the shell Ansible role on first run.
-shell/config/env/90-local.sh
-
 # Ignore Python cache files and macOS metadata files
 __pycache__/
 *.pyc

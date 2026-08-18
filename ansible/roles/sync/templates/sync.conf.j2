@@ -2,14 +2,20 @@
 # Written by install.sh on first run — never overwritten by Ansible.
 # Managed at runtime by: dotfiles-branch
 #
-# DEV_MODE: when "true", sync.sh exits immediately without pulling.
+# DOTFILES_DIR: dev mode — the git checkout; release mode — the
+#               ~/.local/share/dotfiles/current symlink. sync.sh tells the
+#               two apart by checking for a .git directory here, fresh on
+#               every run — see docs/sync.md#install-modes.
+#
+# DEV_MODE: when "true", sync.sh exits immediately without pulling/fetching.
 #           Set automatically by dotfiles-branch when switching to a non-main branch.
 #
 # SSH_KEY:  path to a dedicated deploy key if you are not using an SSH agent.
 #           Leave commented out to rely on ssh-agent (preferred for dev workstations).
 #           Downstream/server installs with no agent should uncomment and set this.
+#           dev mode only — release mode fetches over HTTPS.
 
-DOTFILES_DIR="{{ dotfiles_dir }}"
+DOTFILES_DIR="{{ dotfiles_repo_root }}"
 REPO_URL="{{ dotfiles_repo_url }}"
 GIT_BRANCH="main"
 DEV_MODE="false"

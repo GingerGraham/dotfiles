@@ -160,7 +160,7 @@ _gh-install-tarball() {
     rm -rf "${tmp_dir}"
     log_info "gh installed to ~/.local/bin/gh"
     [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
-        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in 90-local.sh"
 }
 
 
@@ -334,7 +334,7 @@ _glab-install-tarball() {
     rm -rf "${tmp_dir}"
     log_info "glab installed to ~/.local/bin/glab"
     [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
-        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in 90-local.sh"
 }
 
 
@@ -688,7 +688,7 @@ _direnv-install-script() {
     mkdir -p "${HOME}/.local/bin"
     curl -sfL https://direnv.net/install.sh | bin_path="${HOME}/.local/bin" bash
     [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]] \
-        && log_warn "${HOME}/.local/bin is not on PATH — add it in env/90-local.sh"
+        && log_warn "${HOME}/.local/bin is not on PATH — add it in 90-local.sh"
 }
 
 
