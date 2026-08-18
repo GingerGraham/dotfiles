@@ -156,8 +156,9 @@ for _env_file in "${SHELL_CONFIG_DIR}/env"/[0-9][0-9]-*.sh; do
 done
 unset _env_file
 
-# 90-local.sh lives outside SHELL_CONFIG_DIR (see roles/shell/tasks/main.yml
-# Section 6 and docs/sync.md#install-modes), so it isn't picked up by the
+# 90-local.sh lives outside SHELL_CONFIG_DIR (see
+# ansible/roles/shell/tasks/main.yml Section 6 and docs/sync.md#install-modes),
+# so it isn't picked up by the
 # glob above. Sourced here too — not just in "Local overrides (always last)"
 # below — so flags it sets that gate later tiers (DOTFILES_OFFLINE for
 # completions, DOTFILES_OPTIONAL_INSTALLERS for Tier 3 lazy stubs) actually

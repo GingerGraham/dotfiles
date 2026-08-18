@@ -246,9 +246,11 @@ release_sync() {
 
     mkdir -p "$RELEASES_DIR"
 
+    # Explicit templates: BSD/macOS mktemp requires one (a bare `mktemp`
+    # errors), unlike GNU's which defaults to one.
     local tmp_tar tmp_extract
-    tmp_tar=$(mktemp)
-    tmp_extract=$(mktemp -d)
+    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/dotfiles-sync.XXXXXX")
+    tmp_extract=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-sync.XXXXXX")
 
     # Fetches the branch tip rather than the exact resolved sha above — on
     # the rare chance a new commit lands in between, the installed content
@@ -278,8 +280,13 @@ release_sync() {
     mv "$extracted_dir" "$new_release_dir"
     rm -rf "$tmp_extract"
 
-    ln -sfn "$new_release_dir" "${CURRENT_LINK}.tmp"
-    mv -T "${CURRENT_LINK}.tmp" "$CURRENT_LINK"
+    # `ln -sfn` replaces an existing symlink in place rather than following
+    # it — unlike `mv`, which (on both GNU and BSD, and without a portable
+    # equivalent of GNU's non-standard -T) treats an existing
+    # symlink-to-directory destination as a directory to move *into*,
+    # silently nesting the new release inside the old one instead of
+    # replacing 'current'.
+    ln -sfn "$new_release_dir" "$CURRENT_LINK"
 
     log "Flipped to release ${shortsha} (${timestamp})"
 

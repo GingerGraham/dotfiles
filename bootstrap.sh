@@ -97,8 +97,10 @@ done
 
 mkdir -p "${RELEASE_BASE}/releases"
 
-tmp_tar=$(mktemp)
-tmp_extract=$(mktemp -d)
+# Explicit templates: BSD/macOS mktemp requires one (a bare `mktemp` errors),
+# unlike GNU's which defaults to one.
+tmp_tar=$(mktemp "${TMPDIR:-/tmp}/dotfiles-bootstrap.XXXXXX")
+tmp_extract=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-bootstrap.XXXXXX")
 trap 'rm -f "${tmp_tar}"; rm -rf "${tmp_extract}"' EXIT
 
 # Resolve the branch to a commit sha via the GitHub API first. GitHub's
@@ -143,11 +145,12 @@ mv "${extracted_dir}" "${release_dir}"
 rm -rf "${tmp_extract}"
 trap - EXIT
 
-# Atomic flip: symlink into place under a temp name, then rename over the
-# real one — 'current' always points at either the old or the new release,
-# never a half-written one.
-ln -sfn "${release_dir}" "${RELEASE_BASE}/current.tmp"
-mv -T "${RELEASE_BASE}/current.tmp" "${RELEASE_BASE}/current"
+# Flip: `ln -sfn` replaces an existing symlink in place rather than
+# following it — unlike `mv`, which (on both GNU and BSD, and without a
+# portable equivalent of GNU's non-standard -T) treats an existing
+# symlink-to-directory destination as a directory to move *into*, silently
+# nesting the new release inside the old one instead of replacing 'current'.
+ln -sfn "${release_dir}" "${RELEASE_BASE}/current"
 
 echo "Installed release ${shortsha} to ${release_dir}"
 
