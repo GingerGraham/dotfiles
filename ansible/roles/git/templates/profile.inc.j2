@@ -17,3 +17,12 @@
 [tag]
     gpgsign = true
 {% endif %}
+{% if item.cli is defined and item.cli %}
+{% set cli_default_host = 'github.com' if item.cli == 'gh' else 'gitlab.com' %}
+{% set cli_host = item.cli_host if (item.cli_host is defined and item.cli_host) else cli_default_host %}
+{% set cli_cmd = '!gh auth git-credential' if item.cli == 'gh' else '!glab auth git-credential' %}
+
+[credential "https://{{ cli_host }}"]
+    helper =
+    helper = {{ cli_cmd }}
+{% endif %}

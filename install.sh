@@ -74,6 +74,14 @@ EXTERNAL_REPO_URLS=()
 EXTERNAL_REPO_PRIVATE=()
 EXTERNAL_REPO_ALLOW_HOOKS=()
 
+# Populated by generate_host_vars() during the git_projects collection loop
+# whenever a project is wired for gh/glab; consumed by post_run() to print
+# the "cd <dir> && <cli> auth login" next-steps block. Parallel arrays,
+# indexed together — bash 3.2 has no associative arrays.
+CLI_PROJECT_CONTEXTS=()
+CLI_PROJECT_PROVIDERS=()
+CLI_PROJECT_CLIS=()
+
 # ── Colour output ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]] && command -v tput &>/dev/null; then
     _RED=$(tput setaf 1)
@@ -749,10 +757,34 @@ generate_host_vars() {
 
             read -r -p "  GPG signing key for ${ctx}/${prov} (optional, Enter to skip): " key || true
 
+            # Wire the gh/glab CLI — inferred from provider, offered as a
+            # single Y/n question, skipped entirely when no CLI can be
+            # inferred (this stays a first-run prompt, not a CLI-selection
+            # interview). No auth here: that needs a browser and interactive
+            # device flow, done after Ansible in the closing summary.
+            local inferred_cli=""
+            case "$(printf '%s' "${prov}" | tr '[:upper:]' '[:lower:]')" in
+                github) inferred_cli="gh" ;;
+                gitlab) inferred_cli="glab" ;;
+            esac
+
+            local cli=""
+            if [[ -n "${inferred_cli}" ]]; then
+                local cli_answer=""
+                read -r -p "  Wire the ${inferred_cli} CLI for ${ctx}/${prov}? [Y/n]: " cli_answer || true
+                if [[ "${cli_answer}" != "n" && "${cli_answer}" != "N" ]]; then
+                    cli="${inferred_cli}"
+                    CLI_PROJECT_CONTEXTS+=("${ctx}")
+                    CLI_PROJECT_PROVIDERS+=("${prov}")
+                    CLI_PROJECT_CLIS+=("${cli}")
+                fi
+            fi
+
             git_projects_yaml+="  - context: \"${ctx}\"\n"
             git_projects_yaml+="    provider: \"${prov}\"\n"
             git_projects_yaml+="    email: \"${email}\"\n"
             [[ -n "${key}" ]] && git_projects_yaml+="    signing_key: \"${key}\"\n"
+            [[ -n "${cli}" ]] && git_projects_yaml+="    cli: \"${cli}\"\n"
 
             info "Added ${ctx}/${prov}"
             echo
@@ -1188,6 +1220,22 @@ post_run() {
         echo "  Check status any time with:"
         echo "    external-sync"
         echo "    cat ~/.local/share/external-sync/<name>/last-sync"
+    fi
+
+    if [[ ${#CLI_PROJECT_CONTEXTS[@]} -gt 0 ]]; then
+        echo
+        echo "  CLI wiring was configured for ${#CLI_PROJECT_CONTEXTS[@]} project(s), but not"
+        echo "  authenticated — that needs a browser and an interactive device flow."
+        echo "  Authenticate from inside each project tree so credentials land in the"
+        echo "  right per-context store:"
+        local i
+        for (( i=0; i<${#CLI_PROJECT_CONTEXTS[@]}; i++ )); do
+            echo
+            echo "    cd ${PROJECTS_BASE}/${CLI_PROJECT_CONTEXTS[i]}/${CLI_PROJECT_PROVIDERS[i]}"
+            echo "    ${CLI_PROJECT_CLIS[i]} auth login"
+        done
+        echo
+        echo "  Verify any time with: gh auth status   /   glab auth status"
     fi
 
     echo

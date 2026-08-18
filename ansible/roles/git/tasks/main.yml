@@ -103,6 +103,71 @@
     label: "{{ item.context }}/{{ item.provider }}"
   when: git_projects | length > 0
 
+# ── CLI context (gh/glab) ──────────────────────────────────────────────────────
+# Wires per-context gh/glab CLI config directories and generated .envrc files
+# so authentication follows the working directory the same way identity
+# already does via direnv. No-op — no directories, no files — when no
+# project has `cli` set. Runs after project directories exist (above), since
+# the .envrc below is written inside them. See ansible/roles/git/README.md#cli-context.
+
+- name: git | cli | resolve projects with CLI wiring
+  ansible.builtin.set_fact:
+    git_cli_projects: "{{ git_projects | selectattr('cli', 'defined') | selectattr('cli') | list }}"
+
+- name: git | cli | ensure ~/.config/direnv/lib exists
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/direnv/lib"
+    state: directory
+    mode: '0700'
+
+- name: git | cli | deploy direnv stdlib function
+  ansible.builtin.template:
+    src: dotfiles-git-context.sh.j2
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/direnv/lib/dotfiles-git-context.sh"
+    mode: '0644'
+    force: true
+
+- name: git | cli | ensure CLI config directories
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/git/{{ item.cli }}/{{ item.context | lower | replace(' ', '-') }}"
+    state: directory
+    mode: '0700'
+  loop: "{{ git_cli_projects }}"
+  loop_control:
+    label: "{{ item.context }}/{{ item.provider }} ({{ item.cli }})"
+
+- name: git | cli | deploy generated .envrc per project
+  ansible.builtin.template:
+    src: envrc.j2
+    dest: "{{ projects_base_expanded }}/{{ item.context }}/{{ item.provider }}/.envrc"
+    mode: '0644'
+    force: true
+  loop: "{{ git_cli_projects }}"
+  loop_control:
+    label: "{{ item.context }}/{{ item.provider }}"
+
+- name: git | cli | ensure state directory exists
+  ansible.builtin.file:
+    path: "{{ xdg_state_home }}/dotfiles"
+    state: directory
+    mode: '0700'
+  when: git_cli_projects | length > 0
+
+- name: git | cli | create sentinel file (CLI contexts configured)
+  ansible.builtin.file:
+    path: "{{ xdg_state_home }}/dotfiles/git-cli-contexts"
+    state: touch
+    mode: '0644'
+    modification_time: preserve
+    access_time: preserve
+  when: git_cli_projects | length > 0
+
+- name: git | cli | remove sentinel file (no CLI contexts configured)
+  ansible.builtin.file:
+    path: "{{ xdg_state_home }}/dotfiles/git-cli-contexts"
+    state: absent
+  when: git_cli_projects | length == 0
+
 # ── XDG Projects migration ────────────────────────────────────────────────────
 # Only runs when projects_base is not ~/Development.
 # Moves existing ~/Development contents into ~/Projects, then replaces

@@ -15,6 +15,10 @@ Deploys git configuration and manages multi-context project identities.
 | `~/.config/git/profiles/local.inc` | User only | No — never touched after creation |
 | `~/.config/git/ignore` | Ansible | Yes |
 | `~/.config/git/attributes` | Ansible | Yes |
+| `~/.config/direnv/lib/dotfiles-git-context.sh` | Ansible | Yes — fully generated, no user content |
+| `~/.config/git/<gh\|glab>/<context-slug>/` | Ansible + shell functions | N/A — directory only, contents owned by `gh`/`glab` |
+| `<projects_base>/<context>/<provider>/.envrc` | Ansible + shell functions | Yes — fully generated (only for projects with `cli` set) |
+| `<projects_base>/<context>/<provider>/.envrc.local` | User only | No — never touched by dotfiles |
 
 ### How `~/.gitconfig` is managed
 
@@ -73,6 +77,136 @@ git-sync-projects --from-host-vars  # rebuild manifest from host_vars
 # or: delete projects.yml and re-run Ansible to reset from host_vars
 ```
 
+## CLI context
+
+The git role manages per-`context`/`provider` **identity** — commit authorship and GPG
+signing follow the working directory automatically via `includeIf`. It does not, on its
+own, manage **authentication**: `gh` and `glab` each hold a single global credential set
+(`~/.config/gh/hosts.yml`, `~/.config/glab-cli/config.yml`), so a personal GitHub account
+and a work GitHub account have to be switched manually, and `git push` over HTTPS uses
+whichever account was configured last.
+
+CLI context wiring closes that gap using the same working-directory trick, via `direnv`:
+setting a project's `cli` field gives it its own `gh`/`glab` config directory, a generated
+`.envrc` that activates it on `cd`, and a credential helper scoped to that project tree —
+so authentication follows the working directory the same way identity already does. This
+supports multiple account instances for the same provider (personal vs. work, or a
+consultant on several concurrent client projects) without any manual switching.
+
+This is **wiring only** — you still run `gh auth login` / `glab auth login` yourself; the
+system's job is to make sure the credentials land in the right per-context store and that
+everything downstream (git pushes, `gh`/`glab` commands, `GITHUB_PERSONAL_ACCESS_TOKEN`)
+picks them up.
+
+### File map
+
+| File | Purpose |
+|------|---------|
+| `~/.config/direnv/lib/dotfiles-git-context.sh` | direnv stdlib function backing `use git_context` — deployed by this role (it's git-identity logic), regenerated on every run |
+| `~/.config/git/gh/<context-slug>/`, `~/.config/git/glab/<context-slug>/` | Per-context CLI config directories — keyed on **context alone**, not context+provider, since `gh`/`glab` each hold multiple hosts in one config dir. Empty until you run `auth login` from inside the tree |
+| `<projects_base>/<context>/<provider>/.envrc` | Generated, one call: `use git_context <gh\|glab> <context-slug> [host]` — activates the CLI config dir (and, for `gh`, the context-aware token export) on `cd`. Only exists for projects with `cli` set |
+| `<projects_base>/<context>/<provider>/.envrc.local` | Your own overrides — sourced by the generated `.envrc`, never touched by dotfiles |
+| `~/.config/git/profiles/<n>.inc` | Gains a `[credential "https://<host>"]` section when the project has `cli` set (see below) |
+
+### The `use git_context` contract
+
+```
+use git_context <gh|glab> <context-slug> [host]
+```
+
+`direnv` sources every `*.sh` in `$XDG_CONFIG_HOME/direnv/lib/` into its stdlib before
+evaluating any `.envrc`, and dispatches `use foo <args>` to a function named `use_foo` —
+see the [shell role's direnv section](../shell/README.md#direnv-configuration) for how
+that hook and the `projects_base` whitelist are set up. A one-line `.envrc` calling `use
+git_context gh personal` is therefore fully equivalent to inline `export` lines: same
+automatic activation on `cd`, no commands to run, no `direnv allow` needed.
+
+`use_git_context` sets `GH_CONFIG_DIR`/`GLAB_CONFIG_DIR` (and `GH_HOST`/`GITLAB_HOST` when
+a non-default `host` is given) to the context's config directory. For `gh`, it also
+re-exports `GITHUB_PERSONAL_ACCESS_TOKEN` from that context's `gh auth token` — a local
+keyring read, no network call — overriding the out-of-tree default set at shell start (see
+the comment above the token-export block in `tools/git.sh` for the two-tier arrangement).
+There is no `glab` equivalent: `glab` has no non-interactive token-print command matching
+`gh auth token`. Opt out of the token export with `DOTFILES_GIT_CONTEXT_EXPORT_TOKEN=false`
+in `90-local.sh`.
+
+The trade-off of relying entirely on `direnv`: a project tree copied to a machine without
+these dotfiles gets a broken `.envrc` (an undefined `use git_context` command) rather than
+a degraded-but-working one. This is accepted — it keeps the generated `.envrc` narrow. If
+`direnv` isn't installed at all, `tools/git.sh` warns once at shell start, but only when at
+least one project actually has `cli` set (checked via a cheap sentinel file, not a manifest
+read).
+
+### Credential helper and its known limitation
+
+A project with `cli` set gets, in its profile `.inc`:
+
+```ini
+[credential "https://github.com"]
+    helper =
+    helper = !gh auth git-credential
+```
+
+(`glab` equivalent: `helper = !glab auth git-credential`; the host is `cli_host` when set,
+otherwise the CLI's own default.) The bare `helper =` resets the inherited helper list so
+a globally configured `libsecret`/`store`/`osxkeychain` helper isn't consulted first inside
+the project tree — without it, behaviour depends on whatever else is configured on the
+machine. `gh auth setup-git` is never invoked for this — it writes to `~/.gitconfig`
+directly, which Ansible regenerates (force: yes) on every run.
+
+**Known limitation:** the helper invokes `gh`/`glab`, which reads `GH_CONFIG_DIR` /
+`GLAB_CONFIG_DIR` from its environment. A git operation launched from a process that did
+not inherit direnv's environment — some IDE integrations, some daemons — falls back to the
+default (unscoped) credential store. Command-line git, and any editor launched from a shell
+already inside the tree, are unaffected.
+
+### Adding, changing, and removing CLI wiring
+
+`git-add-project` offers to wire a CLI right after adding a project — it infers `gh` for a
+`GitHub` provider and `glab` for `GitLab` (case-insensitive), prompts to confirm or pick a
+different CLI, and prompts for an optional non-default host. Decline it (or pass
+`--no-cli`) and add it later:
+
+```sh
+git-add-project-cli <context> <provider> [--cli gh|glab] [--host <hostname>] [--adopt <path>]
+git-update-project <context> <provider> --cli <gh|glab|none> [--cli-host <hostname>]
+git-remove-project-cli <context> <provider>
+```
+
+See [Shell functions](#shell-functions) below for the full surface. After wiring, `cd` into
+the project tree and authenticate:
+
+```sh
+cd ~/Projects/Personal/GitHub
+gh auth login
+gh auth status   # verify
+```
+
+**Migrating an already-authenticated store** — if you've previously used the
+`gh_config_dir`/`GH_CONFIG_DIR`-per-directory convention by hand (e.g. `~/.config/gh-work`),
+carry it over instead of re-running `auth login`:
+
+```sh
+git-add-project-cli Acme GitHub --adopt ~/.config/gh-work
+```
+
+`--adopt` copies `hosts.yml`/`config.yml` into the new context directory — it never moves
+or deletes the source, and never overwrites a non-empty target. Without `--adopt`, if the
+target directory is empty, `git-add-project-cli` checks a couple of likely source locations
+(the ad-hoc `~/.config/gh-<context-slug>` convention, and the CLI's own default
+`~/.config/gh` / `~/.config/glab-cli`) and offers to copy from there instead.
+
+`git-remove-project-cli` clears the manifest/`host_vars` fields, the generated `.envrc`
+(only if it still carries the generated marker — a hand-written `.envrc` is left alone),
+and the credential helper section — then prompts **separately**, defaulting to no, before
+deleting the CLI config directory itself, since it holds live credentials.
+
+### Out of scope
+
+SSH-based auth (`GIT_SSH_COMMAND`, the `ssh_key` manifest field), Windows/PowerShell, and
+context-aware `gpg-push-github`/`gpg-push-gitlab` (they use the ambient CLI config today) are
+all deliberately out of scope for CLI context wiring.
+
 ## Variables
 
 All variables are defined in `group_vars/all.yml` with empty defaults.
@@ -99,6 +233,8 @@ Personal values belong in `host_vars/localhost.yml` (gitignored).
 | `signing_key` | No | GPG fingerprint — enables `gpgsign` for this context |
 | `name` | No | Display name override — defaults to `git_name` |
 | `ssh_key` | No | SSH key path — informational, consumed by the `ssh` role |
+| `cli` | No | `gh` \| `glab` — wires a per-context CLI config directory and credential helper for this project tree. See [CLI context](#cli-context) |
+| `cli_host` | No | Non-default host for a self-managed instance (e.g. `github.acme.com`). Absent means the CLI's own default host |
 
 ## Shell functions
 
@@ -108,35 +244,59 @@ Requires `yq` v4 (mikefarah/yq) for manifest operations.
 ### Project management
 
 ```sh
-git-add-project <context> <provider> <email> [signing-key] [name]
+git-add-project <context> <provider> <email> [signing-key] [name] [--no-cli]
     Add a new context/provider pair. Creates the directory, profile .inc,
-    and updates the manifest, project-includes, and host_vars.
+    and updates the manifest, project-includes, and host_vars. When stdin
+    is a TTY, also offers to wire a CLI (see below) — skip with --no-cli.
 
-git-update-project <context> <provider> [--email <e>] [--signing-key <k>] [--name <n>]
+git-update-project <context> <provider> [--email <e>] [--signing-key <k>]
+                    [--name <n>] [--cli <gh|glab|none>] [--cli-host <hostname>]
     Update fields on an existing project. Updates the .inc file, manifest,
-    and host_vars in sync. Multiple flags can be combined.
+    and host_vars in sync. Multiple flags can be combined. --cli none is
+    equivalent to git-remove-project-cli without the config-dir deletion prompt.
 
 git-remove-project <context> <provider>
     Remove a project from config. Prompts for confirmation. Does NOT delete
-    the project directory or any repos inside it.
+    the project directory or any repos inside it. Also removes any CLI
+    wiring first (prompting separately before deleting the CLI config dir).
 
 git-list-projects
-    Tabular view of all configured projects from the manifest.
+    Tabular view of all configured projects from the manifest, including
+    each project's CLI column (gh, glab, gh@host, or -).
 
 git-sync-projects
-    Ensure all manifest entries have their directory and profile .inc file.
-    Rebuilds project-includes. Safe to re-run.
+    Ensure all manifest entries have their directory, profile .inc file, and
+    (where cli is set) CLI config directory and .envrc. Rebuilds
+    project-includes. Safe to re-run.
 
 git-sync-projects --status
-    Show which projects are missing their directory or profile file.
-    No changes made.
+    Show which projects are missing their directory, profile file, CLI
+    config dir, or .envrc — and, where the CLI binary is present, whether
+    each is authenticated. No changes made.
 
 git-sync-projects --from-host-vars
-    Rebuild the manifest from host_vars/localhost.yml. Use after Ansible
-    changes that weren't propagated to the live manifest.
+    Rebuild the manifest from host_vars/localhost.yml (carrying cli/cli_host
+    through). Use after Ansible changes that weren't propagated to the live
+    manifest.
 
 git-projects-base
     Print the resolved projects base directory.
+```
+
+### CLI wiring
+
+```sh
+git-add-project-cli <context> <provider> [--cli gh|glab] [--host <hostname>] [--adopt <path>]
+    Add CLI wiring to an existing project. Same prompts as git-add-project's
+    CLI step when flags are omitted. Errors if the project isn't in the
+    manifest, or suggests git-update-project --cli if it already has one.
+    --adopt copies an existing hosts.yml/config.yml instead of re-running
+    auth login — see "Migrating an already-authenticated store" above.
+
+git-remove-project-cli <context> <provider>
+    Remove CLI wiring from a project — manifest/host_vars fields, the
+    generated .envrc, and the credential helper. Prompts separately
+    (default no) before deleting the CLI config directory itself.
 ```
 
 ### Examples
@@ -159,6 +319,19 @@ git-list-projects
 
 # Check sync status without making changes
 git-sync-projects --status
+
+# Wire the glab CLI for an existing project, then authenticate
+git-add-project-cli Personal GitLab
+cd ~/Projects/Personal/GitLab && glab auth login
+
+# Wire gh for a GitHub Enterprise instance
+git-add-project-cli Acme GitHub --host github.acme.com
+
+# Carry over an already-authenticated gh config instead of re-authenticating
+git-add-project-cli Acme GitHub --adopt ~/.config/gh-work
+
+# Drop CLI wiring but keep the project itself
+git-remove-project-cli Acme GitHub
 ```
 
 ## Tags
