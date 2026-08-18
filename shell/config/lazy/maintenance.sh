@@ -46,6 +46,7 @@ neovim|nvim|install-neovim|install-neovim|Neovim
 oh-my-posh|oh-my-posh|install-oh-my-posh|install-oh-my-posh|oh-my-posh
 oh-my-zsh|path:~/.oh-my-zsh|_update_omz|install-oh-my-zsh|oh-my-zsh
 op|op|install-op-cli|install-op-cli|1Password CLI
+pinentry|pinentry|install-pinentry|install-pinentry|GPG Pinentry
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
 snapd|snap|install-snapd|install-snapd|snapd
 starship|command -v|install-starship|install-starship|Prompt engine

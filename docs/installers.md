@@ -51,6 +51,7 @@ root is required.
 | `install-oh-my-zsh`   | oh-my-zsh framework                       | Upstream install script                                                      |
 | `install-op-cli`      | 1Password CLI (`op`)                      | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS      |
 | `install-opendeck`    | Opendeck                                  | Official vendor repo per distro (apt/dnf/zypper/AUR); Homebrew on macOS      |
+| `install-pinentry`    | pinentry (GPG passphrase prompt)          | Package manager per distro (curses/tty frontend); Homebrew `pinentry-mac` on macOS |
 | `install-noteshub`    | NotesHub                                  | GitHub release `.deb`/`.rpm` via package manager                             |
 | `install-nvm`         | Node Version Manager                      | Official `install.sh` (version auto-detected), then installs the current LTS |
 | `install-starship`    | Starship prompt                           | Official install script / Homebrew                                           |

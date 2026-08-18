@@ -9,19 +9,34 @@ These functions integrate with two password managers for key backup (**Bitwarden
 
 ## Table of Contents
 
-- [Key structure](#key-structure)
-- [Prerequisites](#prerequisites)
-- [Typical workflow: new machine setup](#typical-workflow-new-machine-setup)
-- [Key lifecycle](#key-lifecycle)
-  - [Adding UIDs (email aliases)](#adding-uids-email-aliases)
-  - [Extending expiry](#extending-expiry)
-  - [Rotating a subkey](#rotating-a-subkey)
-  - [Restoring the master key temporarily](#restoring-the-master-key-temporarily)
-  - [New machine from existing backup](#new-machine-from-existing-backup)
-- [Publishing your signing key](#publishing-your-signing-key)
-- [Agent management](#agent-management)
-- [Function reference](#function-reference)
-- [GPG_TTY](#gpg_tty)
+- [GPG key management](#gpg-key-management)
+  - [Table of Contents](#table-of-contents)
+  - [Key structure](#key-structure)
+  - [Prerequisites](#prerequisites)
+    - [Bitwarden (`bw`)](#bitwarden-bw)
+    - [1Password (`op`)](#1password-op)
+    - [Backup naming convention](#backup-naming-convention)
+  - [Typical workflow: new machine setup](#typical-workflow-new-machine-setup)
+    - [1. Check for existing keys](#1-check-for-existing-keys)
+    - [2. Create a new key set](#2-create-a-new-key-set)
+    - [3. Generate a revocation certificate](#3-generate-a-revocation-certificate)
+    - [4. Back up your keys](#4-back-up-your-keys)
+    - [5. Remove the master key from local keyring](#5-remove-the-master-key-from-local-keyring)
+    - [6. Wire up git commit signing](#6-wire-up-git-commit-signing)
+  - [Key lifecycle](#key-lifecycle)
+    - [Adding UIDs (email aliases)](#adding-uids-email-aliases)
+    - [Extending expiry](#extending-expiry)
+    - [Rotating a subkey](#rotating-a-subkey)
+    - [Restoring the master key temporarily](#restoring-the-master-key-temporarily)
+    - [New machine from existing backup](#new-machine-from-existing-backup)
+  - [Publishing your signing key](#publishing-your-signing-key)
+  - [Agent management](#agent-management)
+  - [Function reference](#function-reference)
+    - [tools/gpg.sh — always available](#toolsgpgsh--always-available)
+    - [lazy/gpg-management.sh — loaded on first call](#lazygpg-managementsh--loaded-on-first-call)
+    - [lazy/installers.sh](#lazyinstallerssh)
+  - [Pinentry](#pinentry)
+  - [GPG_TTY](#gpg_tty)
 
 ## Key structure
 
@@ -136,12 +151,12 @@ gpg-export-1password <fingerprint> --vault "Secrets"
 
 Each stores four items:
 
-| Item name | Contents |
-|---|---|
-| `GPG Public Key — [<host>] <uid> (<fp>)` | Armoured public key |
-| `GPG Secret Key — [<host>] <uid> (<fp>)` | Full secret key (master + subkeys) |
-| `GPG Subkeys Only — [<host>] <uid> (<fp>)` | Subkeys only, no master key material |
-| `GPG Revocation Certificate — [<host>] <uid> (<fp>)` | Revocation certificate |
+| Item name                                            | Contents                             |
+| ---------------------------------------------------- | ------------------------------------ |
+| `GPG Public Key — [<host>] <uid> (<fp>)`             | Armoured public key                  |
+| `GPG Secret Key — [<host>] <uid> (<fp>)`             | Full secret key (master + subkeys)   |
+| `GPG Subkeys Only — [<host>] <uid> (<fp>)`           | Subkeys only, no master key material |
+| `GPG Revocation Certificate — [<host>] <uid> (<fp>)` | Revocation certificate               |
 
 If a passphrase is entered when prompted, it is also stored as a separate Login item: `GPG Key Passphrase — [<host>] <uid> (<fp>)`.
 
@@ -329,54 +344,82 @@ gpg-card-status      # show YubiKey / smartcard status
 
 ### tools/gpg.sh — always available
 
-| Function | Description |
-|---|---|
-| `gpg-list` | List all public keys with fingerprints |
-| `gpg-list-secret` | List all secret keys with fingerprints |
+| Function                        | Description                                          |
+| ------------------------------- | ---------------------------------------------------- |
+| `gpg-list`                      | List all public keys with fingerprints               |
+| `gpg-list-secret`               | List all secret keys with fingerprints               |
 | `gpg-list-signing-keys [email]` | List signing subkeys formatted for `git-add-project` |
-| `gpg-show <id>` | Full detail for one key by fingerprint, ID, or email |
-| `gpg-verify <file> [sigfile]` | Verify a detached signature |
-| `gpg-agent-restart` | Kill and restart the GPG agent |
-| `gpg-agent-forget` | Clear passphrase cache |
-| `gpg-card-status` | Show smartcard / YubiKey GPG status |
+| `gpg-show <id>`                 | Full detail for one key by fingerprint, ID, or email |
+| `gpg-verify <file> [sigfile]`   | Verify a detached signature                          |
+| `gpg-agent-restart`             | Kill and restart the GPG agent                       |
+| `gpg-agent-forget`              | Clear passphrase cache                               |
+| `gpg-card-status`               | Show smartcard / YubiKey GPG status                  |
 
 ### lazy/gpg-management.sh — loaded on first call
 
-| Function | Description |
-|---|---|
-| `gpg-create-key` | Interactive wizard: master `[C]` + `[S]` + `[E]` subkeys |
-| `gpg-add-uid [fp]` | Add an email address / identity to an existing key |
-| `gpg-add-subkey [fp] [type] [expiry]` | Add a subkey to an existing master key |
-| `gpg-extend-expiry [fp] [expiry]` | Extend expiry on master key and all subkeys |
-| `gpg-remove-master [fp]` | Remove master secret key from local keyring (keeps subkeys) |
-| `gpg-rotate-subkey [master-fp] [subkey-fp] [type] [expiry]` | Retire a subkey and add a replacement |
-| `gpg-revoke [fp] [--apply]` | Generate or apply a revocation certificate |
-| `gpg-export [fp] [dir]` | Export public and full secret key to files |
-| `gpg-export-master [fp] [dir]` | Export master key secret material only |
-| `gpg-export-subkeys [fp] [dir]` | Export subkeys-only (no master key material) |
-| `gpg-export-bitwarden [fp] [--name <label>] [--master-only]` | Back up all key material to Bitwarden |
-| `gpg-export-1password [fp] [--name <label>] [--vault <name>] [--master-only]` | Back up all key material to 1Password |
-| `gpg-import <file>` | Import a key from an armoured file |
-| `gpg-import-bitwarden [note-name]` | Import a key from a Bitwarden secure note |
-| `gpg-import-1password [item-name] [--vault <name>]` | Import a key from a 1Password item |
-| `gpg-trust [fp] [level]` | Set owner trust (default: `ultimate`) |
-| `gpg-push-github [key-id]` | Push a public signing key to the authenticated GitHub account |
-| `gpg-push-gitlab [key-id]` | Push a public signing key to the authenticated GitLab account |
+| Function                                                                      | Description                                                   |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `gpg-create-key`                                                              | Interactive wizard: master `[C]` + `[S]` + `[E]` subkeys      |
+| `gpg-add-uid [fp]`                                                            | Add an email address / identity to an existing key            |
+| `gpg-add-subkey [fp] [type] [expiry]`                                         | Add a subkey to an existing master key                        |
+| `gpg-extend-expiry [fp] [expiry]`                                             | Extend expiry on master key and all subkeys                   |
+| `gpg-remove-master [fp]`                                                      | Remove master secret key from local keyring (keeps subkeys)   |
+| `gpg-rotate-subkey [master-fp] [subkey-fp] [type] [expiry]`                   | Retire a subkey and add a replacement                         |
+| `gpg-revoke [fp] [--apply]`                                                   | Generate or apply a revocation certificate                    |
+| `gpg-export [fp] [dir]`                                                       | Export public and full secret key to files                    |
+| `gpg-export-master [fp] [dir]`                                                | Export master key secret material only                        |
+| `gpg-export-subkeys [fp] [dir]`                                               | Export subkeys-only (no master key material)                  |
+| `gpg-export-bitwarden [fp] [--name <label>] [--master-only]`                  | Back up all key material to Bitwarden                         |
+| `gpg-export-1password [fp] [--name <label>] [--vault <name>] [--master-only]` | Back up all key material to 1Password                         |
+| `gpg-import <file>`                                                           | Import a key from an armoured file                            |
+| `gpg-import-bitwarden [note-name]`                                            | Import a key from a Bitwarden secure note                     |
+| `gpg-import-1password [item-name] [--vault <name>]`                           | Import a key from a 1Password item                            |
+| `gpg-trust [fp] [level]`                                                      | Set owner trust (default: `ultimate`)                         |
+| `gpg-push-github [key-id]`                                                    | Push a public signing key to the authenticated GitHub account |
+| `gpg-push-gitlab [key-id]`                                                    | Push a public signing key to the authenticated GitLab account |
 
 All functions with optional arguments support interactive prompts when arguments are omitted.
 
 ### lazy/installers.sh
 
-| Function | Description |
-|---|---|
-| `install-bw-cli` | Install the Bitwarden CLI (`bw`) |
-| `install-bitwarden` | Install the Bitwarden desktop app |
-| `install-op-cli` | Install the 1Password CLI (`op`) |
-| `install-1password` | Install the 1Password desktop app |
-| `install-gh` | Install the GitHub CLI (`gh`), used by `gpg-push-github` |
-| `install-glab` | Install the GitLab CLI (`glab`), used by `gpg-push-gitlab` |
+| Function            | Description                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `install-bw-cli`    | Install the Bitwarden CLI (`bw`)                                                      |
+| `install-bitwarden` | Install the Bitwarden desktop app                                                     |
+| `install-op-cli`    | Install the 1Password CLI (`op`)                                                      |
+| `install-1password` | Install the 1Password desktop app                                                     |
+| `install-gh`        | Install the GitHub CLI (`gh`), used by `gpg-push-github`                              |
+| `install-glab`      | Install the GitLab CLI (`glab`), used by `gpg-push-gitlab`                            |
+| `install-pinentry`  | Install a pinentry frontend — used automatically by `gpg-create-key` if none is found |
 
 See [installers.md](installers.md) for details on each.
+
+## Pinentry
+
+GPG needs a pinentry frontend to prompt for passphrases. Minimal and WSL images
+commonly don't ship one, which surfaces as:
+
+```bash
+gpg: signing failed: No pinentry
+
+# or
+
+gpg: agent_genkey failed: No pinentry
+```
+
+`gpg-create-key` detects this automatically and offers to run `install-pinentry`
+and retry inline, reusing the identity and expiry details already entered. To
+install pinentry manually ahead of time, or if you decline the prompt:
+
+```bash
+install-pinentry
+```
+
+This installs a terminal-capable frontend (curses/tty) via the platform package
+manager — no display or GUI dependency required. On macOS it installs
+`pinentry-mac` via Homebrew; for Touch ID / keychain-backed prompts, also set
+`pinentry-program` in `~/.gnupg/gpg-agent.conf` to its path (printed by
+`install-pinentry` on completion).
 
 ## GPG_TTY
 

@@ -265,14 +265,45 @@ EOF
     fps_before="$(gpg --list-secret-keys --with-colons 2>/dev/null \
         | awk -F: '$1=="fpr"{print $10}')"
 
-    gpg --full-generate-key --expert --batch "${param_file}"
-    local gen_rc=$?
-    rm -f "${param_file}"
+    local gpg_output gen_rc pinentry_retried=false
 
-    if [[ ${gen_rc} -ne 0 ]]; then
+    while true; do
+        gpg_output="$(gpg --full-generate-key --expert --batch "${param_file}" 2>&1)"
+        gen_rc=$?
+        [[ -n "${gpg_output}" ]] && echo "${gpg_output}"
+
+        [[ ${gen_rc} -eq 0 ]] && break
+
+        if [[ "${pinentry_retried}" == "false" ]] && echo "${gpg_output}" | grep -qi "no pinentry"; then
+            pinentry_retried=true
+            echo
+            log_error "Master key generation failed — no pinentry program is installed"
+            log_warn "GPG needs pinentry to prompt for your passphrase"
+            local install_now
+            _read_prompt "  Install pinentry now and retry? [Y/n]: " install_now
+            install_now="${install_now:-y}"
+            if [[ "$(_str_lower "${install_now}")" != "y" ]]; then
+                log_error "Install it manually, then re-run: gpg-create-key"
+                log_error "  install-pinentry"
+                rm -f "${param_file}"
+                return 1
+            fi
+            install-pinentry || {
+                log_error "pinentry install failed — install manually and re-run: gpg-create-key"
+                rm -f "${param_file}"
+                return 1
+            }
+            gpg-agent-restart
+            log_info "Retrying key generation..."
+            continue
+        fi
+
         log_error "Master key generation failed (exit ${gen_rc})"
+        rm -f "${param_file}"
         return 1
-    fi
+    done
+
+    rm -f "${param_file}"
 
     # Identify the new key as the fingerprint present after generation but
     # not before.
