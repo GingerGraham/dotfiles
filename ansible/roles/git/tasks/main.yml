@@ -119,6 +119,7 @@
     path: "{{ ansible_facts['env']['HOME'] }}/.config/direnv/lib"
     state: directory
     mode: '0700'
+  when: git_cli_projects | length > 0
 
 - name: git | cli | deploy direnv stdlib function
   ansible.builtin.template:
@@ -126,6 +127,13 @@
     dest: "{{ ansible_facts['env']['HOME'] }}/.config/direnv/lib/dotfiles-git-context.sh"
     mode: '0644'
     force: true
+  when: git_cli_projects | length > 0
+
+- name: git | cli | remove direnv stdlib function (no CLI contexts configured)
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/direnv/lib/dotfiles-git-context.sh"
+    state: absent
+  when: git_cli_projects | length == 0
 
 - name: git | cli | ensure CLI config directories
   ansible.builtin.file:
