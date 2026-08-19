@@ -114,16 +114,25 @@ projects_base: ~/Projects
 #   signing_key  Optional GPG fingerprint — enables gpgsign for this context
 #   ssh_key      Optional SSH key path — informational, consumed by the ssh role
 #   name         Optional display name override — defaults to git_name
+#   cli          Optional — gh | glab. Wires a per-context gh/glab CLI config
+#                directory and credential helper for this project tree via
+#                direnv. Absent or empty means no CLI wiring. See the
+#                "CLI context" section in ansible/roles/git/README.md.
+#   cli_host     Optional — non-default host for a self-managed instance
+#                (e.g. github.acme.com, gitlab.internal.example.com).
+#                Absent means the CLI's own default (github.com / gitlab.com).
 #
 git_projects:
   - context: Personal
     provider: GitHub
     email: you@example.com
     signing_key: GPGFINGERPRINT
+    cli: gh
 
   - context: Personal
     provider: GitLab
     email: you@example.com
+    cli: glab
 
   - context: Personal
     provider: Bitbucket

@@ -74,6 +74,14 @@ EXTERNAL_REPO_URLS=()
 EXTERNAL_REPO_PRIVATE=()
 EXTERNAL_REPO_ALLOW_HOOKS=()
 
+# Populated by generate_host_vars() during the git_projects collection loop
+# whenever a project is wired for gh/glab; consumed by post_run() to print
+# the "cd <dir> && <cli> auth login" next-steps block. Parallel arrays,
+# indexed together — bash 3.2 has no associative arrays.
+CLI_PROJECT_CONTEXTS=()
+CLI_PROJECT_PROVIDERS=()
+CLI_PROJECT_CLIS=()
+
 # ── Colour output ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]] && command -v tput &>/dev/null; then
     _RED=$(tput setaf 1)
@@ -533,6 +541,49 @@ _read_external_repos_from_host_vars() {
     ' "${file}"
 }
 
+_read_cli_projects_from_host_vars() {
+    # Emits "<context>|<provider>|<cli>" for each git_projects entry that has
+    # cli set, in an existing host_vars file. Used so post_run() can still
+    # print the "cd <dir> && <cli> auth login" next-steps block on a re-run
+    # where host_vars already exists — the interactive git_projects loop that
+    # normally populates CLI_PROJECT_* is skipped entirely in that case (see
+    # generate_host_vars' "already exists" branch), which previously meant
+    # the block silently never printed on exactly the run where a machine
+    # first got CLI wiring deployed.
+    local file="$1"
+    awk '
+        function clean(s) {
+            sub(/[[:space:]]+#.*$/, "", s)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            gsub(/^"|"$/, "", s)
+            gsub(/^'"'"'|'"'"'$/, "", s)
+            return s
+        }
+        /^git_projects:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^[A-Za-z]/ { in_block = 0 }
+        in_block && /^  - context:/ {
+            if (ctx != "" && cli != "") print ctx "|" prov "|" cli
+            line = $0
+            sub(/^  - context: */, "", line)
+            ctx = clean(line)
+            prov = ""
+            cli = ""
+            next
+        }
+        in_block && /^    provider:/ {
+            line = $0
+            sub(/^    provider: */, "", line)
+            prov = clean(line)
+        }
+        in_block && /^    cli:/ {
+            line = $0
+            sub(/^    cli: */, "", line)
+            cli = clean(line)
+        }
+        END { if (ctx != "" && cli != "") print ctx "|" prov "|" cli }
+    ' "${file}"
+}
+
 _extract_git_host() {
     # Derives the real git host from a repo_url in any of the forms
     # install.sh/sync-external accept: https://host/path, git@host:path, or
@@ -566,6 +617,8 @@ _load_host_vars_into_globals() {
     local file="$1"
     PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${file}")
     MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${file}")
+    PROJECTS_BASE=$(_read_yaml_scalar "projects_base"        "${file}")
+    PROJECTS_BASE="${PROJECTS_BASE/#\~/${HOME}}"
 
     local repo_name repo_private repo_url repo_allow_hooks
     while IFS='|' read -r repo_name repo_private repo_url repo_allow_hooks; do
@@ -575,6 +628,14 @@ _load_host_vars_into_globals() {
         EXTERNAL_REPO_URLS+=("${repo_url}")
         EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks:-false}")
     done < <(_read_external_repos_from_host_vars "${file}")
+
+    local cli_ctx cli_prov cli_name
+    while IFS='|' read -r cli_ctx cli_prov cli_name; do
+        [[ -z "${cli_ctx}" ]] && continue
+        CLI_PROJECT_CONTEXTS+=("${cli_ctx}")
+        CLI_PROJECT_PROVIDERS+=("${cli_prov}")
+        CLI_PROJECT_CLIS+=("${cli_name}")
+    done < <(_read_cli_projects_from_host_vars "${file}")
 }
 
 # release mode only — the release directory this runs from gets replaced
@@ -749,10 +810,34 @@ generate_host_vars() {
 
             read -r -p "  GPG signing key for ${ctx}/${prov} (optional, Enter to skip): " key || true
 
+            # Wire the gh/glab CLI — inferred from provider, offered as a
+            # single Y/n question, skipped entirely when no CLI can be
+            # inferred (this stays a first-run prompt, not a CLI-selection
+            # interview). No auth here: that needs a browser and interactive
+            # device flow, done after Ansible in the closing summary.
+            local inferred_cli=""
+            case "$(printf '%s' "${prov}" | tr '[:upper:]' '[:lower:]')" in
+                github) inferred_cli="gh" ;;
+                gitlab) inferred_cli="glab" ;;
+            esac
+
+            local cli=""
+            if [[ -n "${inferred_cli}" ]]; then
+                local cli_answer=""
+                read -r -p "  Wire the ${inferred_cli} CLI for ${ctx}/${prov}? [Y/n]: " cli_answer || true
+                if [[ "${cli_answer}" != "n" && "${cli_answer}" != "N" ]]; then
+                    cli="${inferred_cli}"
+                    CLI_PROJECT_CONTEXTS+=("${ctx}")
+                    CLI_PROJECT_PROVIDERS+=("${prov}")
+                    CLI_PROJECT_CLIS+=("${cli}")
+                fi
+            fi
+
             git_projects_yaml+="  - context: \"${ctx}\"\n"
             git_projects_yaml+="    provider: \"${prov}\"\n"
             git_projects_yaml+="    email: \"${email}\"\n"
             [[ -n "${key}" ]] && git_projects_yaml+="    signing_key: \"${key}\"\n"
+            [[ -n "${cli}" ]] && git_projects_yaml+="    cli: \"${cli}\"\n"
 
             info "Added ${ctx}/${prov}"
             echo
@@ -1188,6 +1273,22 @@ post_run() {
         echo "  Check status any time with:"
         echo "    external-sync"
         echo "    cat ~/.local/share/external-sync/<name>/last-sync"
+    fi
+
+    if [[ ${#CLI_PROJECT_CONTEXTS[@]} -gt 0 ]]; then
+        echo
+        echo "  CLI wiring was configured for ${#CLI_PROJECT_CONTEXTS[@]} project(s), but not"
+        echo "  authenticated — that needs a browser and an interactive device flow."
+        echo "  Authenticate from inside each project tree so credentials land in the"
+        echo "  right per-context store:"
+        local i
+        for (( i=0; i<${#CLI_PROJECT_CONTEXTS[@]}; i++ )); do
+            echo
+            echo "    cd ${PROJECTS_BASE}/${CLI_PROJECT_CONTEXTS[i]}/${CLI_PROJECT_PROVIDERS[i]}"
+            echo "    ${CLI_PROJECT_CLIS[i]} auth login"
+        done
+        echo
+        echo "  Verify any time with: gh auth status   /   glab auth status"
     fi
 
     echo

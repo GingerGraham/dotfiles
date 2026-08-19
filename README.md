@@ -72,6 +72,8 @@ Git identity is managed per `context`/`provider` pair (see [docs/installation.md
 
 Bitbucket, Azure DevOps, and other providers work as `context`/`provider` pairs but do not currently have a dedicated CLI installer or GPG publishing helper.
 
+GitHub and GitLab additionally support per-context CLI authentication — a project's `cli` field wires a dedicated `gh`/`glab` config directory and credential helper that follows the working directory via `direnv`, so a personal account and a work account (or several concurrent client projects) never fight over one global credential store. See [CLI context](ansible/roles/git/README.md#cli-context) in the git role README.
+
 ### Password managers
 
 GPG key backup, restore, and rotation (see [docs/gpg.md](docs/gpg.md)) support two password managers. Use whichever matches your vault, or both:

@@ -218,5 +218,5 @@ Key variables:
 | `git_name` | Git global user name |
 | `git_default_email` | Git global default email |
 | `git_default_signing_key` | Optional GPG key fingerprint for global commit signing |
-| `git_projects` | List of context/provider identity definitions — see [the git role README](../ansible/roles/git/README.md) |
+| `git_projects` | List of context/provider identity definitions, optionally with per-context gh/glab CLI authentication (`cli`/`cli_host`) — see [the git role README](../ansible/roles/git/README.md#cli-context) |
 | `projects_base` | Root of your project directory tree |

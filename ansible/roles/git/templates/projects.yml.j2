@@ -23,4 +23,10 @@ projects:
 {% if project.ssh_key is defined and project.ssh_key %}
     ssh_key: {{ project.ssh_key }}
 {% endif %}
+{% if project.cli is defined and project.cli %}
+    cli: {{ project.cli }}
+{% endif %}
+{% if project.cli_host is defined and project.cli_host %}
+    cli_host: {{ project.cli_host }}
+{% endif %}
 {% endfor %}

@@ -72,6 +72,11 @@ Shell integration (`tools/direnv.sh`, loaded when `direnv` is present):
 Edit `direnv.toml` directly on the machine for further customisation
 (per-directory `[whitelist.exact]`, additional `[global]` settings, etc.).
 
+The `git` role deploys one additional stdlib function here,
+`~/.config/direnv/lib/dotfiles-git-context.sh` (`use git_context`), that wires per-project
+gh/glab CLI authentication — see [CLI context](../git/README.md#cli-context) in the git
+role README for the full design.
+
 ## Dependencies
 
 Requires the `common` role to have run first. The `common` role creates the

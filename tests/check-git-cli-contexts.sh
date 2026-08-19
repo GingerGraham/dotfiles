@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# tests/check-git-cli-contexts.sh
+#
+# Checks for the per-project gh/glab CLI wiring (see the "CLI context" section
+# in ansible/roles/git/README.md). No network, no auth state. Checks 1-5 are
+# static text/syntax checks against the repo; check 6 sources tools/git.sh and
+# exercises two real functions against real git (no manifest/host_vars
+# involved, so still no network and no auth state). Six checks:
+#   1. Every function this feature depends on is actually defined, in the
+#      file it's supposed to live in (catches typos/renames).
+#   2. _git_infer_cli returns gh for GitHub, glab for GitLab, empty for
+#      anything else (Bitbucket as the representative "no inference" case).
+#   3. _git_context_slug lowercases and hyphenates, and matches the Jinja
+#      slug expression used in the Ansible role for a set of sample inputs.
+#   4. The generated .envrc content parses with `bash -n` and both the
+#      shell-side generator and the Ansible template start with the same
+#      generated-marker line (so direnv-init-project's marker detection
+#      and _git_regenerate_envrc's stale-cleanup stay in sync).
+#   5. Every `cli:` value in host_vars/localhost.yml.example is gh or glab.
+#   6. Switching CLI (the git-update-project --cli gh -> --cli glab path)
+#      removes the previous credential-helper section instead of leaving it
+#      behind alongside the new one.
+#
+# Run with bash (not sh): bash tests/check-git-cli-contexts.sh
+# Requires: git (already a hard dependency of this repo)
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+git_sh="${repo_root}/shell/config/tools/git.sh"
+direnv_sh="${repo_root}/shell/config/tools/direnv.sh"
+context_lib_j2="${repo_root}/ansible/roles/git/templates/dotfiles-git-context.sh.j2"
+envrc_j2="${repo_root}/ansible/roles/git/templates/envrc.j2"
+main_yml="${repo_root}/ansible/roles/git/tasks/main.yml"
+localhost_example="${repo_root}/ansible/host_vars/localhost.yml.example"
+
+rc=0
+
+# ---- Check 1: every function this feature depends on is defined ---------------
+is_defined_in() {
+    local fn="$1" file="$2"
+    grep -qE "^${fn}[[:space:]]*\(\)" "${file}"
+}
+
+missing_fns=()
+for fn in _git_infer_cli _git_context_slug _git_wire_project_cli _git_unwire_project_cli \
+          _git_regenerate_envrc _git_write_envrc _git_write_credential_helper \
+          _git_adopt_cli_store _git_cli_config_dir _git_cli_sentinel_file \
+          git-add-project git-add-project-cli git-remove-project-cli \
+          git-update-project git-list-projects git-sync-projects git-remove-project; do
+    is_defined_in "${fn}" "${git_sh}" || missing_fns+=("${fn} (expected in ${git_sh#"${repo_root}"/})")
+done
+is_defined_in "direnv-init-project" "${direnv_sh}" || missing_fns+=("direnv-init-project (expected in ${direnv_sh#"${repo_root}"/})")
+is_defined_in "use_git_context" "${context_lib_j2}" || missing_fns+=("use_git_context (expected in ${context_lib_j2#"${repo_root}"/})")
+
+if (( ${#missing_fns[@]} )); then
+    rc=1
+    echo "FAIL: functions required by the CLI context feature are not defined:"
+    printf '  - %s\n' "${missing_fns[@]}"
+fi
+
+# ---- Check 2: _git_infer_cli behaviour -----------------------------------------
+# Extracted and evaluated standalone rather than sourcing the whole of
+# tools/git.sh, which pulls in bash-logger and other shell-session state this
+# test has no business depending on.
+_str_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+_git_infer_cli() {
+    case "$(_str_lower "${1:-}")" in
+        github) echo "gh" ;;
+        gitlab) echo "glab" ;;
+        *) echo "" ;;
+    esac
+}
+
+infer_failures=()
+[[ "$(_git_infer_cli GitHub)"    == "gh"   ]] || infer_failures+=("GitHub -> $(_git_infer_cli GitHub) (expected gh)")
+[[ "$(_git_infer_cli github)"    == "gh"   ]] || infer_failures+=("github -> $(_git_infer_cli github) (expected gh)")
+[[ "$(_git_infer_cli GitLab)"    == "glab" ]] || infer_failures+=("GitLab -> $(_git_infer_cli GitLab) (expected glab)")
+[[ "$(_git_infer_cli gitlab)"    == "glab" ]] || infer_failures+=("gitlab -> $(_git_infer_cli gitlab) (expected glab)")
+[[ "$(_git_infer_cli Bitbucket)" == ""     ]] || infer_failures+=("Bitbucket -> $(_git_infer_cli Bitbucket) (expected empty)")
+
+if (( ${#infer_failures[@]} )); then
+    rc=1
+    echo "FAIL: _git_infer_cli behaviour does not match the provider inference table:"
+    printf '  - %s\n' "${infer_failures[@]}"
+fi
+
+# Definition in tools/git.sh must actually contain the same case arms —
+# guards against the reimplementation above silently drifting from reality.
+for pattern in 'github) echo "gh"' 'gitlab) echo "glab"'; do
+    grep -qF "${pattern}" "${git_sh}" || {
+        rc=1
+        echo "FAIL: _git_infer_cli in ${git_sh#"${repo_root}"/} no longer contains: ${pattern}"
+    }
+done
+
+# ---- Check 3: _git_context_slug matches the Jinja slug expression -------------
+_git_context_slug() { _str_lower "$1" | tr ' ' '-'; }
+
+# The Jinja expression itself must still read exactly `| lower | replace(' ', '-')`
+# everywhere it's used — a change there needs a matching change here.
+for f in "${main_yml}" "${envrc_j2}"; do
+    grep -qF "| lower | replace(' ', '-')" "${f}" || {
+        rc=1
+        echo "FAIL: expected slug expression \"| lower | replace(' ', '-')\" not found in ${f#"${repo_root}"/}"
+    }
+done
+
+# Render the *actual* Jinja expression via jinja2 (not a bash reimplementation
+# of it, which would only ever compare a copy against itself and could never
+# fail) and compare its output to _git_context_slug for the same inputs.
+if command -v python3 >/dev/null 2>&1 && python3 -c "import jinja2" >/dev/null 2>&1; then
+    slug_failures=()
+    while IFS='|' read -r sample want; do
+        [[ -z "${sample}" ]] && continue
+        got="$(_git_context_slug "${sample}")"
+        [[ "${got}" == "${want}" ]] || slug_failures+=("'${sample}' -> '${got}' (jinja: '${want}')")
+    done < <(python3 -c "
+import jinja2
+env = jinja2.Environment()
+tpl = env.from_string(\"{{ ctx | lower | replace(' ', '-') }}\")
+for s in ['Personal', 'Work Context', 'ACME Corp', 'already-hyphenated', 'Multiple   Spaces']:
+    print(s + '|' + tpl.render(ctx=s))
+")
+    if (( ${#slug_failures[@]} )); then
+        rc=1
+        echo "FAIL: _git_context_slug does not match the real Jinja slug expression for:"
+        printf '  - %s\n' "${slug_failures[@]}"
+    fi
+else
+    echo "NOTE: python3+jinja2 not available — skipped rendering the real Jinja slug expression (the grep check above still confirms the expression text is unchanged)."
+fi
+
+# ---- Check 4: generated .envrc parses and markers agree ------------------------
+envrc_marker='# Generated by the dotfiles git role — do not edit.'
+
+tmp_envrc="$(mktemp)"
+tmp_profile="$(mktemp)"
+trap 'rm -f "${tmp_envrc}" "${tmp_profile}"' EXIT
+cat > "${tmp_envrc}" <<EOF
+${envrc_marker}
+# Per-project overrides belong in .envrc.local (never touched by dotfiles).
+# Regenerate: git-sync-projects   |   Add a project: git-add-project
+
+use git_context gh personal
+
+source_env_if_exists .envrc.local
+EOF
+
+if ! bash -n "${tmp_envrc}" 2>/dev/null; then
+    rc=1
+    echo "FAIL: sample generated .envrc content does not pass 'bash -n'"
+fi
+
+if ! head -n1 "${tmp_envrc}" | grep -qF "${envrc_marker}"; then
+    rc=1
+    echo "FAIL: sample generated .envrc content does not carry the generated marker"
+fi
+
+if ! grep -qF "_GIT_ENVRC_MARKER='${envrc_marker}'" "${git_sh}"; then
+    rc=1
+    echo "FAIL: ${git_sh#"${repo_root}"/} marker constant does not match the expected generated-marker text"
+fi
+
+if ! head -n1 "${envrc_j2}" | grep -qF "${envrc_marker}"; then
+    rc=1
+    echo "FAIL: ${envrc_j2#"${repo_root}"/} does not start with the generated-marker line"
+fi
+
+# Detection uses a shorter, stable prefix (not the full marker line, which
+# could drift on a punctuation-only tweak) — tools/git.sh and
+# tools/direnv.sh each hold their own literal copy of it; keep them in sync.
+envrc_marker_prefix='# Generated by the dotfiles git role'
+case "${envrc_marker}" in
+    "${envrc_marker_prefix}"*) : ;;
+    *)
+        rc=1
+        echo "FAIL: expected marker prefix is not actually a prefix of the full marker line"
+        ;;
+esac
+if ! grep -qF "_GIT_ENVRC_MARKER_PREFIX='${envrc_marker_prefix}'" "${git_sh}"; then
+    rc=1
+    echo "FAIL: ${git_sh#"${repo_root}"/} is missing the expected _GIT_ENVRC_MARKER_PREFIX definition"
+fi
+if ! grep -qF "grep -qF '${envrc_marker_prefix}'" "${direnv_sh}"; then
+    rc=1
+    echo "FAIL: ${direnv_sh#"${repo_root}"/} direnv-init-project detection no longer matches the shared marker prefix"
+fi
+
+# ---- Check 5: cli values in localhost.yml.example are gh or glab --------------
+bad_cli_values=()
+while IFS= read -r val; do
+    [[ -z "${val}" ]] && continue
+    [[ "${val}" == "gh" || "${val}" == "glab" ]] || bad_cli_values+=("${val}")
+done < <(grep -E '^\s*cli:\s*\S+' "${localhost_example}" | sed -E 's/^\s*cli:\s*//')
+
+if (( ${#bad_cli_values[@]} )); then
+    rc=1
+    echo "FAIL: cli values in ${localhost_example#"${repo_root}"/} must be gh or glab:"
+    printf '  - %s\n' "${bad_cli_values[@]}"
+fi
+
+# ---- Check 6: switching --cli re-keys the credential helper cleanly -----------
+# Exercises the real _git_write_credential_helper / _git_remove_credential_helper
+# primitives (against real git) in the same sequence git-update-project's --cli
+# arm now runs: remove the previous CLI's section, then write the new one. Guards
+# against a switch (e.g. gh -> glab) leaving the old section orphaned in place.
+log_info()  { :; }
+log_warn()  { :; }
+log_error() { :; }
+log_debug() { :; }
+# shellcheck disable=SC1090
+source "${git_sh}"
+
+git config --file "${tmp_profile}" user.email "me@example.com" >/dev/null
+
+_git_write_credential_helper "${tmp_profile}" gh
+_git_remove_credential_helper "${tmp_profile}" gh
+_git_write_credential_helper "${tmp_profile}" glab
+
+switch_failures=()
+if git config --file "${tmp_profile}" --get-all 'credential.https://github.com.helper' >/dev/null 2>&1; then
+    switch_failures+=("gh credential section still present after switching to glab")
+fi
+glab_helpers="$(git config --file "${tmp_profile}" --get-all 'credential.https://gitlab.com.helper' 2>/dev/null || true)"
+if ! printf '%s\n' "${glab_helpers}" | grep -qF '!glab auth git-credential'; then
+    switch_failures+=("glab credential section missing or wrong after switch")
+fi
+
+if (( ${#switch_failures[@]} )); then
+    rc=1
+    echo "FAIL: --cli gh -> --cli glab does not cleanly re-key the credential helper:"
+    printf '  - %s\n' "${switch_failures[@]}"
+fi
+
+# ---- Report ---------------------------------------------------------------------
+if (( rc == 0 )); then
+    echo "OK: git CLI context wiring checks passed (functions, inference, slugging, .envrc, example values, cli-switch re-keying)."
+fi
+exit "${rc}"
