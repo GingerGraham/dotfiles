@@ -492,7 +492,8 @@ _git_write_envrc() {
     local use_line="use git_context ${cli} ${slug}"
     [[ -n "${host}" ]] && use_line+=" ${host}"
 
-    cat > "${envrc_path}" <<EOF
+    local content
+    content="$(cat <<EOF
 ${_GIT_ENVRC_MARKER}
 # Per-project overrides belong in .envrc.local (never touched by dotfiles).
 # Regenerate: git-sync-projects   |   Add a project: git-add-project
@@ -501,6 +502,18 @@ ${use_line}
 
 source_env_if_exists .envrc.local
 EOF
+)"
+
+    # Only log at info level (and only touch the file) when content actually
+    # changes — git-sync-projects re-wires every cli-set project on every
+    # run, so an unconditional log_info here printed one line per project
+    # even when nothing changed.
+    if [[ -f "${envrc_path}" && "$(cat "${envrc_path}" 2>/dev/null)" == "${content}" ]]; then
+        log_debug "Unchanged: ${envrc_path}"
+        return 0
+    fi
+
+    printf '%s\n' "${content}" > "${envrc_path}"
     log_info "Wrote: ${envrc_path}"
 }
 
@@ -552,10 +565,16 @@ _git_update_cli_sentinel() {
 
 # Idempotent: wire CLI config dir, credential helper, and .envrc for a project.
 #
-# Usage: _git_wire_project_cli <context> <provider> <cli> [host]
+# Usage: _git_wire_project_cli <context> <provider> <cli> [host] [skip-adopt-probe]
 #
+# skip-adopt-probe (default false): pass "true" when the caller is about to
+# run its own explicit adoption (git-add-project-cli --adopt), so the
+# candidate probe below doesn't race it and populate the config dir first.
 _git_wire_project_cli() {
-    local context="$1" provider="$2" cli="$3" host="${4:-}"
+    local context="$1" provider="$2" cli="$3" host="${4:-}" skip_adopt_probe="${5:-false}"
+
+    local lib="${XDG_CONFIG_HOME:-${HOME}/.config}/direnv/lib/dotfiles-git-context.sh"
+    [[ -f "${lib}" ]] || log_warn "direnv stdlib function missing (${lib}) — the generated .envrc will fail until Ansible re-runs the git role. Run: ansible-playbook site.yml --tags git"
 
     local cli_dir; cli_dir="$(_git_cli_config_dir "${cli}" "${context}")"
     mkdir -p "${cli_dir}"
@@ -572,6 +591,12 @@ _git_wire_project_cli() {
     fi
 
     _git_write_envrc "${context}" "${provider}" "${cli}" "${host}"
+
+    # Offer to carry over an already-authenticated store when the config dir
+    # is still empty — reachable from every caller (git-add-project's CLI
+    # step, git-add-project-cli, git-update-project --cli/--cli-host, and
+    # git-sync-projects), not just the explicit --adopt flag.
+    [[ "${skip_adopt_probe}" == "true" ]] || _git_probe_adopt_candidate "${cli}" "${context}" "${cli_dir}"
 }
 
 # Clear CLI wiring for a project: manifest/host_vars fields, credential
@@ -613,7 +638,8 @@ _git_unwire_project_cli() {
         local cli_dir; cli_dir="$(_git_cli_config_dir "${cli}" "${context}")"
         echo ""
         log_warn "${cli_dir} holds live credentials."
-        read -rp "Also delete it? [y/N]: " confirm
+        local confirm=""
+        _read_prompt "Also delete it? [y/N]: " confirm
         if [[ "$(_str_lower "${confirm}")" == "y" ]]; then
             rm -rf "${cli_dir}"
             log_info "Removed: ${cli_dir}"
@@ -637,6 +663,53 @@ _git_adopt_cli_store() {
     mkdir -p "${dst}"
     cp -R "${src}/." "${dst}/"
     log_info "Adopted ${src} -> ${dst}"
+}
+
+# Echo the first plausible pre-existing CLI config store for this context
+# (the ad-hoc `~/.config/gh-<slug>` convention, then the CLI's own default),
+# or nothing if none is found. Detection only — no prompting, no side
+# effects. Shared by _git_probe_adopt_candidate and git-sync-projects --status.
+_git_find_adopt_candidate() {
+    local cli="$1" context="$2"
+    local slug; slug="$(_git_context_slug "${context}")"
+    local c
+    if [[ "${cli}" == "gh" ]]; then
+        for c in "${HOME}/.config/gh-${slug}" "${HOME}/.config/gh"; do
+            [[ -n "$(ls -A "${c}" 2>/dev/null)" ]] && { echo "${c}"; return 0; }
+        done
+    else
+        for c in "${HOME}/.config/glab-${slug}" "${HOME}/.config/glab-cli"; do
+            [[ -n "$(ls -A "${c}" 2>/dev/null)" ]] && { echo "${c}"; return 0; }
+        done
+    fi
+}
+
+# Probe likely locations for an already-authenticated CLI store and offer to
+# adopt one into the new per-context config dir. No-op unless the target dir
+# is empty and stdin is a TTY. Shared by git-add-project-cli (explicit) and
+# _git_wire_project_cli (so git-sync-projects offers the same carry-over,
+# not just the dedicated command).
+_git_probe_adopt_candidate() {
+    local cli="$1" context="$2" cli_dir="$3"
+    [[ -n "$(ls -A "${cli_dir}" 2>/dev/null)" ]] && return 0
+    [[ -t 0 ]] || return 0
+
+    # Skip when already inside an active wired tree for this CLI —
+    # GH_CONFIG_DIR/GLAB_CONFIG_DIR already points at our own managed
+    # structure, so there's nothing meaningful left to adopt.
+    local active_dir=""
+    case "${cli}" in
+        gh)   active_dir="${GH_CONFIG_DIR:-}" ;;
+        glab) active_dir="${GLAB_CONFIG_DIR:-}" ;;
+    esac
+    [[ "${active_dir}" == "${HOME}/.config/git/${cli}/"* ]] && return 0
+
+    local candidate; candidate="$(_git_find_adopt_candidate "${cli}" "${context}")"
+    if [[ -n "${candidate}" ]]; then
+        local ans=""
+        _read_prompt "Found an existing ${cli} config at ${candidate} — copy it into ${cli_dir}? [y/N]: " ans
+        [[ "$(_str_lower "${ans}")" == "y" ]] && _git_adopt_cli_store "${candidate}" "${cli_dir}"
+    fi
 }
 
 # Rebuild generated .envrc files from the manifest. Writes one per project
@@ -748,7 +821,7 @@ git-add-project() {
     local signing_key="${4:-}" name="${5:-}"
 
     if [[ -z "${context}" || -z "${provider}" || -z "${email}" ]]; then
-        log_error "Usage: git-add-project <context> <provider> <email> [signing-key] [name]"
+        log_error "Usage: git-add-project <context> <provider> <email> [signing-key] [name] [--no-cli]"
         log_error "Example: git-add-project Personal GitHub me@example.com"
         log_error "Example: git-add-project Acme AzureDevOps me@acme.com GPGFINGERPRINT"
         return 1
@@ -933,30 +1006,17 @@ git-add-project-cli() {
         _git_host_vars_update_field "${context}" "${provider}" cli_host "${host}"
     fi
 
-    _git_wire_project_cli "${context}" "${provider}" "${cli}" "${host}"
-    _git_regenerate_envrc
-
-    local cli_dir; cli_dir="$(_git_cli_config_dir "${cli}" "${context}")"
-
+    # When --adopt is explicit, skip _git_wire_project_cli's own candidate
+    # probe (it would otherwise race the explicit adopt below over who gets
+    # to populate the still-empty config dir first) and adopt directly.
     if [[ -n "${adopt_path}" ]]; then
+        _git_wire_project_cli "${context}" "${provider}" "${cli}" "${host}" true
+        _git_regenerate_envrc
+        local cli_dir; cli_dir="$(_git_cli_config_dir "${cli}" "${context}")"
         _git_adopt_cli_store "${adopt_path}" "${cli_dir}"
-    elif [[ -z "$(ls -A "${cli_dir}" 2>/dev/null)" && -t 0 ]]; then
-        local slug; slug="$(_git_context_slug "${context}")"
-        local candidate="" c
-        if [[ "${cli}" == "gh" ]]; then
-            for c in "${HOME}/.config/gh-${slug}" "${HOME}/.config/gh"; do
-                [[ -n "$(ls -A "${c}" 2>/dev/null)" ]] && { candidate="${c}"; break; }
-            done
-        else
-            for c in "${HOME}/.config/glab-${slug}" "${HOME}/.config/glab-cli"; do
-                [[ -n "$(ls -A "${c}" 2>/dev/null)" ]] && { candidate="${c}"; break; }
-            done
-        fi
-        if [[ -n "${candidate}" ]]; then
-            local ans=""
-            _read_prompt "Found an existing ${cli} config at ${candidate} — copy it into ${cli_dir}? [y/N]: " ans
-            [[ "$(_str_lower "${ans}")" == "y" ]] && _git_adopt_cli_store "${candidate}" "${cli_dir}"
-        fi
+    else
+        _git_wire_project_cli "${context}" "${provider}" "${cli}" "${host}"
+        _git_regenerate_envrc
     fi
 
     cat <<CLIEOF
@@ -1078,6 +1138,19 @@ git-update-project() {
                 [[ -z "${2:-}" ]] && { log_error "--cli requires a value (gh|glab|none)"; return 1; }
                 case "${2}" in
                     gh|glab)
+                        # Read the currently-wired cli/host before mutating the
+                        # manifest, so a cli switch (e.g. gh -> glab) can remove
+                        # the previous credential-helper section rather than
+                        # leaving it behind alongside the new one.
+                        local prev_cli prev_host
+                        prev_cli="$(_git_manifest_field "${context}" "${provider}" cli)"
+                        prev_host="$(_git_manifest_field "${context}" "${provider}" cli_host)"
+                        if [[ -n "${prev_cli}" && "${prev_cli}" != "${2}" ]]; then
+                            _git_remove_credential_helper "${profile_path}" "${prev_cli}" "${prev_host}"
+                            local prev_cli_dir; prev_cli_dir="$(_git_cli_config_dir "${prev_cli}" "${context}")"
+                            log_warn "Previous ${prev_cli} config dir left in place (holds credentials, not auto-removed): ${prev_cli_dir}"
+                        fi
+
                         _git_manifest_update_field  "${context}" "${provider}" cli "${2}"
                         _git_host_vars_update_field "${context}" "${provider}" cli "${2}"
                         local cur_host; cur_host="$(_git_manifest_field "${context}" "${provider}" cli_host)"
@@ -1093,6 +1166,16 @@ git-update-project() {
                 updated=true; shift 2 ;;
             --cli-host)
                 [[ -z "${2:-}" ]] && { log_error "--cli-host requires a value"; return 1; }
+                # Same reasoning as --cli above: a host change re-keys the
+                # credential helper section (it's scoped to "https://<host>"),
+                # so the old section must be dropped explicitly.
+                local prev_cli prev_host
+                prev_cli="$(_git_manifest_field "${context}" "${provider}" cli)"
+                prev_host="$(_git_manifest_field "${context}" "${provider}" cli_host)"
+                if [[ -n "${prev_cli}" && "${prev_host}" != "${2}" ]]; then
+                    _git_remove_credential_helper "${profile_path}" "${prev_cli}" "${prev_host}"
+                fi
+
                 _git_manifest_update_field  "${context}" "${provider}" cli_host "${2}"
                 _git_host_vars_update_field "${context}" "${provider}" cli_host "${2}"
                 local cur_cli; cur_cli="$(_git_manifest_field "${context}" "${provider}" cli)"
@@ -1137,8 +1220,9 @@ git-remove-project() {
     log_warn "This removes ${context}/${provider} from git config."
     log_warn "Directory ${project_dir} and its repos will NOT be deleted."
     echo ""
-    read -rp "Confirm removal of ${context}/${provider}? [y/N]: " confirm
-    [[ "${confirm,,}" != "y" ]] && { echo "Aborted."; return 0; }
+    local confirm=""
+    _read_prompt "Confirm removal of ${context}/${provider}? [y/N]: " confirm
+    [[ "$(_str_lower "${confirm}")" != "y" ]] && { echo "Aborted."; return 0; }
 
     local profile_name; profile_name="$(_git_profile_name "${context}" "${provider}")"
     local profile_path="${HOME}/.config/git/profiles/${profile_name}.inc"
@@ -1242,23 +1326,36 @@ git-sync-projects() {
                 envrc_path="${project_dir}/.envrc"
                 [[ -d "${cli_dir}"   ]] && cli_dir_s="✓" || cli_dir_s="✗ missing"
                 [[ -f "${envrc_path}" ]] && envrc_s="✓" || envrc_s="✗ missing"
-                if command -v "${cli}" &>/dev/null; then
-                    # GH_HOST/GITLAB_HOST must be set alongside the config
-                    # dir when cli_host is non-default, or the auth check
-                    # queries the CLI's default host instead of the one
-                    # actually authenticated.
-                    if [[ "${cli}" == "gh" ]]; then
-                        GH_CONFIG_DIR="${cli_dir}" GH_HOST="${host:-github.com}" \
-                            gh auth status &>/dev/null && auth_s="yes" || auth_s="no"
+
+                # Local-only check — no network call. `gh auth token` is a
+                # keyring read; glab has no non-interactive equivalent, so
+                # its check falls back to "does the config file have
+                # content". Neither validates the token against the API, so
+                # this is a cheap reconciliation report, not a live auth
+                # check — consistent with what dir_s/prof_s already do.
+                if [[ "${cli}" == "gh" ]]; then
+                    if command -v gh &>/dev/null; then
+                        if GH_CONFIG_DIR="${cli_dir}" GH_HOST="${host:-github.com}" \
+                           gh auth token &>/dev/null; then
+                            auth_s="stored"
+                        else
+                            auth_s="none"
+                        fi
                     else
-                        GLAB_CONFIG_DIR="${cli_dir}" GITLAB_HOST="${host:-gitlab.com}" \
-                            glab auth status &>/dev/null && auth_s="yes" || auth_s="no"
+                        auth_s="?"
                     fi
                 else
-                    auth_s="?"
+                    [[ -s "${cli_dir}/config.yml" ]] && auth_s="stored" || auth_s="none"
                 fi
-                printf '  %-20s %-20s  cli: %-10s config: %-12s envrc: %-12s auth: %s\n' \
-                    "" "" "${cli}${host:+@${host}}" "${cli_dir_s}" "${envrc_s}" "${auth_s}"
+
+                local adopt_hint=""
+                if [[ "${auth_s}" == "none" && -z "$(ls -A "${cli_dir}" 2>/dev/null)" ]]; then
+                    local candidate; candidate="$(_git_find_adopt_candidate "${cli}" "${ctx}")"
+                    [[ -n "${candidate}" ]] && adopt_hint=" (candidate store found at ${candidate} — see git-add-project-cli --adopt)"
+                fi
+
+                printf '  %-20s %-20s  cli: %-10s config: %-12s envrc: %-12s auth: %s%s\n' \
+                    "" "" "${cli}${host:+@${host}}" "${cli_dir_s}" "${envrc_s}" "${auth_s}" "${adopt_hint}"
             fi
         done
         echo ""

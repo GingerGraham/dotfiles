@@ -541,6 +541,49 @@ _read_external_repos_from_host_vars() {
     ' "${file}"
 }
 
+_read_cli_projects_from_host_vars() {
+    # Emits "<context>|<provider>|<cli>" for each git_projects entry that has
+    # cli set, in an existing host_vars file. Used so post_run() can still
+    # print the "cd <dir> && <cli> auth login" next-steps block on a re-run
+    # where host_vars already exists — the interactive git_projects loop that
+    # normally populates CLI_PROJECT_* is skipped entirely in that case (see
+    # generate_host_vars' "already exists" branch), which previously meant
+    # the block silently never printed on exactly the run where a machine
+    # first got CLI wiring deployed.
+    local file="$1"
+    awk '
+        function clean(s) {
+            sub(/[[:space:]]+#.*$/, "", s)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            gsub(/^"|"$/, "", s)
+            gsub(/^'"'"'|'"'"'$/, "", s)
+            return s
+        }
+        /^git_projects:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^[A-Za-z]/ { in_block = 0 }
+        in_block && /^  - context:/ {
+            if (ctx != "" && cli != "") print ctx "|" prov "|" cli
+            line = $0
+            sub(/^  - context: */, "", line)
+            ctx = clean(line)
+            prov = ""
+            cli = ""
+            next
+        }
+        in_block && /^    provider:/ {
+            line = $0
+            sub(/^    provider: */, "", line)
+            prov = clean(line)
+        }
+        in_block && /^    cli:/ {
+            line = $0
+            sub(/^    cli: */, "", line)
+            cli = clean(line)
+        }
+        END { if (ctx != "" && cli != "") print ctx "|" prov "|" cli }
+    ' "${file}"
+}
+
 _extract_git_host() {
     # Derives the real git host from a repo_url in any of the forms
     # install.sh/sync-external accept: https://host/path, git@host:path, or
@@ -574,6 +617,8 @@ _load_host_vars_into_globals() {
     local file="$1"
     PROFILE=$(_read_yaml_scalar       "dotfiles_profile"     "${file}")
     MACHINE_NAME=$(_read_yaml_scalar  "machine_name"         "${file}")
+    PROJECTS_BASE=$(_read_yaml_scalar "projects_base"        "${file}")
+    PROJECTS_BASE="${PROJECTS_BASE/#\~/${HOME}}"
 
     local repo_name repo_private repo_url repo_allow_hooks
     while IFS='|' read -r repo_name repo_private repo_url repo_allow_hooks; do
@@ -583,6 +628,14 @@ _load_host_vars_into_globals() {
         EXTERNAL_REPO_URLS+=("${repo_url}")
         EXTERNAL_REPO_ALLOW_HOOKS+=("${repo_allow_hooks:-false}")
     done < <(_read_external_repos_from_host_vars "${file}")
+
+    local cli_ctx cli_prov cli_name
+    while IFS='|' read -r cli_ctx cli_prov cli_name; do
+        [[ -z "${cli_ctx}" ]] && continue
+        CLI_PROJECT_CONTEXTS+=("${cli_ctx}")
+        CLI_PROJECT_PROVIDERS+=("${cli_prov}")
+        CLI_PROJECT_CLIS+=("${cli_name}")
+    done < <(_read_cli_projects_from_host_vars "${file}")
 }
 
 # release mode only — the release directory this runs from gets replaced

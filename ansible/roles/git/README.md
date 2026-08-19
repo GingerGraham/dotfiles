@@ -17,8 +17,9 @@ Deploys git configuration and manages multi-context project identities.
 | `~/.config/git/attributes` | Ansible | Yes |
 | `~/.config/direnv/lib/dotfiles-git-context.sh` | Ansible | Yes — fully generated, no user content |
 | `~/.config/git/<gh\|glab>/<context-slug>/` | Ansible + shell functions | N/A — directory only, contents owned by `gh`/`glab` |
-| `<projects_base>/<context>/<provider>/.envrc` | Ansible + shell functions | Yes — fully generated (only for projects with `cli` set) |
+| `<projects_base>/<context>/<provider>/.envrc` | Ansible + shell functions | Yes — fully generated (only for projects with `cli` set). A pre-existing hand-written `.envrc` is preserved as `.envrc.pre-dotfiles` on first overwrite |
 | `<projects_base>/<context>/<provider>/.envrc.local` | User only | No — never touched by dotfiles |
+| `<projects_base>/<context>/<provider>/.envrc.pre-dotfiles` | Ansible (created once) | No — never overwritten once created; delete it yourself once merged |
 
 ### How `~/.gitconfig` is managed
 
@@ -106,6 +107,7 @@ picks them up.
 | `~/.config/git/gh/<context-slug>/`, `~/.config/git/glab/<context-slug>/` | Per-context CLI config directories — keyed on **context alone**, not context+provider, since `gh`/`glab` each hold multiple hosts in one config dir. Empty until you run `auth login` from inside the tree |
 | `<projects_base>/<context>/<provider>/.envrc` | Generated, one call: `use git_context <gh\|glab> <context-slug> [host]` — activates the CLI config dir (and, for `gh`, the context-aware token export) on `cd`. Only exists for projects with `cli` set |
 | `<projects_base>/<context>/<provider>/.envrc.local` | Your own overrides — sourced by the generated `.envrc`, never touched by dotfiles |
+| `<projects_base>/<context>/<provider>/.envrc.pre-dotfiles` | A pre-existing, hand-written `.envrc` Ansible found and preserved before overwriting it with the generated one — see [Migrating from a hand-rolled `GH_CONFIG_DIR` setup](#migrating-from-a-hand-rolled-gh_config_dir-setup) |
 | `~/.config/git/profiles/<n>.inc` | Gains a `[credential "https://<host>"]` section when the project has `cli` set (see below) |
 
 ### The `use git_context` contract
@@ -129,6 +131,13 @@ the comment above the token-export block in `tools/git.sh` for the two-tier arra
 There is no `glab` equivalent: `glab` has no non-interactive token-print command matching
 `gh auth token`. Opt out of the token export with `DOTFILES_GIT_CONTEXT_EXPORT_TOKEN=false`
 in `90-local.sh`.
+
+**An unauthenticated `gh` context exports no token** — if the context's store has nothing to
+give `gh auth token`, `use_git_context` unsets `GITHUB_PERSONAL_ACCESS_TOKEN` rather than
+leaving whatever was exported before (the out-of-tree fallback, or a previous context's
+token) in place. Without this, anything reading the variable inside an unauthenticated
+context — the Terraform GitHub provider, an ad-hoc `curl`, an MCP server — would silently
+act as the wrong account. direnv restores the outer value on leaving the tree.
 
 The trade-off of relying entirely on `direnv`: a project tree copied to a machine without
 these dotfiles gets a broken `.envrc` (an undefined `use git_context` command) rather than
@@ -182,19 +191,34 @@ gh auth login
 gh auth status   # verify
 ```
 
-**Migrating an already-authenticated store** — if you've previously used the
-`gh_config_dir`/`GH_CONFIG_DIR`-per-directory convention by hand (e.g. `~/.config/gh-work`),
-carry it over instead of re-running `auth login`:
+### Migrating from a hand-rolled `GH_CONFIG_DIR` setup
 
-```sh
-git-add-project-cli Acme GitHub --adopt ~/.config/gh-work
-```
+If you already had a working per-directory `GH_CONFIG_DIR` convention before this feature
+existed — a hand-written `.envrc` exporting `GH_CONFIG_DIR=~/.config/gh-work`, for instance —
+two things happen automatically the first time Ansible wires that project:
 
-`--adopt` copies `hosts.yml`/`config.yml` into the new context directory — it never moves
-or deletes the source, and never overwrites a non-empty target. Without `--adopt`, if the
-target directory is empty, `git-add-project-cli` checks a couple of likely source locations
-(the ad-hoc `~/.config/gh-<context-slug>` convention, and the CLI's own default
-`~/.config/gh` / `~/.config/glab-cli`) and offers to copy from there instead.
+- **Your `.envrc` is preserved, not silently overwritten.** If it doesn't carry the
+  generated-file marker, Ansible copies it to `.envrc.pre-dotfiles` before replacing it with
+  the generated one, and prints where it went. Compare the two, fold in anything you need
+  (custom `AWS_PROFILE`, `dotenv_if_exists`, etc. — put those in `.envrc.local` instead, which
+  the generated file sources and dotfiles never touches), then remove the `.pre-dotfiles` copy.
+- **Your existing credentials can be carried over instead of re-authenticating.** Explicitly:
+
+  ```sh
+  git-add-project-cli Acme GitHub --adopt ~/.config/gh-work
+  ```
+
+  `--adopt` copies `hosts.yml`/`config.yml` into the new context directory — it never moves
+  or deletes the source, and never overwrites a non-empty target.
+
+  Or let it find the store for you: whenever a CLI is wired into a project — via
+  `git-add-project`'s interactive step, `git-add-project-cli` without `--adopt`,
+  `git-update-project --cli`/`--cli-host`, or `git-sync-projects` — and stdin is a TTY and the
+  new config directory is still empty, dotfiles checks a couple of likely source locations
+  (the ad-hoc `~/.config/gh-<context-slug>` convention, and the CLI's own default
+  `~/.config/gh` / `~/.config/glab-cli`) and offers to copy from there. This is the same
+  mechanism `--adopt` uses, just auto-triggered — it never runs non-interactively, and never
+  overwrites a non-empty target.
 
 `git-remove-project-cli` clears the manifest/`host_vars` fields, the generated `.envrc`
 (only if it still carries the generated marker — a hand-written `.envrc` is left alone),
@@ -271,8 +295,11 @@ git-sync-projects
 
 git-sync-projects --status
     Show which projects are missing their directory, profile file, CLI
-    config dir, or .envrc — and, where the CLI binary is present, whether
-    each is authenticated. No changes made.
+    config dir, or .envrc — and whether each CLI config store has a
+    credential stored locally (a cheap local check — a keyring read for
+    gh, file presence for glab — never a live API call). Flags a likely
+    adoption candidate when one is found and nothing is stored yet. No
+    changes made.
 
 git-sync-projects --from-host-vars
     Rebuild the manifest from host_vars/localhost.yml (carrying cli/cli_host
@@ -291,7 +318,7 @@ git-add-project-cli <context> <provider> [--cli gh|glab] [--host <hostname>] [--
     CLI step when flags are omitted. Errors if the project isn't in the
     manifest, or suggests git-update-project --cli if it already has one.
     --adopt copies an existing hosts.yml/config.yml instead of re-running
-    auth login — see "Migrating an already-authenticated store" above.
+    auth login — see "Migrating from a hand-rolled GH_CONFIG_DIR setup" above.
 
 git-remove-project-cli <context> <provider>
     Remove CLI wiring from a project — manifest/host_vars fields, the
