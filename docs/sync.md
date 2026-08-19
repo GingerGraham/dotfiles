@@ -15,6 +15,10 @@ The sync role installs a background timer that keeps the dotfiles installation u
 - [dotfiles-branch](#dotfiles-branch)
   - [Typical development workflow](#typical-development-workflow)
   - [Status output](#status-output)
+- [Ansible-apply drift detection](#ansible-apply-drift)
+  - [The marker file](#the-marker-file)
+  - [dotfiles-branch --apply](#dotfiles-branch---apply)
+  - [Shell startup nag](#shell-startup-nag)
 - [Checking timer status directly](#checking-timer-status-directly)
 - [Manual sync](#manual-sync)
 - [Disabling sync](#disabling-sync)
@@ -113,11 +117,12 @@ Usage:
   dotfiles-branch --dev             Suspend sync on current branch (no branch switch)
   dotfiles-branch --reset           Hard-reset working copy to match remote HEAD
   dotfiles-branch --status          Show sync state, branch, and last sync time
+  dotfiles-branch --apply [args]    Re-run install.sh to catch up on ansible-managed changes
   dotfiles-branch --init <url> <dir>  Initialise sync.conf (normally done by install.sh)
   dotfiles-branch --help            Show this help
 ```
 
-`<branch>`, `--resume`, `--dev`, and `--reset` all require dev mode — there's no working `git` checkout for them to act on in release mode, so they refuse with a pointer to reinstall with `--dev`. Only `--status` works in both modes.
+`<branch>`, `--resume`, `--dev`, and `--reset` all require dev mode — there's no working `git` checkout for them to act on in release mode, so they refuse with a pointer to reinstall with `--dev`. `--status` and `--apply` both work in either mode — see [Ansible-apply drift detection](#ansible-apply-drift).
 
 ### Typical development workflow
 
@@ -151,6 +156,7 @@ Dev mode:
   Dev mode:         false
   Sync:             active
   Last synced:      2026-06-04 08:42:17
+  Applied:          a1b2c3d
 ```
 
 Release mode:
@@ -164,6 +170,7 @@ Release mode:
   Dev mode:         false
   Sync:             active
   Last synced:      2026-08-17 08:00:00
+  Applied:          a1b2c3d
 ```
 
 If the working copy branch does not match the configured `GIT_BRANCH` (dev mode only), the status output appends:
@@ -177,6 +184,39 @@ If both a dev-mode checkout and a release-mode install are present on the same m
 ```text
   *** both a dev-mode checkout and a release-mode install are present on this machine — dev wins ***
 ```
+
+If synced content has moved past what Ansible last actually applied (see [Ansible-apply drift detection](#ansible-apply-drift) below):
+
+```text
+  *** ansible run pending — dotfiles-branch --apply to catch up ***
+```
+
+## Ansible-apply drift detection
+
+`scripts/sync.sh` (dev: `git pull`, release: tarball fetch + `current` flip) never invokes `ansible-playbook`. Any Ansible-managed artifact — a new templated file, a new managed directory, anything a role deploys — only materializes on a machine once someone re-runs `install.sh` or `ansible-playbook` directly. Left alone, that means synced content can silently run ahead of what's actually been applied, with no signal that anything is pending — this feature closes that gap.
+
+### The marker file
+
+On every **full, untargeted, non-check** Ansible run (`ansible/tasks/record_applied_state.yml`, included as the last `post_tasks` entry in both `site.yml` and `server.yml`), Ansible stamps the content sha it just applied to `~/.local/share/dotfiles/last-applied-sha`. A `--tags`-filtered run or a `--check --diff` dry run does **not** update it — neither one reflects "the whole machine is now caught up."
+
+That sha is also symlinked to `~/.local/state/dotfiles/last-applied-sha`. This repo already has two different "dotfiles state" directories in play — `xdg_data_home` (`~/.local/share`) for sync state (`current`, `last-sync`), and `xdg_state_home` (`~/.local/state`) for the git role's `git-cli-contexts` sentinel. This feature doesn't resolve that inconsistency; it picks the practical option (`xdg_data_home`, alongside `current`/`last-sync`, since every consumer of this value is already anchored there) as canonical, and symlinks the more XDG-correct `xdg_state_home` location alongside it for anything conventionally looking there. Every reader in this repo (`dotfiles-branch`, `loader.sh`) reads the canonical `xdg_data_home` path — nothing reads the symlink.
+
+### dotfiles-branch --apply
+
+```bash
+dotfiles-branch --apply
+```
+
+Re-runs `install.sh` without you needing to locate it — useful if you bootstrapped via `curl | bash` and don't know (or don't remember) where the dotfiles tree lives. Works in **both** install modes, unlike `<branch>`/`--resume`/`--dev`/`--reset` — it resolves `install.sh` via `$DOTFILES_DIR` from `sync.conf`, which in release mode always points at the current `current` symlink target, so it stays valid across every release flip. Any extra arguments are passed straight through to `install.sh` (e.g. `dotfiles-branch --apply -K` for `--ask-become-pass`).
+
+### Shell startup nag
+
+`loader.sh` runs the same drift check on every interactive shell start (skipped entirely for non-interactive shells and `DOTFILES_PLAIN_SHELL=true`). If the currently-synced content sha doesn't match `last-applied-sha`:
+
+- The first time a given content sha is seen, you get an interactive prompt: `Run 'dotfiles-branch --apply' now? [y/N]`. Default is `N`, matching `install.sh`'s own prompts elsewhere.
+- Every subsequent shell within a 24-hour throttle window instead prints a single passive line and continues — so a new terminal tab doesn't re-prompt you on every open. The throttle state lives in `~/.local/share/dotfiles/last-apply-nag`.
+- Once the throttle window elapses (or the content sha changes again), the next shell prompts again.
+- This never applies automatically — there's no `DOTFILES_AUTO_APPLY` opt-in. `install.sh` can need a `sudo` password (e.g. first-run package installs), and the sync subsystem's contract is that it runs as your user, unattended, never root — a silent auto-apply would break that the moment a become-password prompt is needed.
 
 ## Checking timer status directly
 

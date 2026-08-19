@@ -1,0 +1,49 @@
+# ansible/tasks/record_applied_state.yml
+#
+# Stamps the last-applied content sha — but only for a full, untagged,
+# non-check run. A --tags-filtered run didn't touch enough of the system to
+# claim "fully applied"; a --check run didn't apply anything at all.
+#
+# Included as the last post_tasks entry from site.yml/server.yml, after
+# dotfiles_current_sha has already been resolved by
+# tasks/detect_install_mode.yml (tagged always, so it always runs first).
+# See docs/sync.md#ansible-apply-drift.
+
+- name: record-applied-state | determine whether this was a full run
+  ansible.builtin.set_fact:
+    _dotfiles_full_run: >-
+      {{ (ansible_run_tags | default(['all'])) == ['all']
+         and (ansible_skip_tags | default([]) | length == 0) }}
+
+- name: record-applied-state | ensure xdg_data_home state dir exists
+  ansible.builtin.file:
+    path: "{{ xdg_data_home }}/dotfiles"
+    state: directory
+    mode: '0700'
+  when: _dotfiles_full_run and not ansible_check_mode
+
+- name: record-applied-state | write last-applied-sha (canonical)
+  ansible.builtin.copy:
+    content: "{{ dotfiles_current_sha }}\n"
+    dest: "{{ xdg_data_home }}/dotfiles/last-applied-sha"
+    mode: '0644'
+  when: _dotfiles_full_run and not ansible_check_mode
+
+- name: record-applied-state | ensure xdg_state_home dir exists
+  ansible.builtin.file:
+    path: "{{ xdg_state_home }}/dotfiles"
+    state: directory
+    mode: '0700'
+  when: _dotfiles_full_run and not ansible_check_mode
+
+# Symlinked purely for anyone/anything conventionally looking for "last
+# known applied state" under xdg_state_home (consistent with where the git
+# role's git-cli-contexts sentinel lives) — nothing in this repo reads from
+# this path; every reader uses the canonical xdg_data_home one above.
+- name: record-applied-state | symlink into xdg_state_home
+  ansible.builtin.file:
+    src: "{{ xdg_data_home }}/dotfiles/last-applied-sha"
+    dest: "{{ xdg_state_home }}/dotfiles/last-applied-sha"
+    state: link
+    force: true
+  when: _dotfiles_full_run and not ansible_check_mode

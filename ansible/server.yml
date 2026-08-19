@@ -69,3 +69,6 @@
       when: dotfiles_extra_roles | length > 0
       tags:
         - extras
+
+  post_tasks:
+    - ansible.builtin.import_tasks: tasks/record_applied_state.yml
