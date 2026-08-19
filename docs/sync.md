@@ -217,6 +217,7 @@ Re-runs `install.sh` without you needing to locate it — useful if you bootstra
 - Every subsequent shell within a 24-hour throttle window instead prints a single passive line and continues — so a new terminal tab doesn't re-prompt you on every open. The throttle state lives in `~/.local/share/dotfiles/last-apply-nag`.
 - Once the throttle window elapses (or the content sha changes again), the next shell prompts again.
 - This never applies automatically — there's no `DOTFILES_AUTO_APPLY` opt-in. `install.sh` can need a `sudo` password (e.g. first-run package installs), and the sync subsystem's contract is that it runs as your user, unattended, never root — a silent auto-apply would break that the moment a become-password prompt is needed.
+- A missing `last-applied-sha` counts as "never applied" — a real drift state, not a reason to stay quiet. This matters for the exact case that motivated this feature: content freshly synced onto a machine that hasn't yet had a full Ansible run since (including the very first machine to receive this feature's own code). The check only stays silent when it can't determine the machine's *current* content sha at all (mid-bootstrap, before either a dev checkout or a release symlink resolves).
 
 ## Checking timer status directly
 

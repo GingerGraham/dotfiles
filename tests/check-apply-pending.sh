@@ -110,20 +110,29 @@ fi
 if [[ ! -f "${record_state_yml}" ]]; then
     rc=1
     echo "FAIL: ${record_state_yml#"${repo_root}"/} does not exist"
-else
-    for fn in _dotfiles_full_run; do
-        grep -qF "${fn}" "${record_state_yml}" || {
-            rc=1
-            echo "FAIL: ${record_state_yml#"${repo_root}"/} does not define expected fact '${fn}'"
-        }
-    done
+elif ! grep -qF "_dotfiles_full_run" "${record_state_yml}"; then
+    rc=1
+    echo "FAIL: ${record_state_yml#"${repo_root}"/} does not define expected fact '_dotfiles_full_run'"
 fi
 
+# The import must carry its own explicit 'always' tag (matching
+# detect_install_mode.yml's own tags: [always], for the same reason —
+# see its header comment) rather than relying on Ansible's default
+# exclusion of untagged tasks under a --tags filter. Without it, a
+# --tags-filtered run happens to skip this block today only because it's
+# untagged — not because _dotfiles_full_run's own when: guard caught it —
+# so the guard would go unexercised and silently stop protecting anything
+# if this import ever picks up an incidental tag later.
 for playbook in "${site_yml}" "${server_yml}"; do
-    grep -qF 'tasks/record_applied_state.yml' "${playbook}" || {
+    if ! grep -qF 'tasks/record_applied_state.yml' "${playbook}"; then
         rc=1
         echo "FAIL: ${playbook#"${repo_root}"/} does not import tasks/record_applied_state.yml"
-    }
+        continue
+    fi
+    if ! grep -A3 'tasks/record_applied_state.yml' "${playbook}" | grep -qF 'always'; then
+        rc=1
+        echo "FAIL: ${playbook#"${repo_root}"/}'s record_applied_state.yml import is missing tags: [always] — a --tags-filtered run would statically skip this block, bypassing its own when: _dotfiles_full_run guard"
+    fi
 done
 
 # ---- Report ---------------------------------------------------------------------

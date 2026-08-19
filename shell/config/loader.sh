@@ -508,10 +508,6 @@ _dotfiles_apply_check() {
     local current_link="${state_dir}/current"
     local nag_file="${state_dir}/last-apply-nag"
 
-    # Feature not yet present on this machine (pre-upgrade, or no full
-    # Ansible run has ever completed) — nothing to compare against.
-    [[ -f "${applied_file}" ]] || return 0
-
     local current_sha=""
     if [[ -n "${DOTFILES_REPO_DIR:-}" && -d "${DOTFILES_REPO_DIR}/.git" ]]; then
         current_sha="$(git -C "${DOTFILES_REPO_DIR}" rev-parse --short HEAD 2>/dev/null)"
@@ -522,10 +518,15 @@ _dotfiles_apply_check() {
         # guards the two shell-side copies against drift.
         current_sha="$(basename "$(readlink "${current_link}")" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-//')"
     fi
+    # Nothing to compare against at all (mid-bootstrap: neither a dev
+    # checkout nor a release symlink resolved yet) — genuinely bail here.
+    # A missing applied_file below is NOT the same case — that's "never
+    # applied", a real drift state this check needs to surface, not a
+    # reason to skip the comparison (see docs/sync.md#ansible-apply-drift).
     [[ -z "${current_sha}" ]] && return 0
 
-    local applied_sha
-    applied_sha="$(<"${applied_file}")"
+    local applied_sha=""
+    [[ -f "${applied_file}" ]] && applied_sha="$(<"${applied_file}")"
     [[ "${current_sha}" == "${applied_sha}" ]] && return 0
 
     # Throttle: only block for input once per (sha, window) — otherwise
@@ -537,21 +538,21 @@ _dotfiles_apply_check() {
     fi
 
     if [[ "${nagged_sha}" == "${current_sha}" ]] && (( now - ${nagged_at:-0} < throttle_seconds )); then
-        echo "dotfiles: ansible apply pending (${applied_sha} -> ${current_sha}) — run 'dotfiles-branch --apply'"
+        echo "dotfiles: ansible apply pending (${applied_sha:-never applied} -> ${current_sha}) — run 'dotfiles-branch --apply'"
         return 0
     fi
 
     echo "${current_sha}:${now}" > "${nag_file}"
 
     if ! command -v dotfiles-branch &>/dev/null; then
-        echo "dotfiles: content updated (${applied_sha} -> ${current_sha}) but not yet applied — the dotfiles-branch wrapper isn't installed (sync role skipped?), re-run install.sh directly to catch up."
+        echo "dotfiles: content updated (${applied_sha:-never applied} -> ${current_sha}) but not yet applied — the dotfiles-branch wrapper isn't installed (sync role skipped?), re-run install.sh directly to catch up."
         return 0
     fi
 
     # read -p is a bash/zsh builtin flag, but they disagree on its meaning
     # (zsh's -p reads from a coprocess, not "print this as a prompt") — print
     # the prompt separately and use only -r, which both shells treat the same.
-    printf '%s' "dotfiles: content updated (${applied_sha} -> ${current_sha}) but not yet applied. Run 'dotfiles-branch --apply' now? [y/N] " > /dev/tty
+    printf '%s' "dotfiles: content updated (${applied_sha:-never applied} -> ${current_sha}) but not yet applied. Run 'dotfiles-branch --apply' now? [y/N] " > /dev/tty
     local answer
     read -r answer < /dev/tty || true
     if [[ "${answer}" =~ ^[Yy]$ ]]; then
