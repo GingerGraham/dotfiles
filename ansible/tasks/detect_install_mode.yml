@@ -64,3 +64,31 @@
   ansible.builtin.set_fact:
     dotfiles_repo_root: "{{ _dotfiles_home }}/.local/share/dotfiles/current"
   when: dotfiles_resolved_mode == 'release'
+
+# dotfiles_current_sha is the content identity used by the ansible-apply
+# drift check (dotfiles-branch --status / loader.sh) to tell whether the
+# synced content has moved on from what was last actually applied — see
+# ansible/tasks/record_applied_state.yml and docs/sync.md#ansible-apply-drift.
+
+- name: mode-detect | resolve current content sha (dev)
+  ansible.builtin.command:
+    cmd: git rev-parse --short HEAD
+    chdir: "{{ dotfiles_repo_root }}"
+  register: _dotfiles_dev_sha
+  changed_when: false
+  when: dotfiles_resolved_mode == 'dev'
+
+- name: mode-detect | set current content sha (dev)
+  ansible.builtin.set_fact:
+    dotfiles_current_sha: "{{ _dotfiles_dev_sha.stdout | trim }}"
+  when: dotfiles_resolved_mode == 'dev'
+
+# The regex mirrors _release_id()'s sed pattern in scripts/switch-branch.sh
+# and the equivalent in shell/config/loader.sh — keep all three in sync;
+# tests/check-apply-pending.sh guards the shell-side two against drift.
+- name: mode-detect | set current content sha (release)
+  ansible.builtin.set_fact:
+    dotfiles_current_sha: >-
+      {{ (_dotfiles_release_stat.stat.lnk_source | basename)
+         | regex_replace('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-', '') }}
+  when: dotfiles_resolved_mode == 'release'

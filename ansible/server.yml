@@ -69,3 +69,9 @@
       when: dotfiles_extra_roles | length > 0
       tags:
         - extras
+
+  post_tasks:
+    - name: Record last-applied content sha for ansible-apply drift detection
+      ansible.builtin.import_tasks: tasks/record_applied_state.yml
+      tags:
+        - always

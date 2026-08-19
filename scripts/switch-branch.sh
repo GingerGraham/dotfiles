@@ -80,6 +80,26 @@ _release_id() {
     basename "$(readlink "$CURRENT_LINK")" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-//'
 }
 
+# ── Ansible-apply drift detection ────────────────────────────────────────────
+# Reads the canonical marker Ansible stamps on a full, untagged, non-check
+# run (see ansible/tasks/record_applied_state.yml). Empty string if it
+# doesn't exist yet (pre-upgrade machine, or Ansible has never completed a
+# full run).
+_applied_sha() {
+    local f="${STATE_DIR}/last-applied-sha"
+    [[ -f "$f" ]] && cat "$f" || echo ""
+}
+
+# Mirrors ansible/tasks/detect_install_mode.yml's dotfiles_current_sha logic.
+# Requires DOTFILES_DIR (from _conf_load) to already be set.
+_current_content_sha() {
+    if [[ "$(_resolve_mode)" == "dev" ]]; then
+        git -C "$DOTFILES_DIR" rev-parse --short HEAD 2>/dev/null
+    else
+        _release_id
+    fi
+}
+
 # Refuses branch-switching subcommands outright in release mode — there is no
 # working git checkout for them to act on.
 _require_dev_mode() {
@@ -150,11 +170,30 @@ cmd_status() {
     printf "  %-16s %s\n" "Dev mode:"    "$DEV_MODE"
     printf "  %-16s %s\n" "Sync:"        "$sync_state"
     printf "  %-16s %s\n" "Last synced:" "$last_sync"
+
+    local applied current
+    applied=$(_applied_sha)
+    current=$(_current_content_sha)
+    printf "  %-16s %s\n" "Applied:" "${applied:-never}"
+    if [[ -n "$current" && "$applied" != "$current" ]]; then
+        echo "  *** ansible run pending — dotfiles-branch --apply to catch up ***"
+    fi
+
     [[ -n "$branch_note" ]] && echo "$branch_note"
     if _mode_conflict; then
         echo "  *** both a dev-mode checkout and a release-mode install are present on this machine — dev wins ***"
     fi
     echo ""
+}
+
+cmd_apply() {
+    _conf_load
+    if [[ ! -x "${DOTFILES_DIR}/install.sh" ]]; then
+        echo "ERROR: install.sh not found or not executable at ${DOTFILES_DIR}/install.sh" >&2
+        exit 1
+    fi
+    echo "Running ${DOTFILES_DIR}/install.sh ..."
+    exec "${DOTFILES_DIR}/install.sh" "$@"
 }
 
 cmd_switch() {
@@ -290,6 +329,7 @@ Usage:
   dotfiles-branch --dev             Suspend sync on current branch (no branch switch)
   dotfiles-branch --reset           Hard-reset working copy to match remote HEAD
   dotfiles-branch --status          Show sync state, mode, and last sync time
+  dotfiles-branch --apply [args]    Re-run install.sh to catch up on ansible-managed changes
   dotfiles-branch --init <url> <dir>  Initialise sync.conf (normally done by install.sh)
   dotfiles-branch --help            Show this help
 
@@ -297,6 +337,14 @@ Usage:
 they refuse cleanly on a release-mode (tarball) install. Reinstall with
 --dev to get a checkout you can switch branches on. See
 docs/sync.md#install-modes.
+
+--apply works in both modes — it re-runs install.sh, which resolves its own
+target directory correctly whether that's a dev checkout or the release
+'current' symlink. Any extra arguments (e.g. -K for --ask-become-pass) are
+passed straight through to install.sh. Use this when 'Applied:' in --status
+shows content newer than the last full Ansible run — e.g. after sync.sh
+pulls in new dotfiles content that Ansible hasn't materialized yet. See
+docs/sync.md#ansible-apply-drift.
 
 Examples:
   # Start working on a feature
@@ -311,6 +359,9 @@ Examples:
 
   # Suspend sync temporarily without switching branches
   dotfiles-branch --dev
+
+  # Catch up an Ansible-managed change that synced content but never applied
+  dotfiles-branch --apply
 EOF
 }
 
@@ -322,6 +373,7 @@ main() {
         --dev)                  cmd_dev ;;
         --resume|--main)        cmd_resume ;;
         --reset)                cmd_reset ;;
+        --apply)                shift; cmd_apply "$@" ;;
         --init)                 shift; cmd_init "$@" ;;
         --help|-h|"")           usage ;;
         -*)                     echo "Unknown option: $1" >&2; usage; exit 1 ;;

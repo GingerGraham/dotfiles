@@ -491,3 +491,73 @@ dedupe-path 2>/dev/null || true
 if [[ $- == *i* ]] && [[ "${DOTFILES_SHOW_FUNCTIONS}" == "true" ]] && command -v get-functions &>/dev/null; then
     get-functions
 fi
+
+# ── Ansible-apply drift check (always last) ───────────────────────────────────
+# Detects when synced dotfiles content (git pull / release flip) has moved
+# past what Ansible last actually applied — see
+# ansible/tasks/record_applied_state.yml and docs/sync.md#ansible-apply-drift.
+# Nothing later in startup depends on its outcome.
+_dotfiles_apply_check() {
+    # Interactive shells only — a blocking read on stdin in a script or CI
+    # context would hang it.
+    [[ $- == *i* ]] || return 0
+    [[ "${DOTFILES_PLAIN_SHELL:-false}" == "true" ]] && return 0
+
+    local state_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/dotfiles"
+    local applied_file="${state_dir}/last-applied-sha"
+    local current_link="${state_dir}/current"
+    local nag_file="${state_dir}/last-apply-nag"
+
+    local current_sha=""
+    if [[ -n "${DOTFILES_REPO_DIR:-}" && -d "${DOTFILES_REPO_DIR}/.git" ]]; then
+        current_sha="$(git -C "${DOTFILES_REPO_DIR}" rev-parse --short HEAD 2>/dev/null)"
+    elif [[ -L "${current_link}" ]]; then
+        # Mirrors _release_id() in scripts/switch-branch.sh and
+        # dotfiles_current_sha (release) in ansible/tasks/detect_install_mode.yml
+        # — keep this regex in sync with both; tests/check-apply-pending.sh
+        # guards the two shell-side copies against drift.
+        current_sha="$(basename "$(readlink "${current_link}")" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-//')"
+    fi
+    # Nothing to compare against at all (mid-bootstrap: neither a dev
+    # checkout nor a release symlink resolved yet) — genuinely bail here.
+    # A missing applied_file below is NOT the same case — that's "never
+    # applied", a real drift state this check needs to surface, not a
+    # reason to skip the comparison (see docs/sync.md#ansible-apply-drift).
+    [[ -z "${current_sha}" ]] && return 0
+
+    local applied_sha=""
+    [[ -f "${applied_file}" ]] && applied_sha="$(<"${applied_file}")"
+    [[ "${current_sha}" == "${applied_sha}" ]] && return 0
+
+    # Throttle: only block for input once per (sha, window) — otherwise
+    # every new tab re-prompts until the user actually applies.
+    local nagged_sha="" nagged_at=0 now throttle_seconds=86400
+    now="$(date +%s)"
+    if [[ -f "${nag_file}" ]]; then
+        IFS=: read -r nagged_sha nagged_at < "${nag_file}"
+    fi
+
+    if [[ "${nagged_sha}" == "${current_sha}" ]] && (( now - ${nagged_at:-0} < throttle_seconds )); then
+        echo "dotfiles: ansible apply pending (${applied_sha:-never applied} -> ${current_sha}) — run 'dotfiles-branch --apply'"
+        return 0
+    fi
+
+    echo "${current_sha}:${now}" > "${nag_file}"
+
+    if ! command -v dotfiles-branch &>/dev/null; then
+        echo "dotfiles: content updated (${applied_sha:-never applied} -> ${current_sha}) but not yet applied — the dotfiles-branch wrapper isn't installed (sync role skipped?), re-run install.sh directly to catch up."
+        return 0
+    fi
+
+    # read -p is a bash/zsh builtin flag, but they disagree on its meaning
+    # (zsh's -p reads from a coprocess, not "print this as a prompt") — print
+    # the prompt separately and use only -r, which both shells treat the same.
+    printf '%s' "dotfiles: content updated (${applied_sha:-never applied} -> ${current_sha}) but not yet applied. Run 'dotfiles-branch --apply' now? [y/N] " > /dev/tty
+    local answer
+    read -r answer < /dev/tty || true
+    if [[ "${answer}" =~ ^[Yy]$ ]]; then
+        dotfiles-branch --apply
+    fi
+}
+_dotfiles_apply_check
+unset -f _dotfiles_apply_check
