@@ -175,7 +175,7 @@ cmd_status() {
     applied=$(_applied_sha)
     current=$(_current_content_sha)
     printf "  %-16s %s\n" "Applied:" "${applied:-never}"
-    if [[ -n "$applied" && "$applied" != "$current" ]]; then
+    if [[ -n "$applied" && -n "$current" && "$applied" != "$current" ]]; then
         echo "  *** ansible run pending — dotfiles-branch --apply to catch up ***"
     fi
 

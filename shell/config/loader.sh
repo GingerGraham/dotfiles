@@ -543,8 +543,17 @@ _dotfiles_apply_check() {
 
     echo "${current_sha}:${now}" > "${nag_file}"
 
+    if ! command -v dotfiles-branch &>/dev/null; then
+        echo "dotfiles: content updated (${applied_sha} -> ${current_sha}) but not yet applied — the dotfiles-branch wrapper isn't installed (sync role skipped?), re-run install.sh directly to catch up."
+        return 0
+    fi
+
+    # read -p is a bash/zsh builtin flag, but they disagree on its meaning
+    # (zsh's -p reads from a coprocess, not "print this as a prompt") — print
+    # the prompt separately and use only -r, which both shells treat the same.
+    printf '%s' "dotfiles: content updated (${applied_sha} -> ${current_sha}) but not yet applied. Run 'dotfiles-branch --apply' now? [y/N] " > /dev/tty
     local answer
-    read -r -p "dotfiles: content updated (${applied_sha} -> ${current_sha}) but not yet applied. Run 'dotfiles-branch --apply' now? [y/N] " answer < /dev/tty || true
+    read -r answer < /dev/tty || true
     if [[ "${answer}" =~ ^[Yy]$ ]]; then
         dotfiles-branch --apply
     fi
