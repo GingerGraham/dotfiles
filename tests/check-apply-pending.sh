@@ -141,11 +141,11 @@ for playbook in "${site_yml}" "${server_yml}"; do
 done
 
 # ---- Check 6: full-run gate normalizes tuples to lists before comparing --------
-if ! grep -qF 'ansible_run_tags | list' "${record_state_yml}"; then
+if ! grep -qE 'ansible_run_tags[[:space:]]*\|[[:space:]]*list' "${record_state_yml}"; then
     rc=1
     echo "FAIL: ${record_state_yml#"${repo_root}"/}'s full-run gate does not normalize ansible_run_tags with '| list' — ansible_run_tags is a tuple under real ansible-core, so a bare comparison against a ['all'] list literal is always False and the marker never gets written"
 fi
-if ! grep -qF 'ansible_skip_tags | list' "${record_state_yml}"; then
+if ! grep -qE 'ansible_skip_tags[[:space:]]*\|[[:space:]]*list' "${record_state_yml}"; then
     rc=1
     echo "FAIL: ${record_state_yml#"${repo_root}"/}'s full-run gate does not normalize ansible_skip_tags with '| list' before measuring its length"
 fi
