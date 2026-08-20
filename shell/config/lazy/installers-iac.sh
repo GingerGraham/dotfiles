@@ -454,6 +454,7 @@ _aws_arch() {
 
 _aws-install-linux() {
     local arch; arch="$(_aws_arch)" || return 1
+    command -v curl &>/dev/null || { log_error "curl is required for AWS CLI installation"; return 1; }
     command -v unzip &>/dev/null || { log_error "unzip is required for AWS CLI installation"; return 1; }
 
     local tmp_dir; tmp_dir="$(mktemp -d)"
@@ -601,15 +602,20 @@ install-azure() {
             _azure-install-mac
             ;;
         Linux)
-            local ok=1
+            # pip is only a fallback for a genuinely unrecognised distro — a
+            # real failure on a known distro (repo/network issue, etc.)
+            # surfaces as an error instead of silently retrying via pip and
+            # risking a mixed system-package + pip install.
             case "${DOTFILES_DISTRO}" in
-                rhel)   _azure-install-rhel   && ok=0 ;;
-                debian) _azure-install-debian && ok=0 ;;
-                suse)   _azure-install-suse   && ok=0 ;;
-                arch)   _azure-install-arch   && ok=0 ;;
-                *)      log_warn "Unknown distro (${DOTFILES_DISTRO}) — falling back to pip install" ;;
+                rhel)   _azure-install-rhel   || { log_error "Azure CLI: rhel install failed"; return 1; } ;;
+                debian) _azure-install-debian || { log_error "Azure CLI: debian install failed"; return 1; } ;;
+                suse)   _azure-install-suse   || { log_error "Azure CLI: suse install failed"; return 1; } ;;
+                arch)   _azure-install-arch   || { log_error "Azure CLI: arch install failed"; return 1; } ;;
+                *)
+                    log_warn "Unknown distro (${DOTFILES_DISTRO}) — falling back to pip install"
+                    _azure-install-pip || return 1
+                    ;;
             esac
-            [[ "${ok}" -ne 0 ]] && { _azure-install-pip || return 1; }
             ;;
         *)
             log_error "Unsupported OS for Azure CLI install"; return 1
@@ -643,9 +649,18 @@ install-gcloud() {
     log_info "Installing or updating Google Cloud CLI (gcloud)..."
 
     if command -v gcloud &>/dev/null; then
-        log_info "gcloud found — updating components..."
-        gcloud components update --quiet
-        return $?
+        local gcloud_path; gcloud_path="$(command -v gcloud)"
+        # `gcloud components update` only works for this function's own
+        # ~/google-cloud-sdk install — the components manager is disabled on
+        # package-manager installs (apt/dnf/brew), so it would just fail there.
+        if [[ "${gcloud_path}" == "${HOME}/google-cloud-sdk/bin/gcloud" ]]; then
+            log_info "gcloud found at ${gcloud_path} — updating components..."
+            gcloud components update --quiet
+            return $?
+        fi
+        log_warn "gcloud found at ${gcloud_path}, not the ~/google-cloud-sdk install this function manages."
+        log_warn "It looks package-manager-installed — use that package manager (apt/dnf/brew/etc.) to update it instead."
+        return 0
     fi
 
     command -v curl &>/dev/null || { log_error "curl is required"; return 1; }
