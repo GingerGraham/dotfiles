@@ -100,7 +100,7 @@ gpg-create-key
 | File                   | Contents                                                                                                                                                                                                |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `installers.sh`        | `install-*` functions (gh, glab, nvm, copilot-cli, claude-code, bw-cli, op-cli, oh-my-posh, edit, …). See [installers.md](installers.md).                                                               |
-| `installers-python.sh` | `install-uv` — Python tooling group file, split out from the other installer groups in anticipation of more Python tools                                                                                |
+| `installers-python.sh` | `install-uv`, `install-specify` — Python tooling group file, split out from the other installer groups in anticipation of more Python tools                                                             |
 | `maintenance.sh`       | `update-tools` — orchestrated update of all managed tools                                                                                                                                               |
 | `gpg-management.sh`    | Key creation, subkey management, expiry, rotation, export/import (Bitwarden, 1Password), and signing key publishing (GitHub, GitLab)                                                                    |
 | `user-extensions.sh`   | `check-user-extensions` — full syntax/lint/collision pass over `DOTFILES_USER_EXT_DIR`. Registered only when that directory has at least one `*.sh` file. See [user-extensions.md](user-extensions.md). |
@@ -386,7 +386,7 @@ shell/
     │   ├── installers-X.sh     # install-<tool> and set-<tool> commands
     |   |                       # Split into multiple files to avoid shell startup slowdown from parsing a single large file
     │   │                       # Manages 20+ tools: terraform, helm, aws, nvm, neovim, uv, etc.
-    │   ├── installers-python.sh    # install-uv — Python tooling group file
+    │   ├── installers-python.sh    # install-uv, install-specify — Python tooling group file
     │   ├── maintenance.sh      # update-tools orchestration, registry, and per-tool updaters
     │   │                       # Coordinates install-* commands and automatic updates
     │   ├── gpg-management.sh   # GPG key creation, rotation, export/import, signing key publishing

@@ -48,14 +48,15 @@ The registry currently includes:
 | -------------- | ------------------- | -------------------------- | -------------------------------- |
 | **1password**  | `command -v`        | `install-1password`        | 1Password Desktop                |
 | **ansible**    | `command -v`        | `install-ansible`          | Configuration management         |
-| **aws**        | `command -v`        | `aws-update`               | AWS CLI                          |
-| **az**         | `command -v`        | `az-update`                | Azure CLI                        |
+| **aws**        | `command -v`        | `install-aws`              | AWS CLI                          |
+| **az**         | `command -v`        | `install-azure`            | Azure CLI                        |
 | **bitwarden**  | `command -v`        | `install-bitwarden`        | Bitwarden Desktop                |
 | **bw**         | `command -v`        | `install-bw-cli`           | Bitwarden CLI                    |
 | **claude**     | `command -v`        | `install-claude-code`      | Claude Code CLI                  |
 | **copilot**    | `command -v`        | `install-copilot-cli`      | GitHub Copilot CLI               |
 | **cosign**     | `command -v`        | `install-cosign`           | Container signing                |
 | **edit**       | `command -v`        | `install-edit`             | Microsoft Edit                   |
+| **gcloud**     | `command -v`        | `install-gcloud`           | Google Cloud CLI                 |
 | **gh**         | `command -v`        | `install-gh`               | GitHub CLI                       |
 | **glab**       | `command -v`        | `install-glab`             | GitLab CLI                       |
 | **helm**       | `command -v`        | `install-helm`             | Kubernetes package manager       |
@@ -67,6 +68,7 @@ The registry currently includes:
 | **oh-my-zsh**  | `path:~/.oh-my-zsh` | `install-oh-my-zsh`        | Zsh framework                    |
 | **op**         | `command -v`        | `install-op-cli`           | 1Password CLI                    |
 | **opendeck**   | `command -v`        | `install-opendeck`         | Opendeck                         |
+| **specify**    | `command -v`        | `install-specify`          | Specify CLI (spec-kit)           |
 | **starship**   | `command -v`        | `install-starship`         | Prompt engine                    |
 | **terraform**  | `command -v`        | via tenv or `install-tenv` | Infrastructure as code           |
 | **tenv**       | `command -v`        | `install-tenv`             | Manages terraform/tofu versions  |
@@ -168,12 +170,12 @@ See [installers.md](installers.md) for a per-tool reference, including the GitLa
 Each tool's updater is a private function in `lazy/maintenance.sh`, usually named `_update_<tool>()`:
 
 ```bash
-_update_aws()        # Calls aws-update from tools/aws.sh
+_update_specify()    # Calls `specify self upgrade`, falling back to install-specify
 _update_terraform()  # Calls install-terraform (proxied via tenv if tenv is present)
 _update_omz()        # Updates oh-my-zsh via its upgrade.sh
 ```
 
-Some updater functions are simple wrappers (call `install-<tool>` directly). Others are smart and handle special cases:
+Most tools (including `aws` and `az`) skip a dedicated `_update_<tool>` function entirely — their registry row names `install-<tool>` directly as both the installer and the updater, since the installer is already idempotent (see the [installer ↔ updater contract](#the-installer--updater-contract) below). Some updater functions are simple wrappers (call `install-<tool>` directly). Others are smart and handle special cases:
 
 - **tenv-managed tools** (`terraform`, `tofu`) — if tenv is installed, the updater defers to `_update_tenv_managed()` to avoid duplicate version managers
 - **Custom paths** (`oh-my-zsh`) — uses the tool's built-in upgrade mechanism instead of a re-download

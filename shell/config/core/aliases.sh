@@ -75,11 +75,6 @@ fi
 # ── Fun ───────────────────────────────────────────────────────────────────────
 command -v cmatrix &>/dev/null && alias matrix="cmatrix -abs"
 
-# ── uv ────────────────────────────────────────────────────────────────────────
-if command -v uv &>/dev/null; then
-    alias install-specify="uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git"
-fi
-
 # ── get-functions shortcut ────────────────────────────────────────────────────
 if command -v get-functions &>/dev/null; then
     alias aliases="get-functions"

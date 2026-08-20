@@ -26,8 +26,8 @@ _managed_tools_registry() {
 1password|1password|install-1password|install-1password|1Password Desktop
 ansible|ansible|install-ansible|install-ansible|Ansible
 antigravity|agy|install-antigravity|install-antigravity|Antigravity CLI
-aws|aws|_update_aws|aws-update|AWS CLI
-az|az|_update_az|az-update|Azure CLI
+aws|aws|install-aws|install-aws|AWS CLI
+az|az|install-azure|install-azure|Azure CLI
 bitwarden|bitwarden|install-bitwarden|install-bitwarden|Bitwarden Desktop
 bw|bw|install-bw-cli|install-bw-cli|Bitwarden CLI
 claude|claude|install-claude-code|install-claude-code|Claude Code
@@ -37,6 +37,7 @@ direnv|direnv|install-direnv|install-direnv|direnv
 edit|edit|install-edit|install-edit|Microsoft Edit
 flatpak|flatpak|install-flatpak|install-flatpak|Flatpak
 fzf|fzf|install-fzf|install-fzf|fzf (fuzzy finder)
+gcloud|gcloud|install-gcloud|install-gcloud|Google Cloud CLI
 gh|gh|install-gh|install-gh|GitHub CLI
 glab|glab|install-glab|install-glab|GitLab CLI
 helm|helm|install-helm|install-helm|Helm
@@ -49,6 +50,7 @@ op|op|install-op-cli|install-op-cli|1Password CLI
 pinentry|pinentry|install-pinentry|install-pinentry|GPG Pinentry
 nvm|nvm|install-nvm|install-nvm|nvm (Node)
 snapd|snap|install-snapd|install-snapd|snapd
+specify|specify|_update_specify|install-specify|Specify CLI (spec-kit)
 starship|command -v|install-starship|install-starship|Prompt engine
 tenv|tenv|_update_tenv_managed|install-tenv|tenv (Terraform/OpenTofu)
 terraform|terraform|_update_terraform|install-tenv|Terraform
@@ -143,8 +145,16 @@ _update_ensure_fn() {
     command -v "${fn}" &>/dev/null
 }
 
-_update_aws() { _update_ensure_fn aws-update tools/aws.sh   && aws-update; }
-_update_az()  { _update_ensure_fn az-update  tools/azure.sh && az-update; }
+_update_specify() {
+    # `specify self upgrade` auto-detects uv-tool vs pipx installs; fall back
+    # to re-running install-specify (the plain `uv tool install --force`) if
+    # that self-upgrade path isn't available yet (e.g. a very old specify).
+    if specify self upgrade; then
+        return 0
+    fi
+    log_warn "specify self upgrade failed — falling back to install-specify"
+    install-specify
+}
 
 _update_uv() {
     # `uv self update` only works for standalone installs; a package-manager

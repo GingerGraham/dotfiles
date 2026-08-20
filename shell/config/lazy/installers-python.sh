@@ -95,3 +95,27 @@ install-uv() {
     echo "    uv pip install <pkg>   # install a package"
     echo "    uvx <tool>             # run a tool without installing it"
 }
+
+
+# ── Specify CLI (spec-kit) install ────────────────────────────────────────────
+# GitHub's spec-driven-development CLI. It ships only as a uv tool (no
+# package-manager or binary release), installed straight from the spec-kit
+# git repo — identical on every distro and macOS, so no branching is needed.
+install-specify() {
+    command -v uv &>/dev/null || { log_error "uv is required for Specify CLI. Install it first with: install-uv"; return 1; }
+
+    log_info "Installing or updating Specify CLI (specify-cli)..."
+    uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git \
+        || { log_error "Specify CLI install failed"; return 1; }
+
+    if command -v specify &>/dev/null; then
+        log_info "Specify CLI installed."
+        echo
+        echo "  Common commands:"
+        echo "    specify init          # scaffold a new Spec Kit project"
+        echo "    specify self check    # check whether a newer release is available"
+        echo "    specify self upgrade  # upgrade in place"
+    else
+        log_warn "specify not found on PATH after install. Restart your shell or check uv's tool bin dir (~/.local/bin)."
+    fi
+}
