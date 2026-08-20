@@ -36,6 +36,8 @@ root is required.
 | --------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- |
 | `install-1password`   | 1Password Desktop                         | Official vendor repo per distro (apt/dnf/zypper/AUR); Flatpak fallback       |
 | `install-antigravity` | Antigravity CLI (`agy`)                   | Official curl-to-bash installer → `~/.local/bin`                             |
+| `install-aws`         | AWS CLI (`aws`)                           | Official installer bundle (curl+unzip) on every Linux distro; Homebrew on macOS |
+| `install-azure`       | Azure CLI (`az`)                          | Official vendor repo per distro (apt/dnf/zypper); AUR on Arch; pip fallback; Homebrew on macOS |
 | `install-bitwarden`   | Bitwarden desktop app                     | Vendor package per distro / Flatpak / Homebrew cask                          |
 | `install-bw-cli`      | Bitwarden CLI (`bw`)                      | npm global `@bitwarden/cli`, with a binary fallback                          |
 | `install-claude-code` | Claude Code (`claude`)                    | Native installer (preferred), npm `@anthropic-ai/claude-code` fallback       |
@@ -43,6 +45,7 @@ root is required.
 | `install-cosign`      | cosign                                    | GitHub release tarball → `~/.local/bin`                                      |
 | `install-direnv`      | direnv                                    | Official install script / Homebrew                                           |
 | `install-edit`        | Microsoft Edit                            | GitHub release tarball → `~/.local/bin`                                      |
+| `install-gcloud`      | Google Cloud CLI (`gcloud`)               | Official curl-to-bash installer → `~/google-cloud-sdk`, self-updates via `gcloud components update` |
 | `install-gemini-cli`  | _(alias for `install-antigravity`)_       | See Antigravity CLI                                                          |
 | `install-gh`          | GitHub CLI (`gh`)                         | Official package repo per distro, with a binary tarball fallback             |
 | `install-glab`        | GitLab CLI (`glab`)                       | Native dnf/pacman repo on Fedora/Arch; release tarball fallback              |
@@ -54,6 +57,7 @@ root is required.
 | `install-pinentry`    | pinentry (GPG passphrase prompt)          | Package manager per distro (curses/tty frontend); Homebrew `pinentry-mac` on macOS |
 | `install-noteshub`    | NotesHub                                  | GitHub release `.deb`/`.rpm` via package manager                             |
 | `install-nvm`         | Node Version Manager                      | Official `install.sh` (version auto-detected), then installs the current LTS |
+| `install-specify`     | Specify CLI (`specify`, spec-kit)         | `uv tool install` from the spec-kit git repo — identical on every platform   |
 | `install-starship`    | Starship prompt                           | Official install script / Homebrew                                           |
 | `install-tflint`      | TFLint (Terraform linter)                 | GitHub release tarball → `~/.local/bin`                                      |
 | `install-terraform`   | Terraform CLI                             | Vendor repo per distro / Homebrew                                            |
