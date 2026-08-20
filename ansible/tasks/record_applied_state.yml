@@ -11,9 +11,15 @@
 
 - name: record-applied-state | determine whether this was a full run
   ansible.builtin.set_fact:
+    # ansible_run_tags/ansible_skip_tags are tuples, not lists (verified
+    # against real ansible-core 2.19.12 behavior) — comparing one directly
+    # against a ['all'] list literal is always False regardless of its
+    # contents, which silently gated this fact false on every run. `| list`
+    # normalizes both sides before comparing/measuring.
     _dotfiles_full_run: >-
-      {{ (ansible_run_tags | default(['all'])) == ['all']
-         and (ansible_skip_tags | default([]) | length == 0) }}
+      {{ (ansible_run_tags | list | length == 0
+          or ansible_run_tags | list == ['all'])
+         and (ansible_skip_tags | list | length == 0) }}
 
 - name: record-applied-state | ensure xdg_data_home state dir exists
   ansible.builtin.file:
