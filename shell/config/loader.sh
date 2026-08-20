@@ -149,7 +149,7 @@ _bash_lazy_load() {
     # function based on alias '<name>'" / "parse error near `()'". Clearing
     # any stale alias first makes stub (re-)registration idempotent across a
     # live reload, not just a fresh shell start.
-    unalias "${stub_name}" 2>/dev/null
+    unalias "${stub_name}" 2>/dev/null || true
     # shellcheck disable=SC2140,SC2086
     eval "${stub_name}() {
         unset -f ${stub_name}
