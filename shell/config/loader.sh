@@ -141,6 +141,15 @@ fi
 _bash_lazy_load() {
     local stub_name="$1"
     local source_file="$2"
+    # A stub name that used to be an alias (e.g. install-specify, converted
+    # to a real lazy function) lingers in a shell that re-sources loader.sh
+    # in place (`zshsource`/`source ~/.zshrc`) rather than exec'ing a new
+    # shell — aliases aren't cleared by re-sourcing. zsh's parser then treats
+    # `name()` as alias-expandable and fails the eval below with "defining
+    # function based on alias '<name>'" / "parse error near `()'". Clearing
+    # any stale alias first makes stub (re-)registration idempotent across a
+    # live reload, not just a fresh shell start.
+    unalias "${stub_name}" 2>/dev/null || true
     # shellcheck disable=SC2140,SC2086
     eval "${stub_name}() {
         unset -f ${stub_name}
